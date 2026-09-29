@@ -210,7 +210,6 @@ impl Interlocking {
                 let was = self.routes[i].progress[k];
                 let now = match was {
                     Progress::Untouched if occupied && (rear_touched || releasing) => Progress::Occupied,
-                    Progress::Untouched if releasing => Progress::Released,
                     Progress::Occupied if !occupied => {
                         if auto && !releasing {
                             Progress::Untouched
@@ -220,10 +219,21 @@ impl Interlocking {
                     }
                     p => p,
                 };
-                if now == Progress::Released && was != Progress::Released && self.owner[s.idx()] == Some(Owner::Path(r)) {
-                    self.owner[s.idx()] = None;
-                }
                 self.routes[i].progress[k] = now;
+                if now == Progress::Released && was != Progress::Released {
+                    self.release_path_section(w, r, s);
+                }
+            }
+            // A cancelled route with a train on it keeps the sections ahead of
+            // the train and its overlap; they go as the train runs on.
+            let holding = releasing && self.routes[i].progress.contains(&Progress::Occupied);
+            if releasing && !holding {
+                for k in 0..def.path.len() {
+                    if self.routes[i].progress[k] == Progress::Untouched {
+                        self.routes[i].progress[k] = Progress::Released;
+                        self.release_path_section(w, r, def.path[k]);
+                    }
+                }
             }
 
             // Overlap release.
@@ -234,7 +244,7 @@ impl Interlocking {
                     self.routes[i].progress[last] == Progress::Occupied && occ.stationary(def.path[last]);
                 self.routes[i].overlap_stood_s = if standing { self.routes[i].overlap_stood_s + dt } else { 0.0 };
                 let path_done = self.routes[i].progress.iter().all(|&p| p == Progress::Released);
-                if releasing || path_done || self.routes[i].overlap_stood_s >= w.options.overlap_release_s {
+                if (releasing && !holding) || path_done || self.routes[i].overlap_stood_s >= w.options.overlap_release_s {
                     for &s in &def.overlap {
                         if self.owner[s.idx()] == Some(Owner::Overlap(r)) {
                             self.owner[s.idx()] = None;
@@ -278,6 +288,23 @@ impl Interlocking {
             }
         }
         ev
+    }
+
+    /// Let go of path section `s` of route `r`. If a route still set behind
+    /// `r` (one whose exit signal is `r`'s entrance) has `s` as its overlap,
+    /// the section goes back to that route instead of becoming free.
+    fn release_path_section(&mut self, w: &World, r: RouteId, s: SectionId) {
+        if self.owner[s.idx()] != Some(Owner::Path(r)) {
+            return;
+        }
+        let entrance = w.routes[r.idx()].entrance;
+        let rear = (0..w.routes.len()).find(|&x| {
+            x != r.idx()
+                && self.routes[x].state != RouteState::Idle
+                && w.routes[x].overlap.contains(&s)
+                && w.routes[x].exit == Exit::Signal(entrance)
+        });
+        self.owner[s.idx()] = rear.map(|x| Owner::Overlap(RouteId::from_idx(x)));
     }
 
     /// Whether route `r`'s entrance signal may show a proceed aspect.

@@ -100,9 +100,62 @@ fn cancel_keeps_section_under_train() {
     rig.il.cancel_route(&rig.w, &rig.pts, &on_route, r).unwrap();
     rig.run(121.0, &on_route);
     assert_eq!(rig.il.owner[sec(&rig.w, "TP").idx()], Some(Owner::Path(r)), "train still on it");
-    assert_eq!(rig.il.owner[sec(&rig.w, "TP1").idx()], None);
+    assert_eq!(
+        rig.il.owner[sec(&rig.w, "TP1").idx()],
+        Some(Owner::Path(r)),
+        "the section ahead of the train stays held while it is on the route"
+    );
     rig.run(0.1, &rig.empty());
     assert_eq!(rig.il.routes[r.idx()].state, RouteState::Idle);
+}
+
+#[test]
+fn cancelled_route_releases_behind_a_train_running_on() {
+    let mut rig = locked("S1-E1", "terminus");
+    let r = route(&rig.w, "S1-E1");
+    let on_tp = occ(&rig.w, &["TP"], true);
+    rig.run(0.1, &on_tp);
+    rig.il.cancel_route(&rig.w, &rig.pts, &on_tp, r).unwrap();
+    rig.run(121.0, &on_tp);
+    let (tp, tp1) = (sec(&rig.w, "TP").idx(), sec(&rig.w, "TP1").idx());
+    assert_eq!(rig.il.owner[tp1], Some(Owner::Path(r)));
+    let both = occ(&rig.w, &["TP", "TP1"], true);
+    rig.run(0.1, &both);
+    let on_tp1 = occ(&rig.w, &["TP1"], true);
+    rig.run(0.1, &on_tp1);
+    assert_eq!(rig.il.owner[tp], None, "TP released once the train has left it");
+    assert_eq!(rig.il.owner[tp1], Some(Owner::Path(r)), "train is on TP1");
+    rig.run(0.1, &rig.empty());
+    assert_eq!(rig.il.routes[r.idx()].state, RouteState::Idle);
+    assert_eq!(rig.il.owner[tp1], None);
+}
+
+#[test]
+fn cancelled_route_keeps_its_overlap_while_a_train_is_on_it() {
+    let mut rig = locked("S1-S2", "plain_line");
+    let r = route(&rig.w, "S1-S2");
+    let on_tb = occ(&rig.w, &["TB"], true);
+    rig.run(0.1, &on_tb);
+    rig.il.cancel_route(&rig.w, &rig.pts, &on_tb, r).unwrap();
+    rig.run(121.0, &on_tb);
+    assert_eq!(rig.il.owner[sec(&rig.w, "TC").idx()], Some(Owner::Overlap(r)));
+    rig.run(0.1, &rig.empty());
+    assert_eq!(rig.il.routes[r.idx()].state, RouteState::Idle);
+}
+
+#[test]
+fn taken_over_overlap_returns_to_its_rear_route() {
+    let mut rig = Rig::new("plain_line");
+    let empty = rig.empty();
+    rig.set("S1-S2", &empty).unwrap();
+    rig.set("S2-E", &empty).unwrap();
+    let (r1, r2) = (route(&rig.w, "S1-S2"), route(&rig.w, "S2-E"));
+    let tc = sec(&rig.w, "TC").idx();
+    assert_eq!(rig.il.owner[tc], Some(Owner::Path(r2)));
+    rig.il.cancel_route(&rig.w, &rig.pts, &empty, r2).unwrap();
+    rig.run(0.2, &empty);
+    assert_eq!(rig.il.routes[r2.idx()].state, RouteState::Idle);
+    assert_eq!(rig.il.owner[tc], Some(Owner::Overlap(r1)));
 }
 
 #[test]
