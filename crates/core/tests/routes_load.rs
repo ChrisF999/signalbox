@@ -148,3 +148,19 @@ fn rejects_self_looping_segment() {
     let e = load_with("plain_line", |v| v["segments"][1]["to"] = json!("J1")).unwrap_err();
     assert!(matches!(e, LoadError::Other(_)), "{e:?}");
 }
+
+#[test]
+fn rejects_bad_train_types_entries_and_options() {
+    for field in ["max_speed_kmh", "accel", "service_brake", "emergency_brake", "length_m"] {
+        for bad in [0.0, -1.0] {
+            let e = load_with("terminus", |v| v["train_types"][0][field] = json!(bad)).unwrap_err();
+            assert!(matches!(e, LoadError::Other(ref m) if m.contains(field)), "{field} {bad}: {e:?}");
+        }
+    }
+    let e = load_with("terminus", |v| v["entries"][0]["speed_kmh"] = json!(-5.0)).unwrap_err();
+    assert!(matches!(e, LoadError::Other(ref m) if m.contains("speed_kmh")), "{e:?}");
+    for field in ["overlap_release_s", "approach_lock_s"] {
+        let e = load_with("terminus", |v| v["options"][field] = json!(-1.0)).unwrap_err();
+        assert!(matches!(e, LoadError::Other(ref m) if m.contains(field)), "{field}: {e:?}");
+    }
+}

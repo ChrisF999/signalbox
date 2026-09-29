@@ -344,6 +344,19 @@ fn build_timetable(f: &WorldFile, net: &Network) -> Result<Timetable, LoadError>
     let time = |s: &str, from: &str| -> Result<f64, LoadError> {
         parse_hms(s).map(f64::from).ok_or_else(|| other(format!("{from}: bad time `{s}`")))
     };
+    for t in &f.train_types {
+        for (what, v) in [
+            ("max_speed_kmh", t.max_speed_kmh),
+            ("accel", t.accel),
+            ("service_brake", t.service_brake),
+            ("emergency_brake", t.emergency_brake),
+            ("length_m", t.length_m),
+        ] {
+            if !(v.is_finite() && v > 0.0) {
+                return Err(other(format!("train type `{}`: {what} must be positive and finite", t.code)));
+            }
+        }
+    }
     let train_types = f
         .train_types
         .iter()
@@ -399,12 +412,20 @@ fn build_timetable(f: &WorldFile, net: &Network) -> Result<Timetable, LoadError>
         if net.nodes[boundary.idx()].kind != NodeKind::Boundary {
             return Err(other(format!("entry {}: `{}` is not a boundary", e.service, e.boundary)));
         }
+        if !(e.speed_kmh.is_finite() && e.speed_kmh >= 0.0) {
+            return Err(other(format!("entry {}: speed_kmh must be finite and not negative", e.service)));
+        }
         entries.push(Entry { service, boundary, time_s: time(&e.time, &e.service)?, speed: e.speed_kmh / 3.6 });
     }
     entries.sort_by(|a, b| a.time_s.total_cmp(&b.time_s));
     let o = &f.options;
     if o.entry_delay_s[0] > o.entry_delay_s[1] || o.min_dwell_s[0] > o.min_dwell_s[1] {
         return Err(other("options: ranges must be [min, max]".into()));
+    }
+    for (what, v) in [("overlap_release_s", o.overlap_release_s), ("approach_lock_s", o.approach_lock_s)] {
+        if !(v.is_finite() && v >= 0.0) {
+            return Err(other(format!("options: {what} must be finite and not negative")));
+        }
     }
     let options = Options {
         start_s: time(&o.start_time, "options")?,
