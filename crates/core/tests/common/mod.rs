@@ -39,3 +39,14 @@ pub fn seg(w: &World, name: &str) -> SegmentId {
 pub fn route(w: &World, name: &str) -> RouteId {
     w.route_by_name(name).unwrap_or_else(|| panic!("no route {name}"))
 }
+
+use signalbox_core::occupancy::Occupancy;
+
+/// Occupancy with one pretend train (TrainId 0) in each named section.
+pub fn occ(w: &World, sections: &[&str], moving: bool) -> Occupancy {
+    let mut o = Occupancy::new(w.net.sections.len());
+    for s in sections {
+        o.add(sec(w, s), TrainId(0), moving);
+    }
+    o
+}
