@@ -290,33 +290,124 @@ schema version.
 ## 8. TS2 converter (`ts2-import`)
 
 Input: a TS2 simulation JSON (as in ts2-data). Output: a signalbox world JSON
-plus a warnings report.
+plus a warnings report. The TS2 format facts this section relies on were
+checked against all three ts2-data files (format notes kept with the Plan 2
+workspace). Amended 2026-09-29 after that survey; owner decisions marked (O),
+controller rulings marked (R).
 
-| TS2 | signalbox |
-|---|---|
-| `LineItem`, `InvisibleLinkItem` | segments (length = `realLength`, speed = `maxSpeed`) |
-| `PointsItem` | `Points` node (+ short segments for its legs) |
-| `EndItem` | `BufferStop` or `Boundary` (boundary if services enter/exit there) |
-| `SignalItem` | signal; aspect count from the TS2 signal type name (UK 2/3/4-aspect types in ts2-data), else 3 with a warning |
-| `PlatformItem` + `Place` | platform with place code and track code as platform label |
-| `Route` (begin/end signal + `directions`) | route; path derived by walking the graph with those points positions |
-| `TrainType` | train type (`emergBraking`, `length`, `maxSpeed`, `stdAccel`, `stdBraking`) |
-| `Service` (+ lines, post-actions) | service; post-actions map to end actions where possible |
-| `Train` | entry (appear time, initial delay, service, type) |
-| item `x`/`y`/`xf`/`yf` | layout geometry |
-| `TextItem` | layout label |
+### 8.1 Graph
 
-- **Sections**: TS2 has none, so boundaries are inserted at every signal and
-  on each side of every points (points get their own section), which matches
-  normal UK practice.
-- **Overlaps**: generated as the path beyond the exit signal up to ~180 m,
-  extended to the next section boundary, following the points positions the
-  route already uses. Overlaps that would need an unlisted points position are
-  cut short with a warning.
-- **Areas**: everything goes in one area named after the simulation.
-- **Unmappable items** (custom signal aspect rules, unsupported service actions,
-  TS2 options with no equivalent) produce warnings, never a failed conversion.
-- The CLI: `ts2-import input.json -o world.json` prints the warnings report.
+- TS2 is an item chain: items link through `previousTiId`/`nextTiId`
+  (`reverseTiId` for points), and item orientation is not consistent, so the
+  converter resolves direction by walking (arriving from an item's previous
+  end you leave by its next end).
+- Every `LineItem`/`InvisibleLinkItem` becomes one segment
+  (`length_m = realLength`, speed from `maxSpeed` m/s, where 0 inherits the
+  place's speed if the line has a `placeCode`, else `defaultMaxSpeed`).
+- Signals and points are zero-length items. Where two of them (or one of them
+  and an `EndItem`) touch with no line in between, the converter inserts a
+  1 m segment so every node has real segments.
+- `PointsItem` → `Points` node: toe = previous end, normal = next end,
+  reverse = reverse end.
+- `EndItem` → `Boundary` or `BufferStop` (R): an end is a **Boundary** if any
+  train enters there, or if no platform line (a line with a `placeCode`) lies
+  within 400 m in rear of it; otherwise it is a **BufferStop** (terminal
+  platforms, sidings). The classification of every end is listed in the report.
+- Orphan fragments not connected to anything a route or train uses are
+  dropped with a warning.
+
+### 8.2 Signals
+
+- A `SignalItem` protects trains running from its previous item to its next
+  item, and stands at the end of the segment it is entered from. The `reverse`
+  flag is drawing-only and ignored.
+- `BUFFER` signals are not signals: they are dropped, and routes that end at
+  one get the buffer stop / boundary beyond it as their exit node.
+- Aspects: `UK_3_ASPECTS*` → 3, `UK_4_ASPECTS*` → 4; anything else (the French
+  `FR_*` types) → 3, with one warning per type name. Aspect condition rules and
+  `customProperties` are dropped (one warning per type).
+- `sighting_m` = `options.defaultSignalVisibility`.
+- Names: the TS2 `name`, or `name#tiId` where a name repeats.
+
+### 8.3 Sections
+
+- A section boundary at every signal, and on each side of every points (points
+  get their own section, including any 1 m legs).
+- Flat crossings (`conflictTiId` pairs) (R): both crossing lines go into one
+  shared section, so a train on either line occupies the crossing and a route
+  over one conflicts with a route over the other. One warning per crossing
+  (the shared section is longer than a real diamond).
+- `pairedTiId` (crossover pairs) is ignored: routes already list both points.
+
+### 8.4 Routes
+
+- Each TS2 route's path is found by walking from its begin signal using its
+  `directions` (0 = normal, 1 = reverse).
+- **Split at signals (O):** a TS2 route that passes through intermediate
+  signals becomes one signalbox route per signal-to-signal stretch, each
+  carrying the points positions on its own stretch, as on a real UK
+  entrance–exit panel. Identical stretches from different TS2 routes are merged;
+  if two TS2 routes need different points positions on the same stretch, both
+  are kept as separate routes (same entrance and exit with different points is
+  not allowed, so this is reported and the second is dropped).
+- `initialState` 2 → `automatic` on every stretch; `initialState` 1 (one-off
+  pre-set) → a normal route, with a warning.
+- A main signal that is still the entrance of no route and whose track ahead
+  reaches the next signal or an end without passing facing points gets a
+  generated **automatic** route to it (plain-line automatic signals). Any other
+  signal with no route is reported.
+- Overlaps are generated: the sections beyond the exit signal up to about 180 m,
+  extended to the next section boundary. Beyond facing points the overlap uses
+  the positions the TS2 route set there, if it passed them; otherwise the overlap
+  stops before those points (with a warning). Exits to a buffer stop or
+  boundary have no overlap.
+- Every generated route is checked with the core route tracer before output;
+  a route that fails is dropped with a warning (never silently).
+
+### 8.5 Places, timetable, trains
+
+- Platforms are the lines carrying `placeCode` + `trackCode` (platform label =
+  `trackCode`), not TS2's `PlatformItem`s, which are drawing only and go to the
+  layout. A (place, track) spread over two lines gives two platform entries with
+  the same label.
+- Train types map field for field (m/s → km/h); `elements` is ignored.
+- Service lines → calls (`mustStop` → stop, `""` times → none; a pass line with
+  only one time keeps it as `dep`). Calls at a (place, track) with no line are
+  dropped with a warning.
+- `postActions`: `SET_SERVICE X` + `REVERSE` → `Form(X)`; `REVERSE` alone →
+  `Stable`; none → `Exit`; `SET_SERVICE` alone → `Form(X)` with a warning (the
+  core always reverses on forming). A Form/Stable service with no stopping call
+  becomes `Exit` with a warning.
+- Trains → entries. A train whose head starts next to an `EndItem` enters at that
+  boundary. **Mid-network starts (O):** any other train starts at its TS2 head
+  position (segment, offset, direction) using the new core entry kind below;
+  a train starting in a platform of its first call simply arrives there at once.
+  `appearTime` + `initialDelay` → entry time (entries before the start time are
+  due immediately).
+- Options: `start_time = currentTime`; TS2 delay generators (integer, or bands of
+  `[lo, hi, %]`) become the `[min lo, max hi]` range, clamped at 0, with a
+  warning when bands are merged; `latePenalty`/`wrongPlatformPenalty` carry over;
+  `timeFactor`, `trackCircuitBased`, `warningSpeed`, `wrongDestinationPenalty`,
+  scores and tokens are ignored (listed once in the report).
+
+### 8.6 Core change: start positions (O)
+
+`EntryFile` gains an optional `at: { segment, offset_m, direction }`, exclusive
+with `boundary`. Such a train appears with its head at that position; the rest of
+the train is laid behind it along the track (any part that would run off the
+network is treated like a train still entering). It is placed only once every
+section under it is free and unowned, and its headcode is interposed in the berth
+of the first signal ahead.
+
+### 8.7 Output and CLI
+
+- Layout: line polylines, points glyphs, signals and berth positions, platform
+  rectangles, place names and text labels, all in TS2 scene coordinates.
+- `ts2-import input.json -o world.json` writes the world and prints the warnings
+  report (grouped counts, then details); `--strict` exits non-zero if any
+  route was dropped.
+- The world always passes `World::from_json` validation; a converter bug that
+  produces an invalid world is a failed conversion, not a warning.
 
 ## 9. Error handling
 
