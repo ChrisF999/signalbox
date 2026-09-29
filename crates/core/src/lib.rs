@@ -3,6 +3,7 @@
 pub mod aspect;
 pub mod events;
 pub mod ids;
+pub mod interlocking;
 pub mod network;
 pub mod occupancy;
 pub mod points;

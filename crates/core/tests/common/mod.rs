@@ -50,3 +50,46 @@ pub fn occ(w: &World, sections: &[&str], moving: bool) -> Occupancy {
     }
     o
 }
+
+use signalbox_core::aspect::Aspect;
+use signalbox_core::events::{Event, Rejection};
+use signalbox_core::interlocking::Interlocking;
+use signalbox_core::points::PointsTable;
+
+/// A world plus interlocking and points, without trains.
+pub struct Rig {
+    pub w: World,
+    pub pts: PointsTable,
+    pub il: Interlocking,
+}
+
+impl Rig {
+    pub fn new(name: &str) -> Rig {
+        Rig::from_world(world(name))
+    }
+
+    pub fn from_world(w: World) -> Rig {
+        let pts = PointsTable::new(&w.net);
+        let il = Interlocking::new(&w);
+        Rig { w, pts, il }
+    }
+
+    pub fn set(&mut self, name: &str, occ: &Occupancy) -> Result<Vec<Event>, Rejection> {
+        let r = route(&self.w, name);
+        self.il.set_route(&self.w, &mut self.pts, occ, r)
+    }
+
+    /// Run points and interlocking for `secs` seconds of sim time.
+    pub fn run(&mut self, secs: f64, occ: &Occupancy) -> Vec<Event> {
+        let mut ev = Vec::new();
+        for _ in 0..(secs * 10.0).round() as usize {
+            self.pts.tick(0.1);
+            ev.extend(self.il.update(&self.w, &self.pts, occ, 0.1));
+        }
+        ev
+    }
+
+    pub fn empty(&self) -> Occupancy {
+        Occupancy::new(self.w.net.sections.len())
+    }
+}
