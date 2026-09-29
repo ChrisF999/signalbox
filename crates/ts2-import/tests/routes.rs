@@ -118,3 +118,28 @@ fn automatic_route_before_a_controlled_signal_has_no_overlap() {
         }
     }
 }
+
+#[test]
+fn automatic_route_sharing_its_signal_with_other_routes_is_set_by_hand() {
+    // Mini with a buffer signal before end 10 and a persistent TS2 route from A
+    // over the reverse leg: A also begins the hand-set route to BUF, so an
+    // automatic A route would hold A for ever and the other could never be set.
+    let mut v: serde_json::Value = serde_json::from_str(&data("mini")).unwrap();
+    let items = v["trackItems"].as_object_mut().unwrap();
+    let mut buf = items["7"].clone();
+    buf["tiId"] = "13".into();
+    buf["name"] = "BUF2".into();
+    buf["previousTiId"] = "8".into();
+    buf["nextTiId"] = "10".into();
+    items.insert("13".into(), buf);
+    items["8"]["nextTiId"] = "13".into();
+    items["10"]["previousTiId"] = "13".into();
+    v["routes"]["2"] = serde_json::json!({"__type__": "Route", "id": "2", "beginSignal": "3", "endSignal": "13",
+        "directions": {"5": 1}, "initialState": 2});
+    let c = ts2_import::convert(&v.to_string()).unwrap();
+    World::from_file(c.world.clone()).unwrap();
+    let from_a: Vec<&RouteFile> = c.world.routes.iter().filter(|r| r.entrance == "A").collect();
+    assert_eq!(from_a.len(), 2);
+    assert!(from_a.iter().all(|r| !r.automatic), "{from_a:?}");
+    assert_eq!(c.report.count(report::AUTOMATIC_DEMOTED), 1, "{}", c.report.render());
+}

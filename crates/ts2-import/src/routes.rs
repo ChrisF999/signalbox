@@ -340,9 +340,20 @@ fn drop_overlap_before_controlled_signals(v: &mut [Stretch], net: &Network, repo
     }
 }
 
-/// Two automatic routes may only share sections when one continues the other
-/// and the shared sections are the first one's overlap.
+/// An automatic route must be the only route from its signal: it is never
+/// cancelled, so the signal's other routes could never be set. Two automatic
+/// routes may only share sections when one continues the other and the shared
+/// sections are the first one's overlap.
 fn demote_clashing_automatics(v: &mut [Stretch], net: &Network, report: &mut Report) {
+    for j in 0..v.len() {
+        if v[j].automatic && v.iter().filter(|m| m.entrance == v[j].entrance).count() > 1 {
+            v[j].automatic = false;
+            report.warn(
+                report::AUTOMATIC_DEMOTED,
+                format!("route from {} shares its signal with other routes; set by hand instead", net.signals[v[j].entrance.idx()].name),
+            );
+        }
+    }
     for j in 0..v.len() {
         if !v[j].automatic {
             continue;
