@@ -140,7 +140,7 @@ fn same_tick_entries_do_not_collide() {
 
 #[test]
 fn running_into_an_occupied_section_is_a_collision() {
-    let w: World = world("plain_line");
+    let w: World = load_with("plain_line", |v| v["entries"] = json!([])).unwrap();
     let svc = w.service("2A01").unwrap();
     let (a, b) = (seg(&w, "a"), seg(&w, "b"));
     let mut sim = Sim::new(w, 1);
