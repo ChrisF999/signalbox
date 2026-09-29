@@ -108,7 +108,18 @@ impl Interlocking {
                 None => {}
                 // The next route may take over the overlap of the route it continues.
                 Some(Owner::Overlap(x)) if w.routes[x.idx()].exit == Exit::Signal(def.entrance) => {}
+                // Our overlap may lie over the path of the route that continues from our exit.
+                Some(Owner::Path(x)) if def.overlap.contains(&s) && def.exit == Exit::Signal(w.routes[x.idx()].entrance) => {}
                 Some(_) => return Err(Rejection::ConflictingRoute),
+            }
+        }
+        // Overlap points inside another route's path must be where that route needs them.
+        for &(p, pos) in &def.overlap_points {
+            let sec = w.net.points_section(p).expect("route points are validated at load");
+            if let Some(Owner::Path(x)) = self.owner[sec.idx()] {
+                if w.routes[x.idx()].all_points().any(|&(q, qpos)| q == p && qpos != pos) {
+                    return Err(Rejection::PointsLocked);
+                }
             }
         }
         for &(p, pos) in def.all_points() {
@@ -134,7 +145,10 @@ impl Interlocking {
             self.owner[s.idx()] = Some(Owner::Path(r));
         }
         for &s in &def.overlap {
-            self.owner[s.idx()] = Some(Owner::Overlap(r));
+            // A section under the continuing route's path stays that route's.
+            if !matches!(self.owner[s.idx()], Some(Owner::Path(_))) {
+                self.owner[s.idx()] = Some(Owner::Overlap(r));
+            }
         }
         let mut st = RouteStatus::idle(def.path.len());
         st.state = RouteState::Setting;

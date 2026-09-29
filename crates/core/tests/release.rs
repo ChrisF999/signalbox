@@ -207,3 +207,42 @@ fn points_moving_under_a_locked_route_is_reported() {
     let ev = rig.run(0.1, &empty);
     assert!(ev.iter().any(|e| matches!(e, Event::InvariantViolated { .. })), "{ev:?}");
 }
+
+/// S2-E is set first, so TC is its path; S1-S2's overlap is TC.
+fn overlap_over_a_set_route() -> Rig {
+    let mut rig = Rig::new("plain_line");
+    let empty = rig.empty();
+    rig.set("S2-E", &empty).unwrap();
+    rig.set("S1-S2", &empty).unwrap();
+    rig.run(6.0, &empty);
+    rig
+}
+
+#[test]
+fn overlap_may_lie_over_the_path_of_the_route_set_first() {
+    let mut rig = overlap_over_a_set_route();
+    let (r, x) = (route(&rig.w, "S1-S2"), route(&rig.w, "S2-E"));
+    let empty = rig.empty();
+    assert_eq!(rig.il.routes[r.idx()].state, RouteState::Locked);
+    assert_eq!(rig.il.owner[sec(&rig.w, "TC").idx()], Some(Owner::Path(x)));
+    assert_eq!(rig.aspect("S1", &empty), Green);
+}
+
+#[test]
+fn releasing_the_rear_route_leaves_the_continuing_path_alone() {
+    let mut rig = overlap_over_a_set_route();
+    let (r, x) = (route(&rig.w, "S1-S2"), route(&rig.w, "S2-E"));
+    let (tc, w) = (sec(&rig.w, "TC"), rig.w.clone());
+    let empty = rig.empty();
+    rig.il.cancel_route(&rig.w, &rig.pts, &empty, r).unwrap();
+    rig.run(0.2, &empty);
+    assert_eq!(rig.il.routes[r.idx()].state, RouteState::Idle);
+    assert_eq!(rig.il.owner[tc.idx()], Some(Owner::Path(x)));
+    // and a train running through S1-S2 then S2-E does too
+    let mut rig = overlap_over_a_set_route();
+    rig.run(0.1, &occ(&w, &["TB"], true));
+    rig.run(0.1, &occ(&w, &["TB", "TC"], true));
+    rig.run(0.1, &occ(&w, &["TC"], true));
+    assert_eq!(rig.il.routes[r.idx()].state, RouteState::Idle);
+    assert_eq!(rig.il.owner[tc.idx()], Some(Owner::Path(x)));
+}
