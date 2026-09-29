@@ -100,7 +100,8 @@ impl Sim {
         let mut sim = Sim { world, st, rng, occ };
         for i in 0..sim.world.routes.len() {
             if sim.world.routes[i].automatic {
-                // Automatic signals are set from the start; a clash is a world error we ignore here.
+                // Automatic signals are set from the start. World load rejects automatic
+                // routes that share track, so a failure here cannot happen; ignore it.
                 let _ = sim.st.il.set_route(&sim.world, &mut sim.st.points, &sim.occ, RouteId::from_idx(i));
             }
         }
@@ -181,20 +182,47 @@ impl Sim {
     }
 
     /// Rebuild a simulation from a world and a snapshot taken on that world.
-    pub fn restore(world: World, st: SimState) -> Sim {
+    /// Fails if the snapshot's tables do not match the world's size.
+    pub fn restore(world: World, st: SimState) -> Result<Sim, String> {
+        let net = &world.net;
+        let checks = [
+            ("points", st.points.len(), net.nodes.len()),
+            ("interlocking routes", st.il.routes.len(), world.routes.len()),
+            ("interlocking owners", st.il.owner.len(), net.sections.len()),
+            ("interlocking aspects", st.il.aspects.len(), net.signals.len()),
+            ("describer berths", st.describer.berths.len(), net.berths.len()),
+            ("scores areas", st.scores.by_area.len(), net.areas.len()),
+        ];
+        for (what, have, want) in checks {
+            if have != want {
+                return Err(format!("snapshot does not match the world: {what} has {have} entries, expected {want}"));
+            }
+        }
+        for (r, status) in st.il.routes.iter().zip(&world.routes) {
+            if r.progress.len() != status.path.len() {
+                return Err(format!("snapshot does not match the world: route {} progress length", status.name));
+            }
+        }
         let mut rng = ChaCha8Rng::from_seed(st.rng_seed);
         rng.set_word_pos((u128::from(st.rng_word_pos.0) << 64) | u128::from(st.rng_word_pos.1));
         let occ = Occupancy::new(world.net.sections.len());
         let mut sim = Sim { world, st, rng, occ };
         sim.rebuild_occupancy();
-        sim
+        Ok(sim)
     }
 
     /// Re-run a session from its seed and command log for `ticks` ticks.
+    /// The log need not be sorted; commands of one tick keep their order.
     pub fn replay(world: World, seed: u64, log: &[(u64, Command)], ticks: u64) -> Sim {
+        let mut sorted = log.to_vec();
+        sorted.sort_by_key(|&(tick, _)| tick);
+        let log = sorted;
         let mut sim = Sim::new(world, seed);
         let mut i = 0;
         while sim.st.tick < ticks {
+            while i < log.len() && log[i].0 < sim.st.tick {
+                i += 1;
+            }
             while i < log.len() && log[i].0 == sim.st.tick {
                 sim.submit(log[i].1.clone());
                 i += 1;
@@ -380,7 +408,12 @@ impl Sim {
 
         // Departure from a stop.
         if let Some(d) = t.dwell {
-            if now >= d.depart_at_s {
+            // Only with a proceed aspect ahead: a red signal within sighting holds the train.
+            let (hs, hd) = t.head();
+            let held_by_red = net
+                .first_signal_ahead(hs, hd, t.head_m, SIGNAL_SEARCH_M, pts)
+                .is_some_and(|(sg, dist)| dist <= net.signals[sg.idx()].sighting_m && aspects[sg.idx()] == Aspect::Red);
+            if now >= d.depart_at_s && !held_by_red {
                 t.dwell = None;
                 t.next_call += 1;
                 ev.push(Event::TrainDeparted { train: t.id, platform: d.platform });

@@ -18,6 +18,15 @@ pub struct PointsTable {
 }
 
 impl PointsTable {
+    /// Number of nodes the table covers (one slot per node).
+    pub fn len(&self) -> usize {
+        self.states.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.states.is_empty()
+    }
+
     /// All points start detected normal.
     pub fn new(net: &Network) -> Self {
         let states = net

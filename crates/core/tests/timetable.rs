@@ -89,3 +89,22 @@ fn dwell_is_at_least_the_minimum_when_no_departure_is_booked() {
     let dwell = sim.now_s() - arrived;
     assert!((dwell - 30.0).abs() < 0.3, "dwell was {dwell}");
 }
+
+#[test]
+fn dwelling_train_waits_for_a_red_starter() {
+    let w = load_with("plain_line", |v| {
+        v["platforms"] = json!([{"place": "MID", "platform": "1", "segment": "b", "from_m": 700, "to_m": 950}]);
+        v["services"][0]["calls"] = json!([{"place": "MID", "platform": "1", "arr": "06:01", "dep": "06:02"}]);
+    })
+    .unwrap();
+    let mut sim = Sim::new(w, 1);
+    let w = sim.world().clone();
+    sim.submit(Command::SetRoute { entrance: sig(&w, "S1"), exit: Exit::Signal(sig(&w, "S2")) });
+    run_until(&mut sim, 600.0, |e| matches!(e, Event::TrainArrived { .. }));
+    let ev = sim.run_for(240.0);
+    assert_eq!(count(&ev, |e| matches!(e, Event::TrainDeparted { .. })), 0, "starter S2 is red");
+    assert!(sim.now_s() > 6.0 * 3600.0 + 2.0 * 60.0, "booked departure has passed");
+    sim.submit(Command::SetRoute { entrance: sig(&w, "S2"), exit: Exit::Node(node(&w, "E")) });
+    let ev = run_until(&mut sim, 60.0, |e| matches!(e, Event::TrainDeparted { .. }));
+    assert_eq!(count(&ev, |e| matches!(e, Event::TrainDeparted { .. })), 1);
+}

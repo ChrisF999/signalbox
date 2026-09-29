@@ -27,7 +27,7 @@ fn snapshot_survives_json() {
 fn restored_sim_continues_identically() {
     let mut a = busy_terminus(3);
     a.run_for(200.0);
-    let mut b = Sim::restore(a.world().clone(), a.snapshot());
+    let mut b = Sim::restore(a.world().clone(), a.snapshot()).unwrap();
     a.run_for(600.0);
     b.run_for(600.0);
     assert_eq!(a.snapshot(), b.snapshot());
@@ -51,4 +51,26 @@ fn different_seeds_can_differ() {
     a.run_for(120.0);
     b.run_for(120.0);
     assert_ne!(a.snapshot().rng_seed, b.snapshot().rng_seed);
+}
+
+#[test]
+fn restore_rejects_a_snapshot_from_another_world() {
+    let mut sim = busy_terminus(3);
+    sim.run_for(10.0);
+    let err = Sim::restore(world("plain_line"), sim.snapshot()).err().expect("size mismatch is rejected");
+    assert!(err.contains("does not match"), "{err}");
+}
+
+#[test]
+fn replay_accepts_an_unsorted_log() {
+    let mut sim = busy_terminus(7);
+    sim.run_for(50.0);
+    let w = sim.world().clone();
+    sim.submit(Command::SetRoute { entrance: sig(&w, "S3"), exit: Exit::Node(node(&w, "W")) });
+    sim.run_for(50.0);
+    let mut log = sim.log().to_vec();
+    assert!(log.len() >= 2 && log[0].0 < log[1].0, "need commands at different ticks");
+    log.reverse();
+    let again = Sim::replay(w, 7, &log, sim.tick());
+    assert_eq!(again.snapshot(), sim.snapshot());
 }
