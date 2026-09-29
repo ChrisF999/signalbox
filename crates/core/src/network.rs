@@ -209,3 +209,143 @@ impl Network {
         (x.min(y), x.max(y))
     }
 }
+
+/// One segment reached while walking ahead. The part of the segment ahead
+/// starts at `from_along` (measured along `dir`); a point at along-distance `x`
+/// on this segment is `d_start + (x - from_along)` metres from the origin.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Step {
+    pub seg: SegmentId,
+    pub dir: Dir,
+    pub d_start: f64,
+    pub from_along: f64,
+}
+
+/// The track ended (buffer stop, boundary, or points not set for us) at `node`,
+/// `d` metres from the origin.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WalkEnd {
+    pub node: NodeId,
+    pub d: f64,
+}
+
+/// Guard against endless loops on circular layouts.
+const MAX_WALK_STEPS: usize = 10_000;
+
+impl Network {
+    /// The segment and direction entered after leaving `seg` in `dir`, or
+    /// `None` at a buffer stop, a boundary, moving points, or points lying
+    /// against us.
+    pub fn next(&self, seg: SegmentId, dir: Dir, pts: &impl PointsView) -> Option<(SegmentId, Dir)> {
+        let node_id = self.segments[seg.idx()].end_node(dir);
+        let node = &self.nodes[node_id.idx()];
+        let next = match node.kind {
+            NodeKind::Joint => node.segments.iter().copied().find(|&s| s != seg)?,
+            NodeKind::BufferStop | NodeKind::Boundary => return None,
+            NodeKind::Points { toe, normal, reverse, .. } => {
+                let leg = match pts.position(node_id)? {
+                    PointsPos::Normal => normal,
+                    PointsPos::Reverse => reverse,
+                };
+                if seg == toe {
+                    leg
+                } else if seg == leg {
+                    toe
+                } else {
+                    return None;
+                }
+            }
+        };
+        let s = &self.segments[next.idx()];
+        let d = if s.a == node_id { Dir::Up } else { Dir::Down };
+        Some((next, d))
+    }
+
+    /// Walk ahead from `from_along` metres into `(seg, dir)` until `max_dist`
+    /// or the end of the track.
+    pub fn walk_ahead(
+        &self,
+        seg: SegmentId,
+        dir: Dir,
+        from_along: f64,
+        max_dist: f64,
+        pts: &impl PointsView,
+    ) -> (Vec<Step>, Option<WalkEnd>) {
+        let mut steps = Vec::new();
+        let (mut s, mut d, mut d0, mut fa) = (seg, dir, 0.0, from_along);
+        loop {
+            steps.push(Step { seg: s, dir: d, d_start: d0, from_along: fa });
+            let d_end = d0 + (self.segments[s.idx()].length_m - fa);
+            if d_end > max_dist || steps.len() >= MAX_WALK_STEPS {
+                return (steps, None);
+            }
+            match self.next(s, d, pts) {
+                Some((ns, nd)) => {
+                    s = ns;
+                    d = nd;
+                    d0 = d_end;
+                    fa = 0.0;
+                }
+                None => {
+                    let node = self.segments[s.idx()].end_node(d);
+                    return (steps, Some(WalkEnd { node, d: d_end }));
+                }
+            }
+        }
+    }
+
+    /// The first signal facing us strictly ahead of `from_along`, and its distance.
+    pub fn first_signal_ahead(
+        &self,
+        seg: SegmentId,
+        dir: Dir,
+        from_along: f64,
+        max_dist: f64,
+        pts: &impl PointsView,
+    ) -> Option<(SignalId, f64)> {
+        let (steps, _) = self.walk_ahead(seg, dir, from_along, max_dist, pts);
+        for (i, st) in steps.iter().enumerate() {
+            let sg = &self.segments[st.seg.idx()];
+            let best = self.signals_on[st.seg.idx()]
+                .iter()
+                .copied()
+                .filter(|&s| self.signals[s.idx()].at.dir == st.dir)
+                .map(|s| (s, sg.along(self.signals[s.idx()].at.offset_m, st.dir)))
+                .filter(|&(_, a)| if i == 0 { a > st.from_along } else { a >= st.from_along })
+                .min_by(|x, y| x.1.total_cmp(&y.1));
+            if let Some((s, a)) = best {
+                let d = st.d_start + (a - st.from_along);
+                return (d <= max_dist).then_some((s, d));
+            }
+        }
+        None
+    }
+
+    /// Sections within `dist` metres in rear of a point facing `at.dir`.
+    pub fn sections_in_rear(&self, at: Position, dist: f64, pts: &impl PointsView) -> Vec<SectionId> {
+        let back = at.dir.rev();
+        let along = self.segments[at.segment.idx()].along(at.offset_m, back);
+        let (steps, _) = self.walk_ahead(at.segment, back, along, dist, pts);
+        let mut out: Vec<SectionId> = Vec::new();
+        for st in steps {
+            let s = self.segments[st.seg.idx()].section;
+            if !out.contains(&s) {
+                out.push(s);
+            }
+        }
+        out
+    }
+
+    /// Whether two sections meet at a node.
+    pub fn sections_touch(&self, a: SectionId, b: SectionId) -> bool {
+        let ends = |s: SectionId| -> Vec<NodeId> {
+            self.sections[s.idx()]
+                .segments
+                .iter()
+                .flat_map(|&g| [self.segments[g.idx()].a, self.segments[g.idx()].b])
+                .collect()
+        };
+        let ea = ends(a);
+        ends(b).iter().any(|n| ea.contains(n))
+    }
+}
