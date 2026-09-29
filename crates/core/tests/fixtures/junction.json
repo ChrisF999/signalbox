@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "title": "Junction",
+  "areas": [{"name": "Jn"}],
+  "sections": [
+    {"name": "TW", "area": "Jn"},
+    {"name": "TP", "area": "Jn"},
+    {"name": "TE", "area": "Jn"},
+    {"name": "TN", "area": "Jn"}
+  ],
+  "nodes": [
+    {"name": "W", "kind": "boundary"},
+    {"name": "J1", "kind": "joint"},
+    {"name": "P", "kind": "points", "toe": "pa", "normal": "pe", "reverse": "pn"},
+    {"name": "J2", "kind": "joint"},
+    {"name": "J3", "kind": "joint"},
+    {"name": "E", "kind": "boundary"},
+    {"name": "N", "kind": "boundary"}
+  ],
+  "segments": [
+    {"name": "w", "from": "W", "to": "J1", "length_m": 1500, "line_speed_kmh": 100, "section": "TW"},
+    {"name": "pa", "from": "J1", "to": "P", "length_m": 40, "line_speed_kmh": 50, "section": "TP"},
+    {"name": "pe", "from": "P", "to": "J2", "length_m": 40, "line_speed_kmh": 50, "section": "TP"},
+    {"name": "pn", "from": "P", "to": "J3", "length_m": 40, "line_speed_kmh": 50, "section": "TP"},
+    {"name": "e", "from": "J2", "to": "E", "length_m": 1500, "line_speed_kmh": 100, "section": "TE"},
+    {"name": "n", "from": "J3", "to": "N", "length_m": 1500, "line_speed_kmh": 80, "section": "TN"}
+  ],
+  "signals": [
+    {"name": "A", "area": "Jn", "segment": "w", "offset_m": 1500, "direction": "up", "aspects": 4},
+    {"name": "C", "area": "Jn", "segment": "e", "offset_m": 0, "direction": "down", "aspects": 3},
+    {"name": "D", "area": "Jn", "segment": "n", "offset_m": 0, "direction": "down", "aspects": 3}
+  ],
+  "berths": [
+    {"name": "BW", "boundary": "W"},
+    {"name": "BE", "boundary": "E"},
+    {"name": "BN", "boundary": "N"},
+    {"name": "BA", "signal": "A"},
+    {"name": "BC", "signal": "C"},
+    {"name": "BD", "signal": "D"}
+  ],
+  "platforms": [
+    {"place": "EST", "platform": "1", "segment": "e", "from_m": 700, "to_m": 900},
+    {"place": "NST", "platform": "1", "segment": "n", "from_m": 700, "to_m": 900}
+  ],
+  "routes": [
+    {"entrance": "A", "exit": {"kind": "node", "name": "E"}, "path": ["TP", "TE"], "points": [{"points": "P", "position": "normal"}]},
+    {"entrance": "A", "exit": {"kind": "node", "name": "N"}, "path": ["TP", "TN"], "points": [{"points": "P", "position": "reverse"}]},
+    {"entrance": "C", "exit": {"kind": "node", "name": "W"}, "path": ["TP", "TW"], "points": [{"points": "P", "position": "normal"}]},
+    {"entrance": "D", "exit": {"kind": "node", "name": "W"}, "path": ["TP", "TW"], "points": [{"points": "P", "position": "reverse"}]}
+  ],
+  "train_types": [
+    {"code": "EMU", "max_speed_kmh": 120, "accel": 0.8, "service_brake": 0.7, "emergency_brake": 1.2, "length_m": 100}
+  ],
+  "services": [
+    {"headcode": "1E01", "train_type": "EMU", "calls": [{"place": "EST", "platform": "1", "arr": "07:03", "dep": "07:04"}]},
+    {"headcode": "1N02", "train_type": "EMU", "calls": [{"place": "NST", "platform": "1", "arr": "07:06", "dep": "07:07"}]},
+    {"headcode": "2W03", "train_type": "EMU", "calls": [{"place": "EST", "platform": "1", "arr": "07:17", "dep": "07:18"}]},
+    {"headcode": "2W04", "train_type": "EMU", "calls": []}
+  ],
+  "entries": [
+    {"service": "1E01", "boundary": "W", "time": "07:00"},
+    {"service": "1N02", "boundary": "W", "time": "07:02"},
+    {"service": "2W03", "boundary": "E", "time": "07:15"},
+    {"service": "2W04", "boundary": "N", "time": "07:20"}
+  ],
+  "options": {"start_time": "07:00"}
+}

@@ -15,4 +15,5 @@ pub mod time;
 pub mod timetable;
 pub mod trains;
 pub mod world;
+pub mod robot;
 pub mod sim;
