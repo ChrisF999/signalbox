@@ -27,24 +27,47 @@ pub fn entry_ends(ts2: &Ts2) -> BTreeSet<String> {
 }
 
 pub fn build(ts2: &Ts2, g: &Graph, report: &mut Report) -> Timetable {
-    let train_types = ts2
-        .train_types
+    let mut train_types: Vec<TrainTypeFile> = Vec::new();
+    for t in ts2.train_types.values() {
+        let numbers = [t.length, t.max_speed, t.std_accel, t.std_braking, t.emerg_braking];
+        if numbers.iter().any(|v| !(v.is_finite() && *v > 0.0)) {
+            report.warn(report::TRAIN_TYPE_SKIPPED, format!("{}: lengths, speeds and rates must be positive", t.code));
+        } else if train_types.iter().any(|x| x.code == t.code) {
+            report.warn(report::TRAIN_TYPE_SKIPPED, format!("{}: duplicate code", t.code));
+        } else {
+            train_types.push(TrainTypeFile {
+                code: t.code.clone(),
+                max_speed_kmh: t.max_speed * 3.6,
+                accel: t.std_accel,
+                service_brake: t.std_braking,
+                emergency_brake: t.emerg_braking,
+                length_m: t.length,
+                mass_t: 0.0,
+            });
+        }
+    }
+
+    // A service without a usable train type is dropped, and so is everything that runs it.
+    let kept: BTreeSet<&str> = ts2
+        .services
         .values()
-        .map(|t| TrainTypeFile {
-            code: t.code.clone(),
-            max_speed_kmh: t.max_speed * 3.6,
-            accel: t.std_accel,
-            service_brake: t.std_braking,
-            emergency_brake: t.emerg_braking,
-            length_m: t.length,
-            mass_t: 0.0,
+        .filter(|s| {
+            let ok = train_types.iter().any(|t| t.code == s.planned_train_type);
+            if !ok {
+                report.warn(
+                    report::SERVICE_SKIPPED,
+                    format!("{}: unknown or unusable train type {}", s.service_code, s.planned_train_type),
+                );
+            }
+            ok
         })
+        .map(|s| s.service_code.as_str())
         .collect();
 
     let tracks: BTreeSet<(&str, &str)> =
         g.platforms.iter().map(|p| (p.place.as_str(), p.platform.as_str())).collect();
     let mut services = Vec::new();
-    for s in ts2.services.values() {
+    for s in ts2.services.values().filter(|s| kept.contains(s.service_code.as_str())) {
         let mut calls = Vec::new();
         for l in &s.lines {
             if !tracks.contains(&(l.place_code.as_str(), l.track_code.as_str())) {
@@ -55,6 +78,16 @@ pub fn build(ts2: &Ts2, g: &Graph, report: &mut Report) -> Timetable {
                 continue;
             }
             let time = |x: &str| (!x.is_empty()).then(|| x.to_string());
+            if [&l.scheduled_arrival_time, &l.scheduled_departure_time]
+                .iter()
+                .any(|x| !x.is_empty() && parse_hms(x).is_none())
+            {
+                report.warn(
+                    report::CALL_DROPPED,
+                    format!("{}: bad time at {} {}", s.service_code, l.place_code, l.track_code),
+                );
+                continue;
+            }
             let (mut arr, mut dep) = (time(&l.scheduled_arrival_time), time(&l.scheduled_departure_time));
             if !l.must_stop {
                 if dep.is_none() {
@@ -79,6 +112,13 @@ pub fn build(ts2: &Ts2, g: &Graph, report: &mut Report) -> Timetable {
         let next = s.post_actions.iter().find(|a| a.action_code == "SET_SERVICE").and_then(|a| a.action_param.clone());
         let reverse = s.post_actions.iter().any(|a| a.action_code == "REVERSE");
         let mut end = match (next, reverse) {
+            (Some(service), _) if !kept.contains(service.as_str()) => {
+                report.warn(
+                    report::ACTION,
+                    format!("{}: next service {service} is missing or skipped; it stables", s.service_code),
+                );
+                EndFile::Stable
+            }
             (Some(service), rev) => {
                 if !rev {
                     report.warn(
@@ -109,8 +149,8 @@ pub fn build(ts2: &Ts2, g: &Graph, report: &mut Report) -> Timetable {
 
     let mut entries = Vec::new();
     for t in &ts2.trains {
-        if !ts2.services.contains_key(&t.service_code) {
-            report.warn(report::TRAIN_SKIPPED, format!("train {}: unknown service {}", t.train_id, t.service_code));
+        if !kept.contains(t.service_code.as_str()) {
+            report.warn(report::TRAIN_SKIPPED, format!("train {}: unknown or skipped service {}", t.train_id, t.service_code));
             continue;
         }
         let delay = match t.initial_delay.as_i64() {
@@ -122,6 +162,10 @@ pub fn build(ts2: &Ts2, g: &Graph, report: &mut Report) -> Timetable {
                 0
             }
         };
+        if !(t.initial_speed.is_finite() && t.initial_speed >= 0.0) {
+            report.warn(report::TRAIN_SKIPPED, format!("train {}: bad initial speed {}", t.train_id, t.initial_speed));
+            continue;
+        }
         let Some(appear) = parse_hms(&t.appear_time) else {
             report.warn(report::TRAIN_SKIPPED, format!("train {}: bad appear time {}", t.train_id, t.appear_time));
             continue;
@@ -147,11 +191,16 @@ pub fn build(ts2: &Ts2, g: &Graph, report: &mut Report) -> Timetable {
             report.warn(report::TRAIN_SKIPPED, format!("train {}: head is not on a kept line", t.train_id));
             continue;
         };
+        let start = i64::from(appear).saturating_add(delay).max(0);
+        if start >= 48 * 3600 {
+            report.warn(report::TRAIN_SKIPPED, format!("train {}: enters at or after 48:00:00", t.train_id));
+            continue;
+        }
         entries.push(EntryFile {
             service: t.service_code.clone(),
             boundary,
             at,
-            time: fmt_hms((i64::from(appear) + delay).max(0) as f64),
+            time: fmt_hms(start as f64),
             speed_kmh: t.initial_speed * 3.6,
         });
     }
