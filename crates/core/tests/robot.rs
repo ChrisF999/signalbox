@@ -117,3 +117,74 @@ fn robot_does_not_reserve_track_for_a_route_the_interlocking_would_reject() {
     let w = sim.world().clone();
     assert_eq!(commands(&sim), vec![Command::SetRoute { entrance: sig(&w, "SY"), exit: Exit::Node(node(&w, "EY")) }]);
 }
+
+/// Line P crosses line Q on the flat (section TX), and signal SB stands only
+/// 50 m past the crossing, so a train waiting at SB would stand across it.
+/// `blocker`: a third train stands on P beyond SB.
+fn crossing(blocker: bool) -> Sim {
+    let seg = |name: &str, from: &str, to: &str, len: u32, sec: &str| {
+        serde_json::json!({"name": name, "from": from, "to": to, "length_m": len, "line_speed_kmh": 100, "section": sec})
+    };
+    let nodes: Vec<_> = [("WP", "boundary"), ("P1", "joint"), ("P2", "joint"), ("P3", "joint"), ("EP", "boundary"),
+        ("WQ", "boundary"), ("Q1", "joint"), ("Q2", "joint"), ("EQ", "boundary")]
+        .iter()
+        .map(|(n, k)| serde_json::json!({"name": n, "kind": k}))
+        .collect();
+    let sections: Vec<_> =
+        ["TPA", "TX", "TPB", "TPC", "TQA", "TQB"].iter().map(|s| serde_json::json!({"name": s, "area": "A"})).collect();
+    let signal = |name: &str, segment: &str, at: u32| {
+        serde_json::json!({"name": name, "area": "A", "segment": segment, "offset_m": at, "direction": "up", "aspects": 3})
+    };
+    let mut services = vec![serde_json::json!({"headcode": "1X01", "train_type": "EMU"}), serde_json::json!({"headcode": "1Y01", "train_type": "EMU"})];
+    let mut entries = vec![
+        serde_json::json!({"service": "1X01", "boundary": "WP", "time": "06:00"}),
+        serde_json::json!({"service": "1Y01", "boundary": "WQ", "time": "06:00"}),
+    ];
+    if blocker {
+        services.push(serde_json::json!({"headcode": "1Z01", "train_type": "EMU"}));
+        entries.push(serde_json::json!({"service": "1Z01", "at": {"segment": "pc", "offset_m": 500, "direction": "up"}, "time": "06:00"}));
+    }
+    let w = serde_json::json!({
+        "schema": 1, "areas": [{"name": "A"}], "sections": sections, "nodes": nodes,
+        "segments": [
+            seg("pa", "WP", "P1", 1000, "TPA"), seg("px", "P1", "P2", 50, "TX"), seg("pb", "P2", "P3", 50, "TPB"),
+            seg("pc", "P3", "EP", 1000, "TPC"), seg("qa", "WQ", "Q1", 1000, "TQA"), seg("qx", "Q1", "Q2", 50, "TX"),
+            seg("qb", "Q2", "EQ", 1000, "TQB"),
+        ],
+        "signals": [signal("SA", "pa", 1000), signal("SB", "pb", 50), signal("SQ", "qa", 1000)],
+        "routes": [
+            {"entrance": "SA", "exit": {"kind": "signal", "name": "SB"}, "path": ["TX", "TPB"]},
+            {"entrance": "SB", "exit": {"kind": "node", "name": "EP"}, "path": ["TPC"]},
+            {"entrance": "SQ", "exit": {"kind": "node", "name": "EQ"}, "path": ["TX", "TQB"]},
+        ],
+        "train_types": [{"code": "EMU", "max_speed_kmh": 120, "accel": 0.8, "service_brake": 0.7, "emergency_brake": 1.2, "length_m": 100}],
+        "services": services, "entries": entries,
+        "options": {"start_time": "06:00", "entry_delay_s": [0, 0]},
+    });
+    let mut sim = Sim::new(signalbox_core::world::World::from_json(&w.to_string()).unwrap(), 1);
+    sim.step();
+    sim.step();
+    assert_eq!(sim.trains().len(), if blocker { 3 } else { 2 });
+    sim
+}
+
+fn set(w: &signalbox_core::world::World, entrance: &str, exit: Exit) -> Command {
+    Command::SetRoute { entrance: sig(w, entrance), exit }
+}
+
+/// A train is only routed to a signal where it would stand across a junction
+/// when the road beyond that signal can be set too; otherwise it could stand
+/// there blocking the train that the road beyond is waiting for.
+#[test]
+fn robot_routes_a_train_over_a_junction_only_with_the_road_beyond() {
+    let sim = crossing(true);
+    let w = sim.world().clone();
+    assert_eq!(commands(&sim), vec![set(&w, "SQ", Exit::Node(node(&w, "EQ")))]);
+
+    let sim = crossing(false);
+    let w = sim.world().clone();
+    assert_eq!(
+        commands(&sim),
+        vec![set(&w, "SA", Exit::Signal(sig(&w, "SB"))), set(&w, "SB", Exit::Node(node(&w, "EP")))]
+    );
+}
