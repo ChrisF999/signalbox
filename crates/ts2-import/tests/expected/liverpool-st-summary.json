@@ -1,11 +1,11 @@
 {
-  "automatic route demoted": 10,
+  "automatic route demoted": 18,
   "call dropped": 207,
   "delay approximated": 2,
   "flat crossing merged": 23,
   "options ignored": 1,
   "orphan track dropped": 1,
-  "overlap cut short": 52,
+  "overlap cut short": 57,
   "route generated": 4,
   "track end classified": 26
 }

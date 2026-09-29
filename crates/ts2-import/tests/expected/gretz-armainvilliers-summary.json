@@ -1,10 +1,10 @@
 {
-  "automatic route demoted": 2,
+  "automatic route demoted": 4,
   "delay approximated": 2,
   "flat crossing merged": 3,
   "form without reverse": 1,
   "options ignored": 1,
-  "overlap cut short": 33,
+  "overlap cut short": 34,
   "route generated": 21,
   "signal type approximated": 16,
   "track end classified": 22

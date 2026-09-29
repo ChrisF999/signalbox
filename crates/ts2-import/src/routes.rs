@@ -226,6 +226,9 @@ pub fn build(ts2: &Ts2, g: &Graph, world: &World, report: &mut Report) -> Vec<Ro
         m.overlap = o;
         m.overlap_points = op;
     }
+    // An overlap dropped before a controlled signal clashes with nothing, so
+    // drop those first; demoting makes more signals controlled, so drop again.
+    drop_overlap_before_controlled_signals(&mut merged, net, report);
     demote_clashing_automatics(&mut merged, net, report);
     drop_overlap_before_controlled_signals(&mut merged, net, report);
 
@@ -340,45 +343,35 @@ fn drop_overlap_before_controlled_signals(v: &mut [Stretch], net: &Network, repo
     }
 }
 
-/// An automatic route must be the only route from its signal: it is never
-/// cancelled, so the signal's other routes could never be set. Two automatic
-/// routes may only share sections when one continues the other and the shared
-/// sections are the first one's overlap.
+/// An automatic route is never cancelled and never lets go of its path, so it
+/// may only share sections with a route that continues it or that it
+/// continues, and only where the shared sections are the first one's overlap.
+/// Any other automatic route is set by hand instead: otherwise the routes it
+/// clashes with (another route from its signal, a route joining or crossing
+/// its line) could never be set.
 fn demote_clashing_automatics(v: &mut [Stretch], net: &Network, report: &mut Report) {
-    for j in 0..v.len() {
-        if v[j].automatic && v.iter().filter(|m| m.entrance == v[j].entrance).count() > 1 {
-            v[j].automatic = false;
-            report.warn(
-                report::AUTOMATIC_DEMOTED,
-                format!("route from {} shares its signal with other routes; set by hand instead", net.signals[v[j].entrance.idx()].name),
-            );
-        }
-    }
+    let secs = |s: &Stretch| -> BTreeSet<SectionId> { s.path.iter().chain(s.overlap.iter()).copied().collect() };
     for j in 0..v.len() {
         if !v[j].automatic {
             continue;
         }
-        for i in 0..j {
-            if !v[i].automatic {
-                continue;
-            }
-            let secs = |s: &Stretch| -> BTreeSet<SectionId> { s.path.iter().chain(s.overlap.iter()).copied().collect() };
+        let clash = (0..v.len()).filter(|&i| i != j).find(|&i| {
             let shared: Vec<SectionId> = secs(&v[i]).intersection(&secs(&v[j])).copied().collect();
-            if shared.is_empty() {
-                continue;
-            }
             let continues = |a: &Stretch, b: &Stretch| {
                 a.exit == Exit::Signal(b.entrance) && shared.iter().all(|s| a.overlap.contains(s) && b.path.contains(s))
             };
-            if continues(&v[i], &v[j]) || continues(&v[j], &v[i]) {
-                continue;
-            }
+            !shared.is_empty() && !continues(&v[i], &v[j]) && !continues(&v[j], &v[i])
+        });
+        if let Some(i) = clash {
             v[j].automatic = false;
             report.warn(
                 report::AUTOMATIC_DEMOTED,
-                format!("route from {} clashes with another automatic route; set by hand instead", net.signals[v[j].entrance.idx()].name),
+                format!(
+                    "route from {} clashes with the route from {}; set by hand instead",
+                    net.signals[v[j].entrance.idx()].name,
+                    net.signals[v[i].entrance.idx()].name
+                ),
             );
-            break;
         }
     }
 }

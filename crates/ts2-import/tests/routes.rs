@@ -143,3 +143,30 @@ fn automatic_route_sharing_its_signal_with_other_routes_is_set_by_hand() {
     assert!(from_a.iter().all(|r| !r.automatic), "{from_a:?}");
     assert_eq!(c.report.count(report::AUTOMATIC_DEMOTED), 1, "{}", c.report.render());
 }
+
+#[test]
+fn automatic_routes_share_track_only_with_their_continuations() {
+    // An automatic route never lets go of its path, so a route crossing or
+    // joining it could never be set. Liverpool Street: automatic 73-83 would
+    // own the line that 71-83 (and 75-83, 90-82, ...) join.
+    for name in ["drain", "gretz-armainvilliers", "liverpool-st"] {
+        let c = ts2_import::convert(&data(name)).unwrap();
+        let routes = &c.world.routes;
+        let exit_is = |r: &RouteFile, s: &str| matches!(&r.exit, ExitFile::Signal(x) if x == s);
+        for a in routes.iter().filter(|r| r.automatic) {
+            for b in routes.iter().filter(|b| !std::ptr::eq(*b, a)) {
+                let shared: Vec<&String> =
+                    a.path.iter().chain(&a.overlap).filter(|s| b.path.contains(s) || b.overlap.contains(s)).collect();
+                let continues = |x: &RouteFile, y: &RouteFile| exit_is(x, &y.entrance) && shared.iter().all(|s| x.overlap.contains(s));
+                assert!(
+                    shared.is_empty() || continues(a, b) || continues(b, a),
+                    "{name}: automatic {}-{:?} shares {shared:?} with {}-{:?}",
+                    a.entrance, a.exit, b.entrance, b.exit
+                );
+            }
+        }
+    }
+    let c = ts2_import::convert(&data("liverpool-st")).unwrap();
+    let r = c.world.routes.iter().find(|r| r.entrance == "73").unwrap();
+    assert!(!r.automatic);
+}
