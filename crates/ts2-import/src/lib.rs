@@ -2,4 +2,5 @@
 
 pub mod graph;
 pub mod report;
+pub mod timetable;
 pub mod ts2;
