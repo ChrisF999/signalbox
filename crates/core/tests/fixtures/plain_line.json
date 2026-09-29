@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "title": "Plain line",
+  "areas": [{"name": "Main"}],
+  "sections": [
+    {"name": "TA", "area": "Main"},
+    {"name": "TB", "area": "Main"},
+    {"name": "TC", "area": "Main"}
+  ],
+  "nodes": [
+    {"name": "W", "kind": "boundary"},
+    {"name": "J1", "kind": "joint"},
+    {"name": "J2", "kind": "joint"},
+    {"name": "E", "kind": "boundary"}
+  ],
+  "segments": [
+    {"name": "a", "from": "W", "to": "J1", "length_m": 1000, "line_speed_kmh": 100, "section": "TA"},
+    {"name": "b", "from": "J1", "to": "J2", "length_m": 1000, "line_speed_kmh": 100, "section": "TB"},
+    {"name": "c", "from": "J2", "to": "E", "length_m": 1000, "line_speed_kmh": 100, "section": "TC"}
+  ],
+  "signals": [
+    {"name": "S1", "area": "Main", "segment": "a", "offset_m": 1000, "direction": "up", "aspects": 3},
+    {"name": "S2", "area": "Main", "segment": "b", "offset_m": 1000, "direction": "up", "aspects": 3}
+  ],
+  "berths": [
+    {"name": "BW", "boundary": "W"},
+    {"name": "B1", "signal": "S1"},
+    {"name": "B2", "signal": "S2"}
+  ],
+  "routes": [
+    {"entrance": "S1", "exit": {"kind": "signal", "name": "S2"}, "path": ["TB"], "overlap": ["TC"]},
+    {"entrance": "S2", "exit": {"kind": "node", "name": "E"}, "path": ["TC"]}
+  ],
+  "train_types": [
+    {"code": "EMU", "max_speed_kmh": 120, "accel": 0.8, "service_brake": 0.7, "emergency_brake": 1.2, "length_m": 100}
+  ],
+  "services": [
+    {"headcode": "2A01", "train_type": "EMU", "calls": [], "end": {"kind": "exit"}}
+  ],
+  "entries": [
+    {"service": "2A01", "boundary": "W", "time": "06:00:00"}
+  ],
+  "options": {"start_time": "06:00:00"}
+}
