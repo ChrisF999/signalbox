@@ -26,6 +26,7 @@ pub const ROUTE_GENERATED: &str = "route generated";
 pub const SIGNAL_NO_ROUTE: &str = "signal without route";
 pub const OVERLAP_CUT: &str = "overlap cut short";
 pub const SIGNAL_OFF_BOUNDARY: &str = "signal not on a section boundary";
+pub const LINE_SPEED_DEFAULTED: &str = "line speed defaulted";
 pub const AUTOMATIC_DEMOTED: &str = "automatic route demoted";
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

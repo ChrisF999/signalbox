@@ -103,6 +103,14 @@ fn attach(kinds: &BTreeMap<&str, Kind>, id: &str, port: Port) -> String {
     if kinds[id] == Kind::Points { format!("N{id}.{}", port.tag()) } else { format!("N{id}") }
 }
 
+/// Line speed used when the TS2 `defaultMaxSpeed` is not a usable speed (TS2 has no
+/// built-in default; its sample layouts range from 24 to 140 km/h).
+pub const FALLBACK_LINE_SPEED_KMH: f64 = 100.0;
+
+fn usable_kmh(kmh: f64) -> bool {
+    kmh.is_finite() && kmh > 0.0
+}
+
 pub fn build(ts2: &Ts2, entry_ends: &BTreeSet<String>, report: &mut Report) -> Result<Graph, String> {
     let items = &ts2.track_items;
     let kinds: BTreeMap<&str, Kind> =
@@ -220,20 +228,38 @@ pub fn build(ts2: &Ts2, entry_ends: &BTreeSet<String>, report: &mut Report) -> R
             _ => None,
         })
         .collect();
+    let mut default_kmh = ts2.options.default_max_speed * 3.6;
+    if !usable_kmh(default_kmh) {
+        report.warn(
+            report::LINE_SPEED_DEFAULTED,
+            format!(
+                "options.defaultMaxSpeed {} is not a usable speed; using {FALLBACK_LINE_SPEED_KMH} km/h",
+                ts2.options.default_max_speed
+            ),
+        );
+        default_kmh = FALLBACK_LINE_SPEED_KMH;
+    }
     for &id in &kept {
         let (Item::LineItem(l) | Item::InvisibleLinkItem(l)) = &items[id] else { continue };
         let from = b.line_end[&(id.to_string(), Port::Prev)].clone();
         let to = b.line_end[&(id.to_string(), Port::Next)].clone();
-        let mps = if l.max_speed > 0.0 {
-            l.max_speed
+        let own = if l.max_speed > 0.0 {
+            Some(l.max_speed)
         } else {
-            l.place_code
-                .as_deref()
-                .and_then(|c| place_speed.get(c).copied())
-                .filter(|&v| v > 0.0)
-                .unwrap_or(ts2.options.default_max_speed)
+            l.place_code.as_deref().and_then(|c| place_speed.get(c).copied()).filter(|&v| v > 0.0)
         };
-        b.segment(format!("L{id}"), from, to, l.real_length, mps * 3.6);
+        let kmh = match own.map(|mps| mps * 3.6) {
+            None => default_kmh,
+            Some(k) if usable_kmh(k) => k,
+            Some(_) => {
+                report.warn(
+                    report::LINE_SPEED_DEFAULTED,
+                    format!("line {id}: speed {} m/s is not usable; using the default line speed", own.unwrap_or(0.0)),
+                );
+                default_kmh
+            }
+        };
+        b.segment(format!("L{id}"), from, to, l.real_length, kmh);
         g.line_segments.insert(id.to_string(), format!("L{id}"));
         if let (Some(pc), Some(tc)) = (&l.place_code, &l.track_code) {
             if !tc.is_empty() {
@@ -247,7 +273,7 @@ pub fn build(ts2: &Ts2, entry_ends: &BTreeSet<String>, report: &mut Report) -> R
             }
         }
     }
-    fill_spacer_speeds(&mut b.segments, ts2.options.default_max_speed * 3.6);
+    fill_spacer_speeds(&mut b.segments, default_kmh);
 
     // Sections.
     let at = node_segments(&b.segments);

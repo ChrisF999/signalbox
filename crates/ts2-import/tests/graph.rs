@@ -142,3 +142,33 @@ fn signals_sit_on_section_boundaries() {
         assert_eq!(r.count(report::SIGNAL_OFF_BOUNDARY), 0, "{name}");
     }
 }
+
+/// Convert `mini` after `edit`ing its JSON; the written world must survive a JSON round trip.
+fn convert_edited(edit: impl FnOnce(&mut serde_json::Value)) -> ts2_import::Conversion {
+    let mut v = load_json("mini");
+    edit(&mut v);
+    let c = ts2_import::convert(&v.to_string()).expect("bad speeds must warn, not fail");
+    let json = serde_json::to_string(&c.world).unwrap();
+    signalbox_core::world::World::from_json(&json).expect("written world must reload");
+    c
+}
+
+fn seg_kmh(c: &ts2_import::Conversion, name: &str) -> f64 {
+    c.world.segments.iter().find(|s| s.name == name).unwrap().line_speed_kmh
+}
+
+#[test]
+fn line_speed_that_overflows_when_converted_falls_back_to_the_default() {
+    let c = convert_edited(|v| v["trackItems"]["8"]["maxSpeed"] = serde_json::json!(1e308));
+    assert!((seg_kmh(&c, "L8") - 72.0).abs() < 1e-9, "default 20 m/s");
+    assert_eq!(c.report.count(report::LINE_SPEED_DEFAULTED), 1);
+}
+
+#[test]
+fn bad_default_max_speed_falls_back_to_a_documented_constant() {
+    for bad in [serde_json::json!(0.0), serde_json::json!(-5.0), serde_json::json!(1e308)] {
+        let c = convert_edited(|v| v["options"]["defaultMaxSpeed"] = bad.clone());
+        assert!((seg_kmh(&c, "L2") - graph::FALLBACK_LINE_SPEED_KMH).abs() < 1e-9, "default {bad}");
+        assert_eq!(c.report.count(report::LINE_SPEED_DEFAULTED), 1, "default {bad}: one warning");
+    }
+}

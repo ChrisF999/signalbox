@@ -82,8 +82,8 @@ pub(super) fn build_network(f: &WorldFile) -> Result<Network, LoadError> {
         if !(s.length_m > 0.0) {
             return Err(other(format!("segment `{}`: length_m must be positive", s.name)));
         }
-        if !(s.line_speed_kmh > 0.0) {
-            return Err(other(format!("segment `{}`: line_speed_kmh must be positive", s.name)));
+        if !(s.line_speed_kmh.is_finite() && s.line_speed_kmh > 0.0) {
+            return Err(other(format!("segment `{}`: line_speed_kmh must be finite and positive", s.name)));
         }
         let a = NodeId(get(&nodes, "node", &s.from, &s.name)?);
         let b = NodeId(get(&nodes, "node", &s.to, &s.name)?);

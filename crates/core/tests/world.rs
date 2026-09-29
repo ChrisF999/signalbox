@@ -129,3 +129,12 @@ fn rejects_negative_sighting_and_swing() {
     let e = load_with("terminus", |v| v["nodes"][2]["swing_s"] = json!(-1)).unwrap_err();
     assert!(matches!(e, LoadError::Other(ref m) if m.contains("points `P`")), "{e:?}");
 }
+
+#[test]
+fn rejects_infinite_segment_speed() {
+    // JSON cannot carry inf, so go through the typed file (what a converter hands over in memory).
+    let mut f: signalbox_core::world::file::WorldFile = serde_json::from_value(fixture_json("plain_line")).unwrap();
+    f.segments[0].line_speed_kmh = f64::INFINITY;
+    let e = signalbox_core::world::World::from_file(f).unwrap_err();
+    assert!(matches!(e, LoadError::Other(ref m) if m.contains("segment `a`")), "{e:?}");
+}
