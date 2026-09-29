@@ -115,22 +115,19 @@ fn speed_update_accelerates_brakes_and_never_goes_negative() {
     assert_eq!(t.speed, 0.0);
 }
 
-/// Three 3-aspect signals on a 100 km/h line, the last two only 150 m apart:
+/// Three signals (of `aspects` aspects each) on a 100 km/h line, the last two only 150 m apart:
 /// braking from line speed takes about 550 m, far more than 150 m plus the
 /// 100 m sighting. S0 and S1 are cleared, S2 stays red. A driver who reads
 /// S0's green as "S1 will be green too" runs at line speed, first sees S2's
 /// red 100 m away and overruns it. A green only promises a yellow next, so
 /// the driver must plan to stop at S2 from S0 on.
-#[test]
-fn a_green_promises_only_a_yellow_so_close_signals_do_not_catch_the_driver_out() {
-    use signalbox_core::events::{Command, Event};
-    use signalbox_core::routes::Exit;
+fn close_spacing_sim(aspects: u8) -> signalbox_core::sim::Sim {
     use signalbox_core::sim::Sim;
     let seg = |name: &str, from: &str, to: &str, len: u32, sec: &str| {
         json!({"name": name, "from": from, "to": to, "length_m": len, "line_speed_kmh": 100, "section": sec})
     };
     let signal = |name: &str, segment: &str, at: u32| {
-        json!({"name": name, "area": "A", "segment": segment, "offset_m": at, "direction": "up", "aspects": 3, "sighting_m": 100})
+        json!({"name": name, "area": "A", "segment": segment, "offset_m": at, "direction": "up", "aspects": aspects, "sighting_m": 100})
     };
     let w = json!({
         "schema": 1, "areas": [{"name": "A"}],
@@ -149,7 +146,14 @@ fn a_green_promises_only_a_yellow_so_close_signals_do_not_catch_the_driver_out()
         "entries": [{"service": "1A01", "boundary": "W", "time": "06:00", "speed_kmh": 100}],
         "options": {"start_time": "06:00", "entry_delay_s": [0, 0]},
     });
-    let mut sim = Sim::new(World::from_json(&w.to_string()).unwrap(), 1);
+    Sim::new(World::from_json(&w.to_string()).unwrap(), 1)
+}
+
+#[test]
+fn a_green_promises_only_a_yellow_so_close_signals_do_not_catch_the_driver_out() {
+    use signalbox_core::events::{Command, Event};
+    use signalbox_core::routes::Exit;
+    let mut sim = close_spacing_sim(3);
     let (s0, s1, s2) = {
         let w = sim.world();
         (sig(w, "S0"), sig(w, "S1"), sig(w, "S2"))
@@ -160,6 +164,24 @@ fn a_green_promises_only_a_yellow_so_close_signals_do_not_catch_the_driver_out()
     assert_eq!(count(&ev, |e| matches!(e, Event::SignalPassedAtDanger { .. })), 0);
     let t = &sim.trains()[0];
     assert_eq!((head_segment(&sim, t), t.speed), ("b".to_string(), 0.0), "stands at S2");
+}
+
+/// The same line on 2 aspects: S0's green shows before S1's red, so the driver
+/// must not read it as "S1 will be yellow" and run on at line speed.
+#[test]
+fn a_two_aspect_green_promises_nothing_so_the_driver_expects_the_next_red() {
+    use signalbox_core::events::{Command, Event};
+    use signalbox_core::routes::Exit;
+    let mut sim = close_spacing_sim(2);
+    let (s0, s1) = {
+        let w = sim.world();
+        (sig(w, "S0"), sig(w, "S1"))
+    };
+    sim.submit(Command::SetRoute { entrance: s0, exit: Exit::Signal(s1) });
+    let ev = sim.run_for(300.0);
+    assert_eq!(count(&ev, |e| matches!(e, Event::SignalPassedAtDanger { .. })), 0);
+    let t = &sim.trains()[0];
+    assert_eq!((head_segment(&sim, t), t.speed), ("a".to_string(), 0.0), "stands at S1");
 }
 
 fn head_segment(sim: &signalbox_core::sim::Sim, t: &Train) -> String {

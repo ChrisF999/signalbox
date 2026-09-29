@@ -496,6 +496,7 @@ impl Sim {
                     t.emergency = true;
                 }
                 t.last_passed_aspect = Some(aspect);
+                t.last_passed_aspects = net.signals[s.idx()].aspects;
                 if let Some(b) = net.signals[s.idx()].berth {
                     let next = net
                         .first_signal_ahead(sw.seg, sw.dir, a, SIGNAL_SEARCH_M, pts)
@@ -563,6 +564,7 @@ impl Sim {
                         t.train_type = nsvc.train_type;
                         t.next_call = 0;
                         t.last_passed_aspect = None;
+                        t.last_passed_aspects = 3;
                         ev.push(Event::TrainFormed { train: t.id, headcode: t.headcode.clone() });
                         let (hs, hd) = t.head();
                         let berth = net

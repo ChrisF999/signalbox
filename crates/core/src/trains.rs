@@ -53,6 +53,8 @@ pub struct Train {
     pub end_done: bool,
     pub stabled: bool,
     pub last_passed_aspect: Option<Aspect>,
+    /// Aspect count of the signal `last_passed_aspect` was read at.
+    pub last_passed_aspects: u8,
 }
 
 impl Train {
@@ -108,6 +110,7 @@ impl Train {
             end_done: false,
             stabled: false,
             last_passed_aspect: None,
+            last_passed_aspects: 3,
         }
     }
 
