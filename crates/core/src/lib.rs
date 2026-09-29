@@ -1,6 +1,7 @@
 //! signalbox: a deterministic UK railway signalling simulation.
 
 pub mod aspect;
+pub mod driver;
 pub mod events;
 pub mod ids;
 pub mod interlocking;
