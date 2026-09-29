@@ -333,7 +333,35 @@ fn build_routes(f: &WorldFile, net: &Network) -> Result<Vec<RouteDef>, LoadError
             automatic: r.automatic,
         });
     }
+    check_automatic_clashes(net, &out)?;
     Ok(out)
+}
+
+/// Automatic routes are all set at start, so two of them must not want the
+/// same track. A route continuing from another's exit signal may take over
+/// that route's overlap, which is not a clash.
+fn check_automatic_clashes(net: &Network, routes: &[RouteDef]) -> Result<(), LoadError> {
+    let autos: Vec<&RouteDef> = routes.iter().filter(|r| r.automatic).collect();
+    for (i, x) in autos.iter().enumerate() {
+        for y in &autos[i + 1..] {
+            let takeover = |rear: &RouteDef, next: &RouteDef, s: &SectionId| {
+                rear.exit == Exit::Signal(next.entrance) && rear.overlap.contains(s) && next.path.contains(s)
+            };
+            let shared = x.path.iter().chain(x.overlap.iter()).find(|s| {
+                (y.path.contains(s) || y.overlap.contains(s)) && !takeover(x, y, s) && !takeover(y, x, s)
+            });
+            if let Some(s) = shared {
+                return Err(LoadError::BadRoute {
+                    route: x.name.clone(),
+                    problem: format!(
+                        "automatic routes `{}` and `{}` both use section `{}`",
+                        x.name, y.name, net.sections[s.idx()].name
+                    ),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 type Timetable = (Vec<TrainType>, Vec<Service>, Vec<Entry>, Options);

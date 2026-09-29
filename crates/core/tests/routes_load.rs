@@ -164,3 +164,22 @@ fn rejects_bad_train_types_entries_and_options() {
         assert!(matches!(e, LoadError::Other(ref m) if m.contains(field)), "{field}: {e:?}");
     }
 }
+
+#[test]
+fn rejects_clashing_automatic_routes() {
+    let e = load_with("junction", |v| {
+        v["routes"][0]["automatic"] = json!(true);
+        v["routes"][1]["automatic"] = json!(true);
+    })
+    .unwrap_err();
+    assert!(bad_route(e).contains("both use section"));
+}
+
+#[test]
+fn continuing_automatic_routes_may_share_an_overlap() {
+    load_with("plain_line", |v| {
+        v["routes"][0]["automatic"] = json!(true);
+        v["routes"][1]["automatic"] = json!(true);
+    })
+    .unwrap();
+}
