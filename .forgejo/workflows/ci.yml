@@ -1,0 +1,35 @@
+# signalbox CI on git-bringer. Runs on the self-hosted runner `signalbox` (host
+# mode, no Docker, no internet: only git-bringer is reachable, through the
+# runner's proxy). No `uses:` actions: they would be fetched from the internet.
+# Cargo works offline against the runner's seeded /cache.
+name: ci
+on:
+  push:
+  workflow_dispatch:
+
+# One run at a time per ref, queued, never cancelled.
+concurrency:
+  group: signalbox-ci-${{ forgejo.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: signalbox
+    timeout-minutes: 60
+    env:
+      FORGEJO_TOKEN: ${{ forgejo.token }}
+    steps:
+      - name: clone
+        run: |
+          set -euo pipefail
+          rm -rf src && git init -q src && cd src
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          # the token goes in a header for these commands only, never in the URL or .git/config
+          auth="Authorization: basic $(printf 'x-access-token:%s' "$FORGEJO_TOKEN" | base64 -w0)"
+          git -c http.extraHeader="$auth" fetch -q --depth 1 origin "$GITHUB_SHA" \
+            || git -c http.extraHeader="$auth" fetch -q --depth 50 origin "$GITHUB_REF"
+          git checkout -q --detach "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git log -1 --format='%H %s'
+      - name: test
+        run: cd src && scripts/ci/test.sh

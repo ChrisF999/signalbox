@@ -14,6 +14,12 @@ scripts/cargo test
 scripts/cargo run -p sim-cli -- run crates/core/tests/fixtures/junction.json --robot --hours 1
 ```
 
+## CI
+
+CI runs on the self-hosted Forgejo (`.forgejo/workflows/ci.yml` → `scripts/ci/test.sh`):
+every push builds and tests the workspace offline with warnings as errors. The GitHub
+mirror has no CI.
+
 ## Layout
 
 - `crates/core` — the simulation library (`signalbox-core`)
