@@ -6,8 +6,8 @@ train-signalling game, and is aimed at multiplayer signal boxes played in the
 browser: several players each running a box on one shared network, handing
 trains to each other.
 
-**Status:** early. The simulation core is done and tested; a converter for TS2's
-existing layouts is in progress. There is no user interface yet — you drive the
+**Status:** simulation core and TS2 converter. Real TS2 layouts
+([ts2-data](https://github.com/ts2/ts2-data)) convert and run. There is no user interface yet — you drive the
 simulation from code or the headless `sim-cli`.
 
 ## What it models
@@ -54,6 +54,13 @@ cargo run -p sim-cli -- replay crates/core/tests/fixtures/junction.json session.
 
 Both commands print a hash of the final state, so you can check a replay matches.
 
+Convert a TS2 simulation and run it:
+
+```bash
+cargo run -p ts2-import -- crates/ts2-import/tests/data/drain.json -o target/drain.json
+cargo run -p sim-cli -- run target/drain.json --robot --hours 2
+```
+
 No local Rust? `scripts/cargo` runs cargo in the official Rust Docker image
 (set `SIGNALBOX_RUST_IMAGE` to use another), e.g. `scripts/cargo test`.
 
@@ -70,17 +77,17 @@ easiest place to see the format; the full definition is in
 - `crates/core` — the simulation library (`signalbox-core`)
 - `crates/sim-cli` — headless runner: `run` (optionally with the robot
   signaller, recording a command log) and `replay`
+- `crates/ts2-import` — TS2 → signalbox converter (library and CLI); vendored
+  ts2-data (GPL-2.0) under `tests/data`
 - `docs/superpowers/specs` — the design; `docs/superpowers/plans` — the
   step-by-step implementation plans it was built from
 
 ## Roadmap
 
-1. TS2 converter: import the layouts from
-   [ts2-data](https://github.com/ts2/ts2-data) (in progress).
-2. A server and network protocol for several players, each owning a signal box.
-3. A browser client: the signaller's panel.
-4. Real timetables from UK open rail data.
-5. More UK signalling: calling-on and shunt signals, permissive working,
+1. A server and network protocol for several players, each owning a signal box.
+2. A browser client: the signaller's panel.
+3. Real timetables from UK open rail data.
+4. More UK signalling: calling-on and shunt signals, permissive working,
    approach release, flashing yellows.
 
 ## Contributing
