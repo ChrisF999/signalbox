@@ -60,6 +60,12 @@ pub(super) fn build_network(f: &WorldFile) -> Result<Network, LoadError> {
         net.sections.push(Section { name: s.name.clone(), area, segments: vec![] });
     }
     for s in &f.segments {
+        if !(s.length_m > 0.0) {
+            return Err(other(format!("segment `{}`: length_m must be positive", s.name)));
+        }
+        if !(s.line_speed_kmh > 0.0) {
+            return Err(other(format!("segment `{}`: line_speed_kmh must be positive", s.name)));
+        }
         let a = NodeId(get(&nodes, "node", &s.from, &s.name)?);
         let b = NodeId(get(&nodes, "node", &s.to, &s.name)?);
         let section = SectionId(get(&sections, "section", &s.section, &s.name)?);
@@ -80,6 +86,9 @@ pub(super) fn build_network(f: &WorldFile) -> Result<Network, LoadError> {
             NodeKindFile::Joint => NodeKind::Joint,
             NodeKindFile::BufferStop => NodeKind::BufferStop,
             NodeKindFile::Boundary => NodeKind::Boundary,
+            NodeKindFile::Points { toe, normal, reverse, swing_s } if !(*swing_s >= 0.0) => {
+                return Err(other(format!("points `{}`: swing_s must not be negative", n.name)));
+            }
             NodeKindFile::Points { toe, normal, reverse, swing_s } => NodeKind::Points {
                 toe: SegmentId(get(&segs, "segment", toe, &n.name)?),
                 normal: SegmentId(get(&segs, "segment", normal, &n.name)?),
@@ -127,6 +136,9 @@ pub(super) fn build_network(f: &WorldFile) -> Result<Network, LoadError> {
         let len = net.segments[segment.idx()].length_m;
         if s.offset_m < 0.0 || s.offset_m > len {
             return Err(LoadError::SignalOffTrack(s.name.clone()));
+        }
+        if !(s.sighting_m >= 0.0) {
+            return Err(other(format!("signal `{}`: sighting_m must not be negative", s.name)));
         }
         if !(2..=4).contains(&s.aspects) {
             return Err(other(format!("signal `{}`: aspects must be 2, 3 or 4", s.name)));

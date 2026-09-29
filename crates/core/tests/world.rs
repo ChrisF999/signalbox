@@ -111,3 +111,21 @@ fn rejects_bad_platform_extent() {
     let e = load_with("terminus", |v| v["platforms"][0]["to_m"] = json!(900)).unwrap_err();
     assert!(matches!(e, LoadError::Other(_)), "{e:?}");
 }
+
+#[test]
+fn rejects_non_positive_segment_length_and_speed() {
+    for bad in [0.0, -5.0] {
+        let e = load_with("plain_line", |v| v["segments"][0]["length_m"] = json!(bad)).unwrap_err();
+        assert!(matches!(e, LoadError::Other(ref m) if m.contains("segment `a`")), "{e:?}");
+        let e = load_with("plain_line", |v| v["segments"][0]["line_speed_kmh"] = json!(bad)).unwrap_err();
+        assert!(matches!(e, LoadError::Other(ref m) if m.contains("segment `a`")), "{e:?}");
+    }
+}
+
+#[test]
+fn rejects_negative_sighting_and_swing() {
+    let e = load_with("plain_line", |v| v["signals"][0]["sighting_m"] = json!(-1)).unwrap_err();
+    assert!(matches!(e, LoadError::Other(ref m) if m.contains("signal `S1`")), "{e:?}");
+    let e = load_with("terminus", |v| v["nodes"][2]["swing_s"] = json!(-1)).unwrap_err();
+    assert!(matches!(e, LoadError::Other(ref m) if m.contains("points `P`")), "{e:?}");
+}
