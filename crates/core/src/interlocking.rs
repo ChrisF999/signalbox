@@ -94,13 +94,9 @@ impl Interlocking {
         })
     }
 
-    pub fn set_route(
-        &mut self,
-        w: &World,
-        pts: &mut PointsTable,
-        occ: &Occupancy,
-        r: RouteId,
-    ) -> Result<Vec<Event>, Rejection> {
+    /// Whether route `r` could be set now, and if not, why. `set_route`
+    /// makes exactly these checks.
+    pub fn check_set_route(&self, w: &World, pts: &PointsTable, occ: &Occupancy, r: RouteId) -> Result<(), Rejection> {
         let def = &w.routes[r.idx()];
         if self.routes[r.idx()].state != RouteState::Idle {
             return Err(Rejection::AlreadySet);
@@ -139,6 +135,18 @@ impl Interlocking {
                 return Err(Rejection::PointsOccupied);
             }
         }
+        Ok(())
+    }
+
+    pub fn set_route(
+        &mut self,
+        w: &World,
+        pts: &mut PointsTable,
+        occ: &Occupancy,
+        r: RouteId,
+    ) -> Result<Vec<Event>, Rejection> {
+        self.check_set_route(w, pts, occ, r)?;
+        let def = &w.routes[r.idx()];
         let mut ev = Vec::new();
         for &(p, pos) in def.all_points() {
             if pts.detected(p) != Some(pos) {

@@ -78,7 +78,9 @@ pub fn choose_route(w: &World, t: &Train, entrance: SignalId) -> Option<RouteId>
 }
 
 /// Route requests for every train facing a red signal with no route set.
-/// A route is only requested when no other train occupies its path.
+/// A route is only requested when no other train occupies its path and the
+/// interlocking would accept it now: a request it would reject must not hold
+/// track back from another train's route.
 pub fn commands(sim: &Sim) -> Vec<Command> {
     let w = sim.world();
     let mut out = Vec::new();
@@ -99,7 +101,7 @@ pub fn commands(sim: &Sim) -> Vec<Command> {
         let blocked = def.path.iter().any(|&s| {
             claimed.contains(&s) || sim.occupancy().trains_in(s).iter().any(|&o| o != t.id)
         });
-        if blocked {
+        if blocked || sim.interlocking().check_set_route(w, sim.points(), sim.occupancy(), r).is_err() {
             continue;
         }
         claimed.extend(def.path.iter().copied());
