@@ -10,4 +10,5 @@ pub mod points;
 pub mod routes;
 pub mod time;
 pub mod timetable;
+pub mod trains;
 pub mod world;
