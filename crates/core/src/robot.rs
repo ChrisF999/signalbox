@@ -1,7 +1,7 @@
 //! A robot signaller: sets the next route for each train towards its next
 //! call (or an exit), and a soak runner built on it.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde::Serialize;
 
@@ -14,6 +14,8 @@ use crate::timetable::EndAction;
 use crate::trains::Train;
 use crate::world::World;
 
+/// A train standing still this long (not at a booked stop, not stabled) is stuck.
+pub const STUCK_S: f64 = 1800.0;
 const SIGNAL_SEARCH_M: f64 = 3_000.0;
 const MAX_ROUTE_DEPTH: usize = 30;
 /// The robot looks at the railway once per this many ticks.
@@ -117,17 +119,35 @@ pub struct SoakReport {
     pub still_running: Vec<String>,
     pub waiting_to_enter: usize,
     pub penalties: i64,
+    /// Headcodes of trains that had not moved for `STUCK_S` at the end.
+    pub stuck: Vec<String>,
+    /// Longest time any due entry waited at the fringe during the run.
+    pub max_fringe_wait_s: f64,
 }
 
 /// Run `secs` seconds with the robot signalling, and report.
 pub fn soak(sim: &mut Sim, secs: f64) -> SoakReport {
     let mut r = SoakReport::default();
     let ticks = (secs / TICK_S).round() as u64;
+    // train → (head segment, head position, standing since)
+    let mut still: BTreeMap<TrainId, (SegmentId, f64, f64)> = BTreeMap::new();
     for i in 0..ticks {
         if i % ROBOT_EVERY_TICKS == 0 {
             for c in commands(sim) {
                 sim.submit(c);
             }
+            let now = sim.now_s();
+            for t in sim.trains() {
+                let (seg, _) = t.head();
+                match still.get(&t.id) {
+                    Some(&(s, m, _)) if s == seg && m == t.head_m => {}
+                    _ => {
+                        still.insert(t.id, (seg, t.head_m, now));
+                    }
+                }
+            }
+            still.retain(|id, _| sim.trains().iter().any(|t| t.id == *id));
+            r.max_fringe_wait_s = r.max_fringe_wait_s.max(sim.longest_fringe_wait_s());
         }
         for e in sim.step() {
             match e {
@@ -140,9 +160,17 @@ pub fn soak(sim: &mut Sim, secs: f64) -> SoakReport {
             }
         }
     }
+    let now = sim.now_s();
     r.exited = sim.finished().iter().filter(|(_, o)| *o == Outcome::Exited).count();
     r.stabled = sim.finished().iter().filter(|(_, o)| *o == Outcome::Stabled).count();
     r.still_running = sim.trains().iter().filter(|t| !t.stabled).map(|t| t.headcode.clone()).collect();
+    r.stuck = sim
+        .trains()
+        .iter()
+        .filter(|t| !t.stabled && t.dwell.is_none())
+        .filter(|t| still.get(&t.id).is_some_and(|&(_, _, since)| now - since >= STUCK_S))
+        .map(|t| t.headcode.clone())
+        .collect();
     r.waiting_to_enter = sim.entries_waiting();
     r.penalties = sim.scores().total();
     r

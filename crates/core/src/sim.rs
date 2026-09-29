@@ -120,6 +120,12 @@ impl Sim {
         self.world.options.start_s + self.st.tick as f64 * TICK_S
     }
 
+    /// How long the longest-waiting due entry has been held at the fringe.
+    pub fn longest_fringe_wait_s(&self) -> f64 {
+        let now = self.now_s();
+        self.st.pending.iter().map(|p| (now - p.due_s).max(0.0)).fold(0.0, f64::max)
+    }
+
     pub fn trains(&self) -> &[Train] {
         &self.st.trains
     }
