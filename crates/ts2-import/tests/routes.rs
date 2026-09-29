@@ -100,3 +100,21 @@ fn overlap_stops_before_unset_facing_points() {
     assert!(c.report.count(report::OVERLAP_CUT) > 0);
     assert_eq!(c.report.count(report::ROUTE_DROPPED), 0, "{}", c.report.render());
 }
+
+#[test]
+fn automatic_route_before_a_controlled_signal_has_no_overlap() {
+    let c = ts2_import::convert(&data("drain")).unwrap();
+    let routes = &c.world.routes;
+    // 74-75 is automatic and 75 begins hand-set routes.
+    let r = routes.iter().find(|r| r.entrance == "74" && matches!(&r.exit, ExitFile::Signal(s) if s == "75")).unwrap();
+    assert!(r.automatic);
+    assert!(r.overlap.is_empty() && r.overlap_points.is_empty());
+    assert!(c.report.render().contains("automatic route before a controlled signal: no overlap"));
+    // No automatic route is left holding an overlap over a controlled signal's routes.
+    let controlled: Vec<&str> = routes.iter().filter(|r| !r.automatic).map(|r| r.entrance.as_str()).collect();
+    for r in routes.iter().filter(|r| r.automatic) {
+        if let ExitFile::Signal(s) = &r.exit {
+            assert!(!controlled.contains(&s.as_str()) || r.overlap.is_empty(), "{}", r.entrance);
+        }
+    }
+}

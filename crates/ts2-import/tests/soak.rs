@@ -27,7 +27,6 @@ fn mini_runs_its_timetable() {
 }
 
 #[test]
-#[ignore = "blocked: an automatic route's overlap is retaken forever and blocks conflicting routes; see task-8 report"]
 fn drain_runs_its_whole_timetable() {
     let r = run("drain", 2.0);
     assert_safe("drain", &r);

@@ -246,3 +246,25 @@ fn releasing_the_rear_route_leaves_the_continuing_path_alone() {
     assert_eq!(rig.il.routes[r.idx()].state, RouteState::Idle);
     assert_eq!(rig.il.owner[tc.idx()], Some(Owner::Path(x)));
 }
+
+#[test]
+fn entrance_is_free_once_the_first_section_is_cleared() {
+    let mut rig = locked("S1-E1", "terminus");
+    let w = rig.w.clone();
+    let (old, new) = (route(&w, "S1-E1"), route(&w, "S1-E2"));
+    rig.run(0.1, &occ(&w, &["TP"], true));
+    // Train still in TP: the entrance is busy.
+    assert_eq!(rig.set("S1-E2", &occ(&w, &["TP"], true)), Err(Rejection::ConflictingRoute));
+    rig.run(0.1, &occ(&w, &["TP", "TP1"], true));
+    assert_eq!(rig.set("S1-E2", &occ(&w, &["TP", "TP1"], true)), Err(Rejection::ConflictingRoute));
+    // Cleared TP, standing in TP1: S1-E1 is still Locked on TP1 but no longer active.
+    let standing = occ(&w, &["TP1"], false);
+    rig.run(0.1, &standing);
+    assert_eq!(rig.il.routes[old.idx()].state, RouteState::Locked);
+    assert_eq!(rig.il.owner[sec(&w, "TP1").idx()], Some(Owner::Path(old)));
+    assert_eq!(rig.il.active_route_from(&w, sig(&w, "S1")), None);
+    rig.set("S1-E2", &standing).unwrap();
+    rig.run(6.0, &standing);
+    assert_eq!(rig.il.active_route_from(&w, sig(&w, "S1")), Some(new));
+    assert_ne!(rig.aspect("S1", &standing), Red);
+}

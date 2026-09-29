@@ -227,6 +227,7 @@ pub fn build(ts2: &Ts2, g: &Graph, world: &World, report: &mut Report) -> Vec<Ro
         m.overlap_points = op;
     }
     demote_clashing_automatics(&mut merged, net, report);
+    drop_overlap_before_controlled_signals(&mut merged, net, report);
 
     let sec = |s: &SectionId| net.sections[s.idx()].name.clone();
     let req = |v: &[(NodeId, PointsPos)]| -> Vec<PointsReqFile> {
@@ -320,6 +321,23 @@ fn overlap(
         }
     }
     best
+}
+
+/// An automatic route runs into a controlled signal (the entrance of a
+/// non-automatic route): its overlap would hold that signal's throat for ever,
+/// so it gets none.
+fn drop_overlap_before_controlled_signals(v: &mut [Stretch], net: &Network, report: &mut Report) {
+    let controlled: BTreeSet<SignalId> = v.iter().filter(|m| !m.automatic).map(|m| m.entrance).collect();
+    for m in v.iter_mut() {
+        if m.automatic && matches!(m.exit, Exit::Signal(s) if controlled.contains(&s)) && !m.overlap.is_empty() {
+            m.overlap.clear();
+            m.overlap_points.clear();
+            report.warn(
+                report::OVERLAP_CUT,
+                format!("route from {}: automatic route before a controlled signal: no overlap", net.signals[m.entrance.idx()].name),
+            );
+        }
+    }
 }
 
 /// Two automatic routes may only share sections when one continues the other

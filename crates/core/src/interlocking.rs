@@ -84,9 +84,14 @@ impl Interlocking {
         }
     }
 
-    /// The route currently set (or setting) from `entrance`, if any.
+    /// The route currently set (or setting) from `entrance`, if any. Once a
+    /// train has cleared a route's first section the entrance is free again:
+    /// that route can never clear the signal, so it is no longer active.
     pub fn active_route_from(&self, w: &World, entrance: SignalId) -> Option<RouteId> {
-        w.routes_from[entrance.idx()].iter().copied().find(|r| self.routes[r.idx()].state != RouteState::Idle)
+        w.routes_from[entrance.idx()].iter().copied().find(|r| {
+            let st = &self.routes[r.idx()];
+            st.state != RouteState::Idle && st.progress.first() != Some(&Progress::Released)
+        })
     }
 
     pub fn set_route(
