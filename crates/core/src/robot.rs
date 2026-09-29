@@ -28,7 +28,9 @@ enum Goal<'a> {
 
 fn goal<'a>(w: &'a World, t: &Train) -> Option<Goal<'a>> {
     let svc = &w.services[t.service.idx()];
-    match svc.calls.get(t.next_call) {
+    // While dwelling, `next_call` is still the call the train stands at.
+    let next = t.next_call + usize::from(t.dwell.is_some());
+    match svc.calls.get(next) {
         Some(c) => Some(Goal::Platform { place: &c.place, platform: c.platform.as_deref() }),
         None if svc.end == EndAction::Exit => Some(Goal::Exit),
         None => None,
