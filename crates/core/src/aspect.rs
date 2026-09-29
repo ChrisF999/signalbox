@@ -22,11 +22,17 @@ pub fn cleared_aspect(n_aspects: u8, exit: Aspect) -> Aspect {
     }
 }
 
-/// What a driver expects the next signal to show after passing one showing `passed`.
-pub fn expected_after(passed: Aspect) -> Aspect {
-    match passed {
-        Aspect::Red | Aspect::Yellow => Aspect::Red,
-        Aspect::DoubleYellow => Aspect::Yellow,
-        Aspect::Green => Aspect::Green,
+/// The most restrictive aspect a driver can meet at the next signal after
+/// passing one showing `passed`, where the passed signal has `n_aspects`
+/// aspects. A green only promises the next signal is not red on 3 aspects,
+/// or at least double yellow on 4; a 2-aspect green (which also shows before
+/// a red, spec §4.3) promises nothing.
+pub fn expected_after(passed: Aspect, n_aspects: u8) -> Aspect {
+    match (passed, n_aspects) {
+        (Aspect::Red | Aspect::Yellow, _) => Aspect::Red,
+        (Aspect::DoubleYellow, _) => Aspect::Yellow,
+        (Aspect::Green, 2) => Aspect::Red,
+        (Aspect::Green, 4) => Aspect::DoubleYellow,
+        (Aspect::Green, _) => Aspect::Yellow,
     }
 }

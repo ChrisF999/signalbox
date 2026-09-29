@@ -51,6 +51,10 @@ pub fn target_speed(
     let look = t.speed * t.speed / (2.0 * b) + EXTRA_LOOKAHEAD_M;
     let (steps, end) = net.walk_ahead(seg, dir, t.head_m, look, pts);
     let mut prev = t.last_passed_aspect.unwrap_or(Aspect::Yellow);
+    // Aspect count of the signal `prev` was read at. The train does not keep
+    // the one it last passed, so assume 3: after a green that plans for a
+    // yellow next, never less cautious than the signal promised.
+    let mut prev_n = 3;
     'walk: for (i, st) in steps.iter().enumerate() {
         let sg = &net.segments[st.seg.idx()];
         if i > 0 {
@@ -87,12 +91,13 @@ pub fn target_speed(
                     break 'walk;
                 }
                 Mark::Signal(s) => {
-                    let seen = if d <= net.signals[s.idx()].sighting_m { aspects[s.idx()] } else { expected_after(prev) };
+                    let seen = if d <= net.signals[s.idx()].sighting_m { aspects[s.idx()] } else { expected_after(prev, prev_n) };
                     if seen == Aspect::Red {
                         target = target.min(stop_curve(d, b));
                         break 'walk;
                     }
                     prev = seen;
+                    prev_n = net.signals[s.idx()].aspects;
                 }
             }
         }

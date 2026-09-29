@@ -25,10 +25,15 @@ fn cleared_aspect_table() {
 
 #[test]
 fn expected_aspect_after_passing_one() {
-    assert_eq!(expected_after(Red), Red);
-    assert_eq!(expected_after(Yellow), Red);
-    assert_eq!(expected_after(DoubleYellow), Yellow);
-    assert_eq!(expected_after(Green), Green);
+    for n in [2, 3, 4] {
+        assert_eq!(expected_after(Red, n), Red);
+        assert_eq!(expected_after(Yellow, n), Red);
+        assert_eq!(expected_after(DoubleYellow, n), Yellow);
+    }
+    // A green promises only the least the signal's aspect sequence allows.
+    assert_eq!(expected_after(Green, 4), DoubleYellow);
+    assert_eq!(expected_after(Green, 3), Yellow);
+    assert_eq!(expected_after(Green, 2), Red);
 }
 
 #[test]
