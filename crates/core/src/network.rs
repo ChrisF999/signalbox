@@ -424,10 +424,15 @@ impl Network {
         if self.segments[s.idx()].section == sig_section {
             return Err(format!("signal `{}` does not stand on a section boundary", sig.name));
         }
+        let mut crossed: Vec<NodeId> = Vec::new();
+        // Points standing right at the signal are crossed by the first step.
+        let first_end = self.segments[seg.idx()].end_node(dir);
+        if matches!(self.nodes[first_end.idx()].kind, NodeKind::Points { .. }) {
+            crossed.push(first_end);
+        }
         (seg, dir) = (s, d);
         let limit = 2 * self.segments.len() + 2;
         let mut path: Vec<SectionId> = Vec::new();
-        let mut crossed: Vec<NodeId> = Vec::new();
         let mut steps = 0;
         let exit = loop {
             steps += 1;
@@ -476,7 +481,15 @@ impl Network {
                     return Err("the overlap loops back on itself".into());
                 }
                 let end = self.segments[seg.idx()].end_node(dir);
-                let Some((ns, nd)) = self.step_checked(seg, dir, &view)? else { break };
+                // Unlisted points after the last overlap section just end the walk;
+                // inside a section still being walked they are an error.
+                let Some((ns, nd)) = (match self.step_checked(seg, dir, &view) {
+                    Ok(x) => x,
+                    Err(_) if overlap.len() >= overlap_len => None,
+                    Err(e) => return Err(e),
+                }) else {
+                    break;
+                };
                 let sec = self.segments[ns.idx()].section;
                 if sec != cur && overlap.len() >= overlap_len {
                     break;

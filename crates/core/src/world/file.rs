@@ -200,10 +200,23 @@ pub enum EndFile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntryFile {
     pub service: String,
-    pub boundary: String,
+    /// Enter at this boundary node...
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary: Option<String>,
+    /// ...or appear with the head at this position (exactly one of the two).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<PositionFile>,
     pub time: String,
     #[serde(default)]
     pub speed_kmh: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PositionFile {
+    pub segment: String,
+    /// Metres from the segment's `from` node.
+    pub offset_m: f64,
+    pub direction: Dir,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

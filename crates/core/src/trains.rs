@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::aspect::Aspect;
 use crate::ids::*;
-use crate::network::{Dir, Network, PointsView};
+use crate::network::{Dir, Network, PointsView, Position};
 
 /// A train standing at a stopping call.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -56,6 +56,31 @@ pub struct Train {
 }
 
 impl Train {
+    /// A train with its head at `at`, the rest laid back along the track
+    /// through the current points (any part past the end of the track is
+    /// treated as still entering).
+    #[allow(clippy::too_many_arguments)]
+    pub fn placed(
+        id: TrainId,
+        service: ServiceId,
+        headcode: &str,
+        train_type: TrainTypeId,
+        length_m: f64,
+        at: Position,
+        speed: f64,
+        net: &Network,
+        pts: &impl PointsView,
+    ) -> Train {
+        let seg = &net.segments[at.segment.idx()];
+        let head_m = seg.along(at.offset_m, at.dir);
+        let (steps, _) = net.walk_ahead(at.segment, at.dir.rev(), seg.length_m - head_m, length_m, pts);
+        let mut t = Train::new(id, service, headcode, train_type, length_m, at.segment, at.dir, speed);
+        t.path = steps.iter().rev().map(|s| (s.seg, s.dir.rev())).collect();
+        t.head_m = head_m;
+        t.trim(net);
+        t
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: TrainId,

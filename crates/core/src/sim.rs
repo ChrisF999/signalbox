@@ -14,7 +14,7 @@ use crate::network::{Dir, Network, NodeKind};
 use crate::occupancy::Occupancy;
 use crate::points::PointsTable;
 use crate::scoring::Scores;
-use crate::timetable::EndAction;
+use crate::timetable::{EndAction, EntryStart};
 use crate::trains::{Dwell, Train};
 use crate::world::World;
 
@@ -326,7 +326,11 @@ impl Sim {
             let delay = f64::from(self.rng.random_range(lo..=hi));
             let e = &self.world.entries[i];
             self.st.pending.push(PendingEntry { entry: i, due_s: e.time_s + delay });
-            if let Some(b) = self.world.net.boundary_berth(e.boundary) {
+            let fringe = match e.start {
+                EntryStart::Boundary(n) => self.world.net.boundary_berth(n),
+                EntryStart::At(_) => None,
+            };
+            if let Some(b) = fringe {
                 ev.extend(self.st.describer.interpose(b, &self.world.services[e.service.idx()].headcode));
             }
             self.st.next_entry += 1;
@@ -335,13 +339,17 @@ impl Sim {
         let mut k = 0;
         while k < self.st.pending.len() {
             let p = self.st.pending[k].clone();
-            let boundary = self.world.entries[p.entry].boundary;
-            let seg = self.world.net.nodes[boundary.idx()].segments[0];
-            let sec = self.world.net.segments[seg.idx()].section;
-            let free = !self.occ.occupied(sec) && self.st.il.owner[sec.idx()].is_none() && !used.contains(&sec);
+            let sections: Vec<SectionId> = self
+                .entry_train(p.entry, TrainId(u32::MAX))
+                .segments()
+                .map(|s| self.world.net.segments[s.idx()].section)
+                .collect();
+            let free = sections
+                .iter()
+                .all(|&s| !self.occ.occupied(s) && self.st.il.owner[s.idx()].is_none() && !used.contains(&s));
             if now >= p.due_s && free {
                 self.st.pending.remove(k);
-                used.push(sec);
+                used.extend(sections);
                 ev.extend(self.spawn(p.entry));
             } else {
                 k += 1;
@@ -350,23 +358,57 @@ impl Sim {
         ev
     }
 
-    fn spawn(&mut self, entry: usize) -> Vec<Event> {
+    /// The train an entry would put on the network (not yet added).
+    fn entry_train(&self, entry: usize, id: TrainId) -> Train {
         let w = &self.world;
         let e = &w.entries[entry];
         let svc = &w.services[e.service.idx()];
         let tt = &w.train_types[svc.train_type.idx()];
-        let seg = w.net.nodes[e.boundary.idx()].segments[0];
-        let dir = if w.net.segments[seg.idx()].a == e.boundary { Dir::Up } else { Dir::Down };
+        let speed = e.speed.min(tt.max_speed);
+        match e.start {
+            EntryStart::Boundary(n) => {
+                let seg = w.net.nodes[n.idx()].segments[0];
+                let dir = if w.net.segments[seg.idx()].a == n { Dir::Up } else { Dir::Down };
+                Train::new(id, e.service, &svc.headcode, svc.train_type, tt.length_m, seg, dir, speed)
+            }
+            EntryStart::At(at) => Train::placed(
+                id,
+                e.service,
+                &svc.headcode,
+                svc.train_type,
+                tt.length_m,
+                at,
+                speed,
+                &w.net,
+                &self.st.points,
+            ),
+        }
+    }
+
+    fn spawn(&mut self, entry: usize) -> Vec<Event> {
         let id = TrainId(self.st.next_train_id);
         self.st.next_train_id += 1;
-        let t = Train::new(id, e.service, &svc.headcode, svc.train_type, tt.length_m, seg, dir, e.speed.min(tt.max_speed));
-        let mut ev = vec![Event::TrainEntered { train: id, headcode: svc.headcode.clone() }];
-        if let Some(b) = w.net.boundary_berth(e.boundary) {
-            let next = w
-                .net
-                .first_signal_ahead(seg, dir, 0.0, SIGNAL_SEARCH_M, &self.st.points)
-                .and_then(|(s, _)| w.net.signals[s.idx()].berth);
-            ev.extend(self.st.describer.step(b, next));
+        let t = self.entry_train(entry, id);
+        let w = &self.world;
+        let e = &w.entries[entry];
+        let headcode = w.services[e.service.idx()].headcode.clone();
+        let mut ev = vec![Event::TrainEntered { train: id, headcode: headcode.clone() }];
+        let (hs, hd) = t.head();
+        let next = w
+            .net
+            .first_signal_ahead(hs, hd, t.head_m, SIGNAL_SEARCH_M, &self.st.points)
+            .and_then(|(s, _)| w.net.signals[s.idx()].berth);
+        match e.start {
+            EntryStart::Boundary(n) => {
+                if let Some(b) = w.net.boundary_berth(n) {
+                    ev.extend(self.st.describer.step(b, next));
+                }
+            }
+            EntryStart::At(_) => {
+                if let Some(b) = next {
+                    ev.extend(self.st.describer.interpose(b, &headcode));
+                }
+            }
         }
         self.st.trains.push(t);
         ev

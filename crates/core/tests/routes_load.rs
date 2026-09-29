@@ -38,7 +38,7 @@ fn services_and_entries_resolve() {
     assert!(a01.calls[0].stop);
     assert_eq!(w.entries.len(), 2);
     assert!(w.entries[0].time_s < w.entries[1].time_s);
-    assert_eq!(w.entries[0].boundary, node(&w, "W"));
+    assert_eq!(w.entries[0].start, signalbox_core::timetable::EntryStart::Boundary(node(&w, "W")));
     assert!((w.train_types[0].max_speed - 120.0 / 3.6).abs() < 1e-9);
 }
 

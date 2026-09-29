@@ -1,6 +1,7 @@
 //! Train types, services, entries and simulation options.
 
 use crate::ids::*;
+use crate::network::Position;
 
 #[derive(Clone, Debug)]
 pub struct TrainType {
@@ -43,10 +44,18 @@ pub struct Service {
     pub end: EndAction,
 }
 
+/// Where an entering train appears.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum EntryStart {
+    Boundary(NodeId),
+    /// Head at this position, the rest of the train laid behind it.
+    At(Position),
+}
+
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub service: ServiceId,
-    pub boundary: NodeId,
+    pub start: EntryStart,
     pub time_s: f64,
     /// m/s
     pub speed: f64,

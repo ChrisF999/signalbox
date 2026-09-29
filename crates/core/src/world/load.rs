@@ -436,14 +436,28 @@ fn build_timetable(f: &WorldFile, net: &Network) -> Result<Timetable, LoadError>
     let mut entries = Vec::new();
     for e in &f.entries {
         let service = ServiceId(get(&svc_index, "service", &e.service, "entry")?);
-        let boundary = net.node(&e.boundary).ok_or_else(|| unknown("node", &e.boundary, &e.service))?;
-        if net.nodes[boundary.idx()].kind != NodeKind::Boundary {
-            return Err(other(format!("entry {}: `{}` is not a boundary", e.service, e.boundary)));
-        }
+        let start = match (&e.boundary, &e.at) {
+            (Some(b), None) => {
+                let n = net.node(b).ok_or_else(|| unknown("node", b, &e.service))?;
+                if net.nodes[n.idx()].kind != NodeKind::Boundary {
+                    return Err(other(format!("entry {}: `{}` is not a boundary", e.service, b)));
+                }
+                EntryStart::Boundary(n)
+            }
+            (None, Some(p)) => {
+                let segment = net.segment(&p.segment).ok_or_else(|| unknown("segment", &p.segment, &e.service))?;
+                let len = net.segments[segment.idx()].length_m;
+                if !(p.offset_m.is_finite() && 0.0 <= p.offset_m && p.offset_m <= len) {
+                    return Err(other(format!("entry {}: offset_m must lie on segment `{}`", e.service, p.segment)));
+                }
+                EntryStart::At(Position { segment, offset_m: p.offset_m, dir: p.direction })
+            }
+            _ => return Err(other(format!("entry {}: give exactly one of `boundary` or `at`", e.service))),
+        };
         if !(e.speed_kmh.is_finite() && e.speed_kmh >= 0.0) {
             return Err(other(format!("entry {}: speed_kmh must be finite and not negative", e.service)));
         }
-        entries.push(Entry { service, boundary, time_s: time(&e.time, &e.service)?, speed: e.speed_kmh / 3.6 });
+        entries.push(Entry { service, start, time_s: time(&e.time, &e.service)?, speed: e.speed_kmh / 3.6 });
     }
     entries.sort_by(|a, b| a.time_s.total_cmp(&b.time_s));
     let o = &f.options;
