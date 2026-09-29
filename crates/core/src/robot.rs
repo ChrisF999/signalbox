@@ -18,6 +18,8 @@ use crate::world::World;
 pub const STUCK_S: f64 = 1800.0;
 const SIGNAL_SEARCH_M: f64 = 3_000.0;
 const MAX_ROUTE_DEPTH: usize = 30;
+/// How long before a dwelling train's departure time the robot sets its road.
+const DEPARTURE_LEAD_S: f64 = 30.0;
 /// The robot looks at the railway once per this many ticks.
 const ROBOT_EVERY_TICKS: u64 = 10;
 
@@ -207,6 +209,10 @@ pub fn commands(sim: &Sim) -> Vec<Command> {
     let shared = shared_sections(w);
     for t in sim.trains() {
         if t.stabled {
+            continue;
+        }
+        // A train waiting for its booked departure does not need the road yet.
+        if t.dwell.is_some_and(|d| d.depart_at_s - sim.now_s() > DEPARTURE_LEAD_S) {
             continue;
         }
         let (seg, dir) = t.head();

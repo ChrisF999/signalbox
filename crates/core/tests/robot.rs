@@ -188,3 +188,25 @@ fn robot_routes_a_train_over_a_junction_only_with_the_road_beyond() {
         vec![set(&w, "SA", Exit::Signal(sig(&w, "SB"))), set(&w, "SB", Exit::Node(node(&w, "EP")))]
     );
 }
+
+/// A train standing in a platform until its booked departure does not need
+/// its road yet: set early, the road would hold the station throat against
+/// arrivals for the whole wait.
+#[test]
+fn robot_sets_a_departure_road_only_shortly_before_departure() {
+    let w = load_with("terminus", |v| {
+        v["entries"][0] = serde_json::json!({"service": "1A01", "at": {"segment": "p1", "offset_m": 2, "direction": "down"}, "time": "06:00"});
+        v["services"][0]["calls"] = serde_json::json!([{"place": "TRM", "platform": "1", "dep": "06:08"}]);
+        v["services"][0]["end"] = serde_json::json!({"kind": "exit"});
+    })
+    .unwrap();
+    let mut sim = Sim::new(w, 1);
+    sim.run_for(1.0);
+    assert!(sim.trains()[0].dwell.is_some());
+    assert_eq!(commands(&sim), vec![]);
+    sim.run_for(7.0 * 60.0 + 28.0);
+    assert_eq!(commands(&sim), vec![]);
+    sim.run_for(2.0);
+    let w = sim.world().clone();
+    assert_eq!(commands(&sim), vec![set(&w, "S3", Exit::Node(node(&w, "W")))]);
+}
