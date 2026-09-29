@@ -205,6 +205,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ts2-import"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "signalbox-core",
+ "thiserror",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"

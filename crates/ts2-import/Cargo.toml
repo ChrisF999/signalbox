@@ -1,0 +1,19 @@
+[package]
+name = "ts2-import"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "ts2_import"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ts2-import"
+path = "src/main.rs"
+
+[dependencies]
+signalbox-core = { path = "../core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

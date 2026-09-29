@@ -1,0 +1,30 @@
+{
+  "__type__": "Simulation",
+  "options": {"title": "Mini", "currentTime": "06:00:00", "defaultMaxSpeed": 20.0, "defaultSignalVisibility": 100, "defaultDelayAtEntry": 0, "defaultMinimumStopTime": [[20, 40, 90], [40, 120, 10]], "latePenalty": 1, "wrongPlatformPenalty": 5, "timeFactor": 5},
+  "trackItems": {
+    "1": {"__type__": "EndItem", "tiId": "1", "name": null, "previousTiId": "2", "nextTiId": null, "x": 0, "y": 0, "maxSpeed": 0, "conflictTiId": null},
+    "2": {"__type__": "LineItem", "tiId": "2", "name": null, "previousTiId": "1", "nextTiId": "3", "realLength": 500.0, "maxSpeed": 0.0, "placeCode": null, "trackCode": "", "conflictTiId": null, "x": 0, "y": 0, "xf": 100, "yf": 0},
+    "3": {"__type__": "SignalItem", "tiId": "3", "name": "A", "signalType": "UK_3_ASPECTS", "reverse": false, "previousTiId": "2", "nextTiId": "4", "x": 100, "y": 0, "xn": 90, "yn": 5, "maxSpeed": 0, "conflictTiId": null, "customProperties": {}},
+    "4": {"__type__": "LineItem", "tiId": "4", "name": null, "previousTiId": "3", "nextTiId": "5", "realLength": 100.0, "maxSpeed": 0.0, "placeCode": null, "trackCode": "", "conflictTiId": null, "x": 100, "y": 0, "xf": 150, "yf": 0},
+    "5": {"__type__": "PointsItem", "tiId": "5", "name": null, "previousTiId": "4", "nextTiId": "6", "reverseTiId": "8", "x": 155, "y": 0, "xf": -5, "yf": 0, "xn": 5, "yn": 0, "xr": 5, "yr": 5, "maxSpeed": 0, "conflictTiId": null},
+    "6": {"__type__": "LineItem", "tiId": "6", "name": null, "previousTiId": "5", "nextTiId": "7", "realLength": 200.0, "maxSpeed": 0.0, "placeCode": "STA", "trackCode": "1", "conflictTiId": null, "x": 160, "y": 0, "xf": 260, "yf": 0},
+    "7": {"__type__": "SignalItem", "tiId": "7", "name": "BUF", "signalType": "BUFFER", "reverse": false, "previousTiId": "6", "nextTiId": "9", "x": 260, "y": 0, "xn": 250, "yn": 5, "maxSpeed": 0, "conflictTiId": null, "customProperties": {}},
+    "8": {"__type__": "LineItem", "tiId": "8", "name": null, "previousTiId": "5", "nextTiId": "10", "realLength": 800.0, "maxSpeed": 15.0, "placeCode": null, "trackCode": "", "conflictTiId": null, "x": 160, "y": 5, "xf": 300, "yf": 50},
+    "9": {"__type__": "EndItem", "tiId": "9", "name": null, "previousTiId": "7", "nextTiId": null, "x": 265, "y": 0, "maxSpeed": 0, "conflictTiId": null},
+    "10": {"__type__": "EndItem", "tiId": "10", "name": null, "previousTiId": "8", "nextTiId": null, "x": 300, "y": 50, "maxSpeed": 0, "conflictTiId": null},
+    "11": {"__type__": "Place", "tiId": "11", "name": "Station", "placeCode": "STA", "previousTiId": null, "nextTiId": null, "x": 200, "y": -20, "maxSpeed": 10.0, "conflictTiId": null},
+    "12": {"__type__": "PlatformItem", "tiId": "12", "name": null, "placeCode": "STA", "trackCode": "1", "previousTiId": null, "nextTiId": null, "x": 160, "y": 10, "xf": 260, "yf": 20, "maxSpeed": 0, "conflictTiId": null}
+  },
+  "routes": {
+    "1": {"__type__": "Route", "id": "1", "beginSignal": "3", "endSignal": "7", "directions": {"5": 0}, "initialState": 0}
+  },
+  "trainTypes": {
+    "T": {"__type__": "TrainType", "code": "T", "description": "test", "length": 50.0, "maxSpeed": 20.0, "stdAccel": 0.5, "stdBraking": 0.5, "emergBraking": 1.0, "elements": []}
+  },
+  "services": {
+    "S1": {"__type__": "Service", "serviceCode": "S1", "description": "in", "plannedTrainType": "T", "lines": [{"__type__": "ServiceLine", "placeCode": "STA", "trackCode": "1", "mustStop": true, "scheduledArrivalTime": "06:05:00", "scheduledDepartureTime": ""}], "postActions": [{"actionCode": "REVERSE", "actionParam": null}]}
+  },
+  "trains": [
+    {"__type__": "Train", "trainId": "0", "serviceCode": "S1", "trainTypeCode": "T", "appearTime": "06:00:00", "initialDelay": 0, "initialSpeed": 0.0, "speed": 0.0, "status": 0, "stoppedTime": 0, "nextPlaceIndex": null, "trainHead": {"__type__": "Position", "trackItem": "2", "previousTI": "1", "positionOnTI": 0.0}}
+  ]
+}
