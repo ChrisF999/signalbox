@@ -168,6 +168,38 @@ impl Sim {
         self.rebuild_occupancy();
     }
 
+    /// The full dynamic state, including the RNG position.
+    pub fn snapshot(&self) -> SimState {
+        let mut st = self.st.clone();
+        let pos = self.rng.get_word_pos();
+        st.rng_word_pos = ((pos >> 64) as u64, pos as u64);
+        st
+    }
+
+    /// Rebuild a simulation from a world and a snapshot taken on that world.
+    pub fn restore(world: World, st: SimState) -> Sim {
+        let mut rng = ChaCha8Rng::from_seed(st.rng_seed);
+        rng.set_word_pos((u128::from(st.rng_word_pos.0) << 64) | u128::from(st.rng_word_pos.1));
+        let occ = Occupancy::new(world.net.sections.len());
+        let mut sim = Sim { world, st, rng, occ };
+        sim.rebuild_occupancy();
+        sim
+    }
+
+    /// Re-run a session from its seed and command log for `ticks` ticks.
+    pub fn replay(world: World, seed: u64, log: &[(u64, Command)], ticks: u64) -> Sim {
+        let mut sim = Sim::new(world, seed);
+        let mut i = 0;
+        while sim.st.tick < ticks {
+            while i < log.len() && log[i].0 == sim.st.tick {
+                sim.submit(log[i].1.clone());
+                i += 1;
+            }
+            sim.step();
+        }
+        sim
+    }
+
     pub fn run_for(&mut self, secs: f64) -> Vec<Event> {
         let n = (secs / TICK_S).round() as u64;
         (0..n).flat_map(|_| self.step()).collect()
