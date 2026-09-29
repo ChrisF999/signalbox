@@ -339,7 +339,8 @@ fn build_routes(f: &WorldFile, net: &Network) -> Result<Vec<RouteDef>, LoadError
 
 /// Automatic routes are all set at start, so two of them must not want the
 /// same track. A route continuing from another's exit signal may take over
-/// that route's overlap, which is not a clash.
+/// that route's overlap, which is not a clash, provided the two agree on where
+/// the points they share must lie.
 fn check_automatic_clashes(net: &Network, routes: &[RouteDef]) -> Result<(), LoadError> {
     let autos: Vec<&RouteDef> = routes.iter().filter(|r| r.automatic).collect();
     for (i, x) in autos.iter().enumerate() {
@@ -356,6 +357,16 @@ fn check_automatic_clashes(net: &Network, routes: &[RouteDef]) -> Result<(), Loa
                     problem: format!(
                         "automatic routes `{}` and `{}` both use section `{}`",
                         x.name, y.name, net.sections[s.idx()].name
+                    ),
+                });
+            }
+            let clash = x.all_points().find(|&&(p, pos)| y.all_points().any(|&(q, qpos)| q == p && qpos != pos));
+            if let Some(&(p, _)) = clash {
+                return Err(LoadError::BadRoute {
+                    route: x.name.clone(),
+                    problem: format!(
+                        "automatic routes `{}` and `{}` disagree on points `{}`",
+                        x.name, y.name, net.nodes[p.idx()].name
                     ),
                 });
             }

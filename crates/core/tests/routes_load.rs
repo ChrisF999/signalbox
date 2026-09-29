@@ -183,3 +183,37 @@ fn continuing_automatic_routes_may_share_an_overlap() {
     })
     .unwrap();
 }
+
+/// Junction with a new signal `X` behind `A`; automatic route `X-A` overlaps over
+/// the points normal, and automatic `A-N` (which continues it) needs them reverse.
+fn continuing_pair_disagreeing() -> Result<signalbox_core::world::World, LoadError> {
+    load_with("junction", |v| {
+        v["sections"].as_array_mut().unwrap().push(json!({"name": "TW0", "area": "Jn"}));
+        v["nodes"].as_array_mut().unwrap().push(json!({"name": "J0", "kind": "joint"}));
+        v["segments"][0] = json!({"name": "w0", "from": "W", "to": "J0", "length_m": 1000, "line_speed_kmh": 100, "section": "TW0"});
+        v["segments"].as_array_mut().unwrap().push(
+            json!({"name": "w", "from": "J0", "to": "J1", "length_m": 500, "line_speed_kmh": 100, "section": "TW"}),
+        );
+        v["signals"].as_array_mut().unwrap().push(
+            json!({"name": "X", "area": "Jn", "segment": "w0", "offset_m": 1000, "direction": "up", "aspects": 3}),
+        );
+        v["signals"][0]["offset_m"] = json!(500);
+        let overlap = json!({
+            "entrance": "X", "exit": {"kind": "signal", "name": "A"}, "path": ["TW"],
+            "overlap": ["TP", "TE"], "overlap_points": [{"points": "P", "position": "normal"}],
+            "automatic": true
+        });
+        // The westbound routes would now run on over TW0; they play no part here.
+        let a_n = json!({"entrance": "A", "exit": {"kind": "node", "name": "N"}, "path": ["TP", "TN"],
+                         "points": [{"points": "P", "position": "reverse"}], "automatic": true});
+        v["routes"] = json!([a_n, overlap]);
+    })
+}
+
+#[test]
+fn rejects_continuing_automatic_routes_that_disagree_on_points() {
+    // A-N runs over P reverse, X-A's overlap wants it normal: setting both at start would fail.
+    let e = continuing_pair_disagreeing().unwrap_err();
+    let m = bad_route(e);
+    assert!(m.contains("disagree on points"), "{m}");
+}

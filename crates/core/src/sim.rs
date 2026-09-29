@@ -101,7 +101,8 @@ impl Sim {
         for i in 0..sim.world.routes.len() {
             if sim.world.routes[i].automatic {
                 // Automatic signals are set from the start. World load rejects automatic
-                // routes that share track, so a failure here cannot happen; ignore it.
+                // routes that share track or disagree on points, so a failure here
+                // cannot happen; ignore it.
                 let _ = sim.st.il.set_route(&sim.world, &mut sim.st.points, &sim.occ, RouteId::from_idx(i));
             }
         }
