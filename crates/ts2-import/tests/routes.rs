@@ -206,3 +206,32 @@ fn a_route_that_runs_past_its_end_signal_is_dropped_whole() {
     // The ring's stretches are gone, so nothing from it can be automatic.
     assert!(c.world.routes.iter().all(|r| !r.automatic), "{}", c.report.render());
 }
+
+#[test]
+fn automatic_takeover_with_disagreeing_points_is_demoted() {
+    // Mini with a signal Y ahead of the points. Automatic A-Y has its overlap
+    // over the reverse leg (its TS2 directions set the points beyond Y), while
+    // the automatic route Y-BUF continues it over the normal leg: the two
+    // disagree on the points, which the core loader rejects for automatic
+    // routes, so the converter must set one of them by hand.
+    let mut v: serde_json::Value = serde_json::from_str(&data("mini")).unwrap();
+    let items = v["trackItems"].as_object_mut().unwrap();
+    let mut y = items["3"].clone();
+    y["tiId"] = "13".into();
+    y["name"] = "Y".into();
+    y["previousTiId"] = "4".into();
+    y["nextTiId"] = "5".into();
+    items.insert("13".into(), y);
+    items["4"]["nextTiId"] = "13".into();
+    items["5"]["previousTiId"] = "13".into();
+    v["routes"]["1"] = serde_json::json!({"__type__": "Route", "id": "1", "beginSignal": "13", "endSignal": "7",
+        "directions": {"5": 0}, "initialState": 2});
+    v["routes"]["2"] = serde_json::json!({"__type__": "Route", "id": "2", "beginSignal": "3", "endSignal": "13",
+        "directions": {"5": 1}, "initialState": 2});
+    let c = ts2_import::convert(&v.to_string()).expect("a clash must be demoted, not fail the conversion");
+    World::from_file(c.world.clone()).unwrap();
+    assert_eq!(c.world.routes.len(), 2, "{:?}", c.world.routes);
+    assert_eq!(c.world.routes.iter().filter(|r| !r.automatic).count(), 1, "{:?}", c.world.routes);
+    assert_eq!(c.report.count(report::ROUTE_DROPPED), 0, "{}", c.report.render());
+    assert_eq!(c.report.count(report::AUTOMATIC_DEMOTED), 1, "{}", c.report.render());
+}

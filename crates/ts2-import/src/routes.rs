@@ -359,6 +359,15 @@ fn drop_overlap_before_controlled_signals(v: &mut [Stretch], net: &Network, repo
     }
 }
 
+/// Two routes name the same points in different positions (the core loader
+/// rejects such a pair of automatic routes, whether or not they share track;
+/// a hand-set route is never in that check).
+fn disagree_on_points(a: &Stretch, b: &Stretch) -> bool {
+    let all = |s: &Stretch| -> Vec<(NodeId, PointsPos)> { s.points.iter().chain(&s.overlap_points).copied().collect() };
+    let (pa, pb) = (all(a), all(b));
+    pa.iter().any(|&(p, pos)| pb.iter().any(|&(q, qpos)| q == p && qpos != pos))
+}
+
 /// An automatic route is never cancelled and never lets go of its path, so it
 /// may only share sections with a route that continues it or that it
 /// continues, and only where the shared sections are the first one's overlap.
@@ -376,7 +385,7 @@ fn demote_clashing_automatics(v: &mut [Stretch], net: &Network, report: &mut Rep
             let continues = |a: &Stretch, b: &Stretch| {
                 a.exit == Exit::Signal(b.entrance) && shared.iter().all(|s| a.overlap.contains(s) && b.path.contains(s))
             };
-            !shared.is_empty() && !continues(&v[i], &v[j]) && !continues(&v[j], &v[i])
+            (!shared.is_empty() && !continues(&v[i], &v[j]) && !continues(&v[j], &v[i])) || (v[i].automatic && disagree_on_points(&v[i], &v[j]))
         });
         if let Some(i) = clash {
             v[j].automatic = false;
