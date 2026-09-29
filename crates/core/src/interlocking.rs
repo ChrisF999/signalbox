@@ -143,14 +143,138 @@ impl Interlocking {
         Ok(ev)
     }
 
-    /// Advance route states by `dt`. (Task 8 extends this with release.)
-    pub fn update(&mut self, w: &World, pts: &PointsTable, _occ: &Occupancy, _dt: f64) -> Vec<Event> {
+    pub fn cancel_route(
+        &mut self,
+        w: &World,
+        pts: &PointsTable,
+        occ: &Occupancy,
+        r: RouteId,
+    ) -> Result<Vec<Event>, Rejection> {
+        let def = &w.routes[r.idx()];
+        if def.automatic {
+            return Err(Rejection::RouteIsAutomatic);
+        }
+        let st = &self.routes[r.idx()];
+        if st.state == RouteState::Idle || st.cancel.is_some() {
+            return Err(Rejection::RouteNotSet);
+        }
+        let sig = &w.net.signals[def.entrance.idx()];
+        let approaching = w.net.sections_in_rear(sig.at, sig.sighting_m, pts).iter().any(|&s| occ.occupied(s))
+            || def.path.iter().any(|&s| occ.occupied(s));
+        let st = &mut self.routes[r.idx()];
+        st.auto_working = false;
+        st.cancel = Some(if approaching { w.options.approach_lock_s } else { 0.0 });
+        Ok(vec![Event::RouteCancelled { route: r, approach_locked: approaching }])
+    }
+
+    pub fn set_auto_working(&mut self, r: RouteId, on: bool) -> Result<Vec<Event>, Rejection> {
+        let st = &mut self.routes[r.idx()];
+        if st.state == RouteState::Idle || st.cancel.is_some() {
+            return Err(Rejection::RouteNotSet);
+        }
+        st.auto_working = on;
+        Ok(vec![Event::AutoWorking { route: r, on }])
+    }
+
+    /// Advance route states by `dt`: locking, sectional release, overlap
+    /// release, approach-locking timers, auto-working, invariant checks.
+    pub fn update(&mut self, w: &World, pts: &PointsTable, occ: &Occupancy, dt: f64) -> Vec<Event> {
         let mut ev = Vec::new();
         for i in 0..w.routes.len() {
-            let detected = w.routes[i].all_points().all(|&(p, pos)| pts.detected(p) == Some(pos));
+            if self.routes[i].state == RouteState::Idle {
+                continue;
+            }
+            let r = RouteId::from_idx(i);
+            let def = &w.routes[i];
+            let auto = def.automatic || self.routes[i].auto_working;
+
+            let detected = def.all_points().all(|&(p, pos)| pts.detected(p) == Some(pos));
             if self.routes[i].state == RouteState::Setting && detected {
                 self.routes[i].state = RouteState::Locked;
-                ev.push(Event::RouteLocked { route: RouteId::from_idx(i) });
+                ev.push(Event::RouteLocked { route: r });
+            }
+
+            let releasing = match self.routes[i].cancel.as_mut() {
+                Some(left) => {
+                    *left -= dt;
+                    *left <= 0.0
+                }
+                None => false,
+            };
+
+            // Sectional release: occupy then clear, in running order.
+            for k in 0..def.path.len() {
+                let s = def.path[k];
+                let occupied = occ.occupied(s);
+                let rear_touched = k == 0 || self.routes[i].progress[k - 1] != Progress::Untouched;
+                let was = self.routes[i].progress[k];
+                let now = match was {
+                    Progress::Untouched if occupied && (rear_touched || releasing) => Progress::Occupied,
+                    Progress::Untouched if releasing => Progress::Released,
+                    Progress::Occupied if !occupied => {
+                        if auto && !releasing {
+                            Progress::Untouched
+                        } else {
+                            Progress::Released
+                        }
+                    }
+                    p => p,
+                };
+                if now == Progress::Released && was != Progress::Released && self.owner[s.idx()] == Some(Owner::Path(r)) {
+                    self.owner[s.idx()] = None;
+                }
+                self.routes[i].progress[k] = now;
+            }
+
+            // Overlap release.
+            let owns_overlap = def.overlap.iter().any(|&s| self.owner[s.idx()] == Some(Owner::Overlap(r)));
+            if owns_overlap && !auto {
+                let last = def.path.len() - 1;
+                let standing =
+                    self.routes[i].progress[last] == Progress::Occupied && occ.stationary(def.path[last]);
+                self.routes[i].overlap_stood_s = if standing { self.routes[i].overlap_stood_s + dt } else { 0.0 };
+                let path_done = self.routes[i].progress.iter().all(|&p| p == Progress::Released);
+                if releasing || path_done || self.routes[i].overlap_stood_s >= w.options.overlap_release_s {
+                    for &s in &def.overlap {
+                        if self.owner[s.idx()] == Some(Owner::Overlap(r)) {
+                            self.owner[s.idx()] = None;
+                        }
+                    }
+                    ev.push(Event::OverlapReleased { route: r });
+                }
+            }
+            // An auto-working route takes its overlap back once it is free again.
+            if auto && !releasing && self.routes[i].state == RouteState::Locked {
+                for &s in &def.overlap {
+                    if self.owner[s.idx()].is_none() {
+                        self.owner[s.idx()] = Some(Owner::Overlap(r));
+                    }
+                }
+            }
+
+            // Invariant: points under a locked route stay where the route needs them.
+            if self.routes[i].state == RouteState::Locked {
+                for &(p, pos) in def.all_points() {
+                    let sec = w.net.points_section(p).expect("route points are validated at load");
+                    if self.owner[sec.idx()].map(Owner::route) == Some(r) && pts.detected(p) != Some(pos) {
+                        ev.push(Event::InvariantViolated {
+                            what: format!(
+                                "route {} is locked but points {} are not {:?}",
+                                def.name,
+                                w.net.nodes[p.idx()].name,
+                                pos
+                            ),
+                        });
+                    }
+                }
+            }
+
+            // Fully released?
+            let overlap_held = def.overlap.iter().any(|&s| self.owner[s.idx()] == Some(Owner::Overlap(r)));
+            let path_done = self.routes[i].progress.iter().all(|&p| p == Progress::Released);
+            if path_done && !overlap_held {
+                self.routes[i] = RouteStatus::idle(def.path.len());
+                ev.push(Event::RouteReleased { route: r });
             }
         }
         ev
