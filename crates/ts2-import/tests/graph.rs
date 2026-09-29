@@ -105,3 +105,12 @@ fn real_graphs_build_and_flat_crossings_merge() {
         assert_eq!(r.count(report::CROSSING), crossings, "{name}");
     }
 }
+
+#[test]
+fn signals_sit_on_section_boundaries() {
+    for name in ["drain", "liverpool-st"] {
+        let mut r = Report::default();
+        graph::build(&load(name), &BTreeSet::new(), &mut r).unwrap();
+        assert_eq!(r.count(report::SIGNAL_OFF_BOUNDARY), 0, "{name}");
+    }
+}

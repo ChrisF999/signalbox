@@ -280,12 +280,22 @@ pub fn build(ts2: &Ts2, entry_ends: &BTreeSet<String>, report: &mut Report) -> R
             }
         }
     }
+    let mut crossings: BTreeSet<(&str, &str)> = BTreeSet::new();
     for &id in &kept {
-        let Item::LineItem(l) = &items[id] else { continue };
-        let Some(c) = l.conflict_ti_id.as_deref() else { continue };
-        if id < c && kept.contains(c) {
-            uf.union(index[format!("L{id}").as_str()], index[format!("L{c}").as_str()]);
-            report.warn(report::CROSSING, format!("lines {id} and {c} cross on the flat and share one section"));
+        let (Item::LineItem(l) | Item::InvisibleLinkItem(l)) = &items[id] else { continue };
+        let Some(c) = l.conflict_ti_id.as_deref().filter(|c| kept.contains(c)) else { continue };
+        crossings.insert(if id < c { (id, c) } else { (c, id) });
+    }
+    for (lo, hi) in crossings {
+        match (index.get(format!("L{lo}").as_str()), index.get(format!("L{hi}").as_str())) {
+            (Some(&x), Some(&y)) => {
+                uf.union(x, y);
+                report.warn(report::CROSSING, format!("lines {lo} and {hi} cross on the flat and share one section"));
+            }
+            _ => report.warn(
+                report::CROSSING,
+                format!("items {lo} and {hi} are marked as crossing but the partner is not a line; ignored"),
+            ),
         }
     }
     let mut section_of_root: BTreeMap<usize, String> = BTreeMap::new();
@@ -368,6 +378,12 @@ pub fn build(ts2: &Ts2, entry_ends: &BTreeSet<String>, report: &mut Report) -> R
         });
         g.berths.push(BerthFile { name: format!("B{name}"), signal: Some(name.clone()), boundary: None });
         g.signal_ti.insert(name.clone(), id.to_string());
+        let side = |p: Port| b.port_seg.get(&(id.to_string(), p)).and_then(|n| index.get(n.as_str()));
+        if let (Some(&x), Some(&y)) = (side(Port::Prev), side(Port::Next)) {
+            if b.segments[x].section == b.segments[y].section {
+                report.warn(report::SIGNAL_OFF_BOUNDARY, format!("signal {name} has the same section on both sides"));
+            }
+        }
         g.signal_names.insert(id.to_string(), name);
     }
     for node in &g.boundaries {
