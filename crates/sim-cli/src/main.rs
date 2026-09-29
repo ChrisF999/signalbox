@@ -33,15 +33,26 @@ fn load(path: &str) -> Result<World, String> {
     World::from_json(&text).map_err(|e| format!("{path}: {e}"))
 }
 
-fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).map(String::as_str)
+/// The value after `--name`; an error if the flag is there without one.
+fn flag<'a>(args: &'a [String], name: &str) -> Result<Option<&'a str>, String> {
+    match args.iter().position(|a| a == name) {
+        None => Ok(None),
+        Some(i) => match args.get(i + 1) {
+            Some(v) if !v.starts_with("--") => Ok(Some(v.as_str())),
+            _ => Err(format!("{name} needs a value")),
+        },
+    }
 }
 
 fn run(args: &[String]) -> Result<ExitCode, String> {
     let path = args.first().ok_or(USAGE)?;
     let world = load(path)?;
-    let seed: u64 = flag(args, "--seed").map_or(Ok(1), str::parse).map_err(|e| format!("--seed: {e}"))?;
-    let hours: f64 = flag(args, "--hours").map_or(Ok(1.0), str::parse).map_err(|e| format!("--hours: {e}"))?;
+    let seed: u64 = flag(args, "--seed")?.map_or(Ok(1), str::parse).map_err(|e| format!("--seed: {e}"))?;
+    let hours: f64 = flag(args, "--hours")?.map_or(Ok(1.0), str::parse).map_err(|e| format!("--hours: {e}"))?;
+    if !hours.is_finite() || hours <= 0.0 {
+        return Err("--hours must be a positive, finite number".into());
+    }
+    let record = flag(args, "--record")?;
     let use_robot = args.iter().any(|a| a == "--robot");
     let mut sim = Sim::new(world, seed);
     let secs = hours * 3600.0;
@@ -57,7 +68,8 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
     };
     println!("{} after {} ({} ticks of {TICK_S} s)", sim.world().title, fmt_hms(sim.now_s()), sim.tick());
     println!("{}", serde_json::to_string_pretty(&report).expect("report serialises"));
-    if let Some(out) = flag(args, "--record") {
+    println!("state fnv1a {:016x}", state_hash(&sim));
+    if let Some(out) = record {
         let log = serde_json::json!({"seed": seed, "ticks": sim.tick(), "log": sim.log()});
         std::fs::write(out, serde_json::to_string_pretty(&log).expect("log serialises"))
             .map_err(|e| format!("{out}: {e}"))?;
@@ -77,9 +89,15 @@ fn replay(args: &[String]) -> Result<ExitCode, String> {
     let ticks = v["ticks"].as_u64().ok_or("log: missing ticks")?;
     let log: Vec<(u64, Command)> = serde_json::from_value(v["log"].clone()).map_err(|e| format!("log: {e}"))?;
     let sim = Sim::replay(world, seed, &log, ticks);
-    let state = serde_json::to_string(&sim.snapshot()).expect("state serialises");
-    println!("replayed {ticks} ticks; final state {} bytes, fnv1a {:016x}", state.len(), fnv1a(state.as_bytes()));
+    println!("replayed {ticks} ticks; state fnv1a {:016x}", state_hash(&sim));
     Ok(ExitCode::SUCCESS)
+}
+
+/// Hash of the full serialised state, printed by both `run` and `replay` so
+/// the two can be compared.
+fn state_hash(sim: &Sim) -> u64 {
+    let state = serde_json::to_string(&sim.snapshot()).expect("state serialises");
+    fnv1a(state.as_bytes())
 }
 
 /// Stable hash for comparing final states by eye.
