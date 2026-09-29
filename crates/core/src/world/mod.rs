@@ -29,10 +29,22 @@ pub enum LoadError {
     Other(String),
 }
 
+use crate::ids::*;
+use crate::routes::{Exit, RouteDef};
+use crate::timetable::{Entry, Options, Service, TrainType};
+
 #[derive(Debug, Clone)]
 pub struct World {
     pub title: String,
     pub net: Network,
+    pub routes: Vec<RouteDef>,
+    /// Routes indexed by entrance signal.
+    pub routes_from: Vec<Vec<RouteId>>,
+    pub train_types: Vec<TrainType>,
+    pub services: Vec<Service>,
+    /// Sorted by time.
+    pub entries: Vec<Entry>,
+    pub options: Options,
     pub layout: serde_json::Value,
 }
 
@@ -44,5 +56,17 @@ impl World {
 
     pub fn from_file(f: file::WorldFile) -> Result<World, LoadError> {
         load::build(f)
+    }
+
+    pub fn find_route(&self, entrance: SignalId, exit: Exit) -> Option<RouteId> {
+        self.routes_from.get(entrance.idx())?.iter().copied().find(|r| self.routes[r.idx()].exit == exit)
+    }
+
+    pub fn route_by_name(&self, name: &str) -> Option<RouteId> {
+        self.routes.iter().position(|r| r.name == name).map(RouteId::from_idx)
+    }
+
+    pub fn service(&self, headcode: &str) -> Option<ServiceId> {
+        self.services.iter().position(|s| s.headcode == headcode).map(ServiceId::from_idx)
     }
 }

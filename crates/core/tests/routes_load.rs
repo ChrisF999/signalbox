@@ -1,0 +1,107 @@
+mod common;
+
+use common::*;
+use serde_json::json;
+use signalbox_core::network::PointsPos;
+use signalbox_core::routes::Exit;
+use signalbox_core::timetable::EndAction;
+use signalbox_core::world::LoadError;
+
+#[test]
+fn routes_resolve() {
+    let w = world("terminus");
+    assert_eq!(w.routes.len(), 4);
+    let r = w.find_route(sig(&w, "S1"), Exit::Node(node(&w, "E1"))).unwrap();
+    assert_eq!(r, route(&w, "S1-E1"));
+    let def = &w.routes[r.idx()];
+    assert_eq!(def.path, vec![sec(&w, "TP"), sec(&w, "TP1")]);
+    assert_eq!(def.points, vec![(node(&w, "P"), PointsPos::Normal)]);
+    assert!(def.overlap.is_empty());
+    assert_eq!(w.routes_from[sig(&w, "S1").idx()].len(), 2);
+}
+
+#[test]
+fn plain_line_route_has_overlap() {
+    let w = world("plain_line");
+    let def = &w.routes[route(&w, "S1-S2").idx()];
+    assert_eq!(def.exit, Exit::Signal(sig(&w, "S2")));
+    assert_eq!(def.overlap, vec![sec(&w, "TC")]);
+}
+
+#[test]
+fn services_and_entries_resolve() {
+    let w = world("terminus");
+    let a01 = &w.services[w.service("1A01").unwrap().idx()];
+    assert_eq!(a01.end, EndAction::Form(w.service("1A02").unwrap()));
+    assert_eq!(a01.calls[0].arr_s, Some((6 * 3600 + 5 * 60) as f64));
+    assert_eq!(a01.calls[0].platform.as_deref(), Some("1"));
+    assert!(a01.calls[0].stop);
+    assert_eq!(w.entries.len(), 2);
+    assert!(w.entries[0].time_s < w.entries[1].time_s);
+    assert_eq!(w.entries[0].boundary, node(&w, "W"));
+    assert!((w.train_types[0].max_speed - 120.0 / 3.6).abs() < 1e-9);
+}
+
+#[test]
+fn options_defaults() {
+    let w = world("terminus");
+    assert_eq!(w.options.start_s, 6.0 * 3600.0);
+    assert_eq!(w.options.overlap_release_s, 60.0);
+    assert_eq!(w.options.approach_lock_s, 120.0);
+    assert_eq!(w.options.min_dwell_s, (30, 30));
+    assert_eq!(w.options.entry_delay_s, (0, 0));
+}
+
+#[test]
+fn rejects_non_contiguous_route() {
+    let e = load_with("plain_line", |v| v["routes"][0]["path"] = json!(["TA", "TC"])).unwrap_err();
+    assert!(matches!(e, LoadError::BadRoute { ref route, .. } if route == "S1-S2"), "{e:?}");
+}
+
+#[test]
+fn rejects_route_missing_points() {
+    let e = load_with("terminus", |v| v["routes"][0]["points"] = json!([])).unwrap_err();
+    assert!(matches!(e, LoadError::BadRoute { ref route, .. } if route == "S1-E1"), "{e:?}");
+}
+
+#[test]
+fn rejects_exit_on_a_joint() {
+    let e = load_with("plain_line", |v| v["routes"][1]["exit"] = json!({"kind": "node", "name": "J2"})).unwrap_err();
+    assert!(matches!(e, LoadError::BadRoute { .. }), "{e:?}");
+}
+
+#[test]
+fn rejects_duplicate_route() {
+    let e = load_with("plain_line", |v| {
+        let dup = v["routes"][0].clone();
+        v["routes"].as_array_mut().unwrap().push(dup);
+    })
+    .unwrap_err();
+    assert_eq!(e, LoadError::Duplicate { kind: "route", name: "S1-S2".into() });
+}
+
+#[test]
+fn rejects_form_without_a_stopping_call() {
+    let e = load_with("terminus", |v| v["services"][0]["calls"] = json!([])).unwrap_err();
+    assert!(matches!(e, LoadError::Other(_)), "{e:?}");
+}
+
+#[test]
+fn rejects_call_at_unknown_platform() {
+    let e = load_with("terminus", |v| v["services"][0]["calls"][0]["platform"] = json!("9")).unwrap_err();
+    assert!(matches!(e, LoadError::Other(_)), "{e:?}");
+}
+
+#[test]
+fn rejects_entry_at_non_boundary() {
+    let e = load_with("terminus", |v| v["entries"][0]["boundary"] = json!("E1")).unwrap_err();
+    assert!(matches!(e, LoadError::Other(_)), "{e:?}");
+}
+
+#[test]
+fn rejects_bad_time_and_bad_ranges() {
+    let e = load_with("terminus", |v| v["entries"][0]["time"] = json!("6am")).unwrap_err();
+    assert!(matches!(e, LoadError::Other(_)), "{e:?}");
+    let e = load_with("terminus", |v| v["options"]["min_dwell_s"] = json!([60, 30])).unwrap_err();
+    assert!(matches!(e, LoadError::Other(_)), "{e:?}");
+}

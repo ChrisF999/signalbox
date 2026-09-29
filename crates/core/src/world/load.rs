@@ -6,6 +6,9 @@ use super::file::*;
 use super::{LoadError, World};
 use crate::ids::*;
 use crate::network::*;
+use crate::routes::*;
+use crate::time::parse_hms;
+use crate::timetable::*;
 
 type Index = BTreeMap<String, u32>;
 
@@ -40,7 +43,23 @@ pub(super) fn build(f: WorldFile) -> Result<World, LoadError> {
         return Err(LoadError::Schema(f.schema));
     }
     let net = build_network(&f)?;
-    Ok(World { title: f.title.clone(), net, layout: f.layout.clone() })
+    let routes = build_routes(&f, &net)?;
+    let mut routes_from = vec![vec![]; net.signals.len()];
+    for (i, r) in routes.iter().enumerate() {
+        routes_from[r.entrance.idx()].push(RouteId::from_idx(i));
+    }
+    let (train_types, services, entries, options) = build_timetable(&f, &net)?;
+    Ok(World {
+        title: f.title.clone(),
+        net,
+        routes,
+        routes_from,
+        train_types,
+        services,
+        entries,
+        options,
+        layout: f.layout.clone(),
+    })
 }
 
 pub(super) fn build_network(f: &WorldFile) -> Result<Network, LoadError> {
@@ -201,4 +220,161 @@ pub(super) fn build_network(f: &WorldFile) -> Result<Network, LoadError> {
         areas: typed(areas, AreaId),
     };
     Ok(net)
+}
+
+fn build_routes(f: &WorldFile, net: &Network) -> Result<Vec<RouteDef>, LoadError> {
+    let mut out: Vec<RouteDef> = Vec::new();
+    for r in &f.routes {
+        let entrance = net.signal(&r.entrance).ok_or_else(|| unknown("signal", &r.entrance, "route"))?;
+        let (exit, exit_name) = match &r.exit {
+            ExitFile::Signal(n) => (Exit::Signal(net.signal(n).ok_or_else(|| unknown("signal", n, &r.entrance))?), n),
+            ExitFile::Node(n) => (Exit::Node(net.node(n).ok_or_else(|| unknown("node", n, &r.entrance))?), n),
+        };
+        let name = format!("{}-{}", r.entrance, exit_name);
+        if out.iter().any(|o| o.entrance == entrance && o.exit == exit) {
+            return Err(LoadError::Duplicate { kind: "route", name });
+        }
+        let bad = |p: &str| LoadError::BadRoute { route: name.clone(), problem: p.to_string() };
+        if let Exit::Node(n) = exit {
+            if !matches!(net.nodes[n.idx()].kind, NodeKind::BufferStop | NodeKind::Boundary) {
+                return Err(bad("exit node must be a buffer stop or boundary"));
+            }
+        }
+        let sections = |names: &[String]| -> Result<Vec<SectionId>, LoadError> {
+            names.iter().map(|n| net.section(n).ok_or_else(|| unknown("section", n, &name))).collect()
+        };
+        let points = |reqs: &[PointsReqFile]| -> Result<Vec<(NodeId, PointsPos)>, LoadError> {
+            reqs.iter()
+                .map(|q| -> Result<(NodeId, PointsPos), LoadError> {
+                    let id = net.node(&q.points).ok_or_else(|| unknown("node", &q.points, &name))?;
+                    if net.points_section(id).is_none() {
+                        return Err(bad(&format!("`{}` is not points", q.points)));
+                    }
+                    Ok((id, q.position))
+                })
+                .collect()
+        };
+        let path = sections(&r.path)?;
+        let overlap = sections(&r.overlap)?;
+        let path_points = points(&r.points)?;
+        let overlap_points = points(&r.overlap_points)?;
+        if path.is_empty() {
+            return Err(bad("path is empty"));
+        }
+        let chain: Vec<SectionId> = path.iter().chain(overlap.iter()).copied().collect();
+        for pair in chain.windows(2) {
+            if !net.sections_touch(pair[0], pair[1]) {
+                return Err(bad(&format!(
+                    "sections `{}` and `{}` do not touch",
+                    net.sections[pair[0].idx()].name,
+                    net.sections[pair[1].idx()].name
+                )));
+            }
+        }
+        for (i, n) in net.nodes.iter().enumerate() {
+            let id = NodeId::from_idx(i);
+            let Some(sec) = net.points_section(id) else { continue };
+            if path.contains(&sec) && !path_points.iter().any(|&(p, _)| p == id) {
+                return Err(bad(&format!("crosses points `{}` without a required position", n.name)));
+            }
+            if overlap.contains(&sec) && !overlap_points.iter().any(|&(p, _)| p == id) {
+                return Err(bad(&format!("overlap crosses points `{}` without a required position", n.name)));
+            }
+        }
+        out.push(RouteDef {
+            name,
+            entrance,
+            exit,
+            path,
+            points: path_points,
+            overlap,
+            overlap_points,
+            automatic: r.automatic,
+        });
+    }
+    Ok(out)
+}
+
+type Timetable = (Vec<TrainType>, Vec<Service>, Vec<Entry>, Options);
+
+fn build_timetable(f: &WorldFile, net: &Network) -> Result<Timetable, LoadError> {
+    let tt_index = index("train type", &f.train_types, |t| &t.code)?;
+    let svc_index = index("service", &f.services, |s| &s.headcode)?;
+    let time = |s: &str, from: &str| -> Result<f64, LoadError> {
+        parse_hms(s).map(f64::from).ok_or_else(|| other(format!("{from}: bad time `{s}`")))
+    };
+    let train_types = f
+        .train_types
+        .iter()
+        .map(|t| TrainType {
+            code: t.code.clone(),
+            max_speed: t.max_speed_kmh / 3.6,
+            accel: t.accel,
+            service_brake: t.service_brake,
+            emergency_brake: t.emergency_brake,
+            length_m: t.length_m,
+            mass_t: t.mass_t,
+        })
+        .collect();
+    let mut services = Vec::new();
+    for s in &f.services {
+        let train_type = TrainTypeId(get(&tt_index, "train type", &s.train_type, &s.headcode)?);
+        let mut calls = Vec::new();
+        for c in &s.calls {
+            let exists = net
+                .platforms
+                .iter()
+                .any(|p| p.place == c.place && c.platform.as_ref().is_none_or(|x| *x == p.platform));
+            if !exists {
+                return Err(other(format!(
+                    "{}: no platform {} at `{}`",
+                    s.headcode,
+                    c.platform.as_deref().unwrap_or("(any)"),
+                    c.place
+                )));
+            }
+            calls.push(Call {
+                place: c.place.clone(),
+                platform: c.platform.clone(),
+                arr_s: c.arr.as_deref().map(|t| time(t, &s.headcode)).transpose()?,
+                dep_s: c.dep.as_deref().map(|t| time(t, &s.headcode)).transpose()?,
+                stop: c.stop,
+            });
+        }
+        let end = match &s.end {
+            EndFile::Exit => EndAction::Exit,
+            EndFile::Stable => EndAction::Stable,
+            EndFile::Form { service } => EndAction::Form(ServiceId(get(&svc_index, "service", service, &s.headcode)?)),
+        };
+        if end != EndAction::Exit && !calls.iter().any(|c| c.stop) {
+            return Err(other(format!("{}: a service that forms or stables must have a stopping call", s.headcode)));
+        }
+        services.push(Service { headcode: s.headcode.clone(), train_type, calls, end });
+    }
+    let mut entries = Vec::new();
+    for e in &f.entries {
+        let service = ServiceId(get(&svc_index, "service", &e.service, "entry")?);
+        let boundary = net.node(&e.boundary).ok_or_else(|| unknown("node", &e.boundary, &e.service))?;
+        if net.nodes[boundary.idx()].kind != NodeKind::Boundary {
+            return Err(other(format!("entry {}: `{}` is not a boundary", e.service, e.boundary)));
+        }
+        entries.push(Entry { service, boundary, time_s: time(&e.time, &e.service)?, speed: e.speed_kmh / 3.6 });
+    }
+    entries.sort_by(|a, b| a.time_s.total_cmp(&b.time_s));
+    let o = &f.options;
+    if o.entry_delay_s[0] > o.entry_delay_s[1] || o.min_dwell_s[0] > o.min_dwell_s[1] {
+        return Err(other("options: ranges must be [min, max]".into()));
+    }
+    let options = Options {
+        start_s: time(&o.start_time, "options")?,
+        entry_delay_s: (o.entry_delay_s[0], o.entry_delay_s[1]),
+        min_dwell_s: (o.min_dwell_s[0], o.min_dwell_s[1]),
+        overlap_release_s: o.overlap_release_s,
+        approach_lock_s: o.approach_lock_s,
+        late_penalty_per_min: o.late_penalty_per_min,
+        wrong_platform_penalty: o.wrong_platform_penalty,
+        spad_penalty: o.spad_penalty,
+        collision_penalty: o.collision_penalty,
+    };
+    Ok((train_types, services, entries, options))
 }

@@ -35,3 +35,7 @@ pub fn node(w: &World, name: &str) -> NodeId {
 pub fn seg(w: &World, name: &str) -> SegmentId {
     w.net.segment(name).unwrap_or_else(|| panic!("no segment {name}"))
 }
+
+pub fn route(w: &World, name: &str) -> RouteId {
+    w.route_by_name(name).unwrap_or_else(|| panic!("no route {name}"))
+}
