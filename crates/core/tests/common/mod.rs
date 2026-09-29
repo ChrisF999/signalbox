@@ -98,3 +98,25 @@ impl Rig {
         Occupancy::new(self.w.net.sections.len())
     }
 }
+
+use signalbox_core::sim::Sim;
+
+/// Step until an event matches `pred`; returns every event up to and
+/// including that step. Panics if it never happens.
+pub fn run_until(sim: &mut Sim, max_s: f64, mut pred: impl FnMut(&Event) -> bool) -> Vec<Event> {
+    let mut all = Vec::new();
+    for _ in 0..(max_s * 10.0).round() as u64 {
+        let ev = sim.step();
+        let hit = ev.iter().any(&mut pred);
+        all.extend(ev);
+        if hit {
+            return all;
+        }
+    }
+    let tail = &all[all.len().saturating_sub(10)..];
+    panic!("condition not reached within {max_s} s; last events: {tail:?}");
+}
+
+pub fn count(ev: &[Event], pred: impl Fn(&Event) -> bool) -> usize {
+    ev.iter().filter(|e| pred(e)).count()
+}
