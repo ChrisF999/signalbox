@@ -29,7 +29,7 @@ pub fn entry_ends(ts2: &Ts2) -> BTreeSet<String> {
 pub fn build(ts2: &Ts2, g: &Graph, report: &mut Report) -> Timetable {
     let mut train_types: Vec<TrainTypeFile> = Vec::new();
     for t in ts2.train_types.values() {
-        let numbers = [t.length, t.max_speed, t.std_accel, t.std_braking, t.emerg_braking];
+        let numbers = [t.length, t.max_speed * 3.6, t.std_accel, t.std_braking, t.emerg_braking];
         if numbers.iter().any(|v| !(v.is_finite() && *v > 0.0)) {
             report.warn(report::TRAIN_TYPE_SKIPPED, format!("{}: lengths, speeds and rates must be positive", t.code));
         } else if train_types.iter().any(|x| x.code == t.code) {
@@ -162,7 +162,8 @@ pub fn build(ts2: &Ts2, g: &Graph, report: &mut Report) -> Timetable {
                 0
             }
         };
-        if !(t.initial_speed.is_finite() && t.initial_speed >= 0.0) {
+        let speed_kmh = t.initial_speed * 3.6;
+        if !(speed_kmh.is_finite() && speed_kmh >= 0.0) {
             report.warn(report::TRAIN_SKIPPED, format!("train {}: bad initial speed {}", t.train_id, t.initial_speed));
             continue;
         }
@@ -201,7 +202,7 @@ pub fn build(ts2: &Ts2, g: &Graph, report: &mut Report) -> Timetable {
             boundary,
             at,
             time: fmt_hms(start as f64),
-            speed_kmh: t.initial_speed * 3.6,
+            speed_kmh,
         });
     }
 

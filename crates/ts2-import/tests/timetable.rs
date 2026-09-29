@@ -158,3 +158,19 @@ fn form_into_a_skipped_service_stables_instead() {
     assert!(matches!(c.world.services[0].end, EndFile::Stable));
     assert_eq!(c.report.count(report::ACTION), 1);
 }
+
+#[test]
+fn max_speed_that_overflows_when_converted_skips_the_type_and_its_services() {
+    let c = convert_edited(|v| v["trainTypes"]["T"]["maxSpeed"] = serde_json::json!(1e308));
+    assert!(c.world.train_types.is_empty());
+    assert!(c.world.services.is_empty());
+    assert_eq!(c.report.count(report::TRAIN_TYPE_SKIPPED), 1);
+    assert_eq!(c.report.count(report::SERVICE_SKIPPED), 1);
+}
+
+#[test]
+fn initial_speed_that_overflows_when_converted_skips_the_train() {
+    let c = convert_edited(|v| v["trains"][0]["initialSpeed"] = serde_json::json!(1e308));
+    assert!(c.world.entries.is_empty());
+    assert_eq!(c.report.count(report::TRAIN_SKIPPED), 1);
+}
