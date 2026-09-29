@@ -89,6 +89,11 @@ impl Rig {
         ev
     }
 
+    pub fn aspect(&mut self, signal: &str, occ: &Occupancy) -> Aspect {
+        self.il.refresh_aspects(&self.w, &self.pts, occ);
+        self.il.aspects[sig(&self.w, signal).idx()]
+    }
+
     pub fn empty(&self) -> Occupancy {
         Occupancy::new(self.w.net.sections.len())
     }

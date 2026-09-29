@@ -2,9 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::aspect::Aspect;
+use crate::aspect::{cleared_aspect, Aspect};
 use crate::events::{Event, Rejection};
 use crate::ids::*;
+use crate::network::NodeKind;
 use crate::occupancy::Occupancy;
 use crate::points::PointsTable;
 use crate::routes::Exit;
@@ -152,6 +153,86 @@ impl Interlocking {
                 ev.push(Event::RouteLocked { route: RouteId::from_idx(i) });
             }
         }
+        ev
+    }
+
+    /// Whether route `r`'s entrance signal may show a proceed aspect.
+    pub fn proceed(&self, w: &World, pts: &PointsTable, occ: &Occupancy, r: RouteId) -> bool {
+        let def = &w.routes[r.idx()];
+        let st = &self.routes[r.idx()];
+        let exit_signal = match def.exit {
+            Exit::Signal(s) => Some(s),
+            Exit::Node(_) => None,
+        };
+        let overlap_held = |s: SectionId| match self.owner[s.idx()] {
+            Some(Owner::Overlap(x)) if x == r => true,
+            // Taken over by a route continuing from our exit signal.
+            Some(o) => exit_signal.is_some() && Some(w.routes[o.route().idx()].entrance) == exit_signal,
+            None => false,
+        };
+        st.state == RouteState::Locked
+            && st.cancel.is_none()
+            && st.progress.iter().all(|&p| p == Progress::Untouched)
+            && def.path.iter().all(|&s| !occ.occupied(s) && self.owner[s.idx()] == Some(Owner::Path(r)))
+            && def.overlap.iter().all(|&s| !occ.occupied(s) && overlap_held(s))
+            && def.all_points().all(|&(p, pos)| pts.detected(p) == Some(pos))
+    }
+
+    pub fn compute_aspects(&self, w: &World, pts: &PointsTable, occ: &Occupancy) -> Vec<Aspect> {
+        let n = w.net.signals.len();
+        let mut memo = vec![None; n];
+        let mut visiting = vec![false; n];
+        for s in 0..n {
+            self.aspect_of(w, pts, occ, SignalId::from_idx(s), &mut memo, &mut visiting);
+        }
+        memo.into_iter().map(|a| a.expect("every signal computed")).collect()
+    }
+
+    fn aspect_of(
+        &self,
+        w: &World,
+        pts: &PointsTable,
+        occ: &Occupancy,
+        s: SignalId,
+        memo: &mut Vec<Option<Aspect>>,
+        visiting: &mut Vec<bool>,
+    ) -> Aspect {
+        if let Some(a) = memo[s.idx()] {
+            return a;
+        }
+        if visiting[s.idx()] {
+            // A loop of cleared signals: treat the far end as clear.
+            return Aspect::Green;
+        }
+        visiting[s.idx()] = true;
+        let a = match self.active_route_from(w, s) {
+            Some(r) if self.proceed(w, pts, occ, r) => {
+                let exit = match w.routes[r.idx()].exit {
+                    Exit::Signal(e) => self.aspect_of(w, pts, occ, e, memo, visiting),
+                    Exit::Node(n) if w.net.nodes[n.idx()].kind == NodeKind::Boundary => Aspect::Green,
+                    Exit::Node(_) => Aspect::Red,
+                };
+                cleared_aspect(w.net.signals[s.idx()].aspects, exit)
+            }
+            _ => Aspect::Red,
+        };
+        visiting[s.idx()] = false;
+        memo[s.idx()] = Some(a);
+        a
+    }
+
+    /// Recompute all aspects; returns events for the ones that changed.
+    pub fn refresh_aspects(&mut self, w: &World, pts: &PointsTable, occ: &Occupancy) -> Vec<Event> {
+        let new = self.compute_aspects(w, pts, occ);
+        let ev = self
+            .aspects
+            .iter()
+            .zip(new.iter())
+            .enumerate()
+            .filter(|(_, (old, a))| old != a)
+            .map(|(i, (_, &a))| Event::SignalAspect { signal: SignalId::from_idx(i), aspect: a })
+            .collect();
+        self.aspects = new;
         ev
     }
 }
