@@ -132,10 +132,13 @@ pub fn build(ts2: &Ts2, g: &Graph, world: &World, report: &mut Report) -> Vec<Ro
         }
         let context = to_nodes(g, net, &ts2_positions(ts2, &r.begin_signal, Some(&r.end_signal), &r.directions, WALK_BEYOND_M));
         let mut cur = entrance;
+        let first = stretches.len();
+        let mut done = false;
         for _ in 0..MAX_STRETCHES {
             match net.trace_route(cur, &context, &[], 0) {
                 Err(e) => {
                     report.warn(report::ROUTE_DROPPED, format!("route {id} from {}: {e}", net.signals[cur.idx()].name));
+                    done = true;
                     break;
                 }
                 Ok(t) => {
@@ -152,8 +155,12 @@ pub fn build(ts2: &Ts2, g: &Graph, world: &World, report: &mut Report) -> Vec<Ro
                     });
                     match t.exit {
                         Exit::Signal(next) if Some(next) != end => cur = next,
-                        Exit::Signal(_) => break,
+                        Exit::Signal(_) => {
+                            done = true;
+                            break;
+                        }
                         Exit::Node(_) => {
+                            done = true;
                             if end.is_some() {
                                 report.warn(report::ROUTE_SHORT, format!("route {id} reached the end of the track before its end signal"));
                             }
@@ -162,6 +169,15 @@ pub fn build(ts2: &Ts2, g: &Graph, world: &World, report: &mut Report) -> Vec<Ro
                     }
                 }
             }
+        }
+        if !done {
+            // Ran past the end signal (a loop, or a wrong TS2 route): keeping the
+            // stretches could turn a manual route automatic through `merge`.
+            stretches.truncate(first);
+            report.warn(
+                report::ROUTE_DROPPED,
+                format!("route {id}: no end signal within {MAX_STRETCHES} stretches of {}", r.begin_signal),
+            );
         }
     }
 

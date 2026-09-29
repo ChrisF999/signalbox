@@ -170,3 +170,39 @@ fn automatic_routes_share_track_only_with_their_continuations() {
     let r = c.world.routes.iter().find(|r| r.entrance == "73").unwrap();
     assert!(!r.automatic);
 }
+
+/// `mini` plus a ring of track with two signals, and a TS2 route round the ring
+/// whose end signal (mini's `A`, elsewhere) can never be met.
+fn ring_route_never_ends(v: &mut serde_json::Value) {
+    use serde_json::json;
+    let line = |id: &str, prev: &str, next: &str| {
+        json!({"__type__": "LineItem", "tiId": id, "name": null, "previousTiId": prev, "nextTiId": next, "realLength": 300.0,
+               "maxSpeed": 0.0, "placeCode": null, "trackCode": "", "conflictTiId": null, "x": 0, "y": 100, "xf": 10, "yf": 100})
+    };
+    let signal = |id: &str, name: &str, prev: &str, next: &str| {
+        json!({"__type__": "SignalItem", "tiId": id, "name": name, "signalType": "UK_3_ASPECTS", "reverse": false,
+               "previousTiId": prev, "nextTiId": next, "x": 5, "y": 100, "xn": 5, "yn": 105, "maxSpeed": 0,
+               "conflictTiId": null, "customProperties": {}})
+    };
+    let items = v["trackItems"].as_object_mut().unwrap();
+    for (id, item) in [
+        ("20", line("20", "24", "21")),
+        ("21", signal("21", "R1", "20", "22")),
+        ("22", line("22", "21", "23")),
+        ("23", signal("23", "R2", "22", "24")),
+        ("24", line("24", "23", "20")),
+    ] {
+        items.insert(id.into(), item);
+    }
+    v["routes"]["2"] = json!({"__type__": "Route", "id": "2", "beginSignal": "21", "endSignal": "3", "directions": {}, "initialState": 2});
+}
+
+#[test]
+fn a_route_that_runs_past_its_end_signal_is_dropped_whole() {
+    let mut v: serde_json::Value = serde_json::from_str(&data("mini")).unwrap();
+    ring_route_never_ends(&mut v);
+    let c = ts2_import::convert(&v.to_string()).unwrap();
+    assert!(c.report.warnings.iter().any(|w| w.kind == report::ROUTE_DROPPED && w.detail.contains("route 2")), "{}", c.report.render());
+    // The ring's stretches are gone, so nothing from it can be automatic.
+    assert!(c.world.routes.iter().all(|r| !r.automatic), "{}", c.report.render());
+}
