@@ -53,6 +53,9 @@ pub struct SimState {
     pub queue: Vec<Command>,
     /// Every command applied, with the tick it was applied at.
     pub log: Vec<(u64, Command)>,
+    /// Train pairs (lower id first) already reported as collided, sorted.
+    #[serde(default)]
+    pub collided: Vec<(TrainId, TrainId)>,
     pub rng_seed: [u8; 32],
     /// ChaCha word position (hi, lo), filled in by `snapshot`.
     pub rng_word_pos: (u64, u64),
@@ -89,6 +92,7 @@ impl Sim {
             scores: Scores::new(&world.net),
             queue: Vec::new(),
             log: Vec::new(),
+            collided: Vec::new(),
             rng_seed: rng.get_seed(),
             rng_word_pos: (0, 0),
         };
@@ -224,6 +228,7 @@ impl Sim {
         ev.extend(self.st.il.refresh_aspects(&self.world, &self.st.points, &self.occ));
         ev.extend(self.move_trains(now));
         self.rebuild_occupancy();
+        ev.extend(self.detect_collisions());
         for e in &ev {
             self.st.scores.apply(&self.world, e);
         }
@@ -391,7 +396,6 @@ impl Sim {
         let target = if held { 0.0 } else { driver::target_speed(t, tt, net, pts, aspects, stop_place) };
         driver::apply_speed(t, tt, net, target, TICK_S);
 
-        let section_before = net.segments[t.head().0.idx()].section;
         let moved = t.advance(net, pts, t.speed * TICK_S);
 
         for sw in &moved.swept {
@@ -430,20 +434,6 @@ impl Sim {
                     t.next_call += 1;
                 }
             }
-        }
-
-        // Running into a section another train occupies.
-        let mut prev_section = section_before;
-        for &(sg, _) in &moved.entered {
-            let sec = net.segments[sg.idx()].section;
-            if sec != prev_section {
-                if let Some(&other) = self.occ.trains_in(sec).iter().find(|&&o| o != t.id) {
-                    ev.push(Event::Collision { train: t.id, other, section: sec });
-                    t.emergency = true;
-                    out.emergency.push(other);
-                }
-            }
-            prev_section = sec;
         }
 
         if let Some(node) = moved.end_node {
@@ -499,6 +489,29 @@ impl Sim {
                             .and_then(|(s, _)| net.signals[s.idx()].berth);
                         if let Some(b) = berth {
                             ev.extend(self.st.describer.interpose(b, &t.headcode));
+                        }
+                    }
+                }
+            }
+        }
+        ev
+    }
+
+    /// Every section holding two trains is a collision, reported once per
+    /// pair; both trains go into emergency.
+    fn detect_collisions(&mut self) -> Vec<Event> {
+        let mut ev = Vec::new();
+        for si in 0..self.world.net.sections.len() {
+            let sec = SectionId::from_idx(si);
+            let here = self.occ.trains_in(sec).to_vec();
+            for (i, &x) in here.iter().enumerate() {
+                for &y in &here[i + 1..] {
+                    let pair = (x.min(y), x.max(y));
+                    if let Err(at) = self.st.collided.binary_search(&pair) {
+                        self.st.collided.insert(at, pair);
+                        ev.push(Event::Collision { train: pair.1, other: pair.0, section: sec });
+                        for t in self.st.trains.iter_mut().filter(|t| t.id == x || t.id == y) {
+                            t.emergency = true;
                         }
                     }
                 }

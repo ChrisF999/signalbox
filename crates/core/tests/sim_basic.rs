@@ -158,6 +158,43 @@ fn running_into_an_occupied_section_is_a_collision() {
 }
 
 #[test]
+fn head_on_into_an_empty_section_is_one_collision() {
+    let w: World = load_with("plain_line", |v| v["entries"] = json!([])).unwrap();
+    let svc = w.service("2A01").unwrap();
+    let (a, c) = (seg(&w, "a"), seg(&w, "c"));
+    let mut sim = Sim::new(w, 1);
+    let mut up = Train::new(TrainId(0), svc, "2A01", TrainTypeId(0), 100.0, a, Dir::Up, 20.0);
+    up.head_m = 950.0;
+    let mut down = Train::new(TrainId(1), svc, "2A09", TrainTypeId(0), 100.0, c, Dir::Down, 20.0);
+    down.head_m = 950.0;
+    sim.insert_train(up);
+    sim.insert_train(down);
+    let ev = sim.run_for(60.0);
+    let tb = sec(sim.world(), "TB");
+    let hits: Vec<_> = ev.iter().filter(|e| matches!(e, Event::Collision { .. })).collect();
+    assert_eq!(hits, vec![&Event::Collision { train: TrainId(1), other: TrainId(0), section: tb }]);
+}
+
+#[test]
+fn rear_end_closing_inside_one_section_is_a_collision() {
+    let w: World = load_with("plain_line", |v| v["entries"] = json!([])).unwrap();
+    let svc = w.service("2A01").unwrap();
+    let b = seg(&w, "b");
+    let mut sim = Sim::new(w, 1);
+    let mut standing = Train::new(TrainId(0), svc, "2A01", TrainTypeId(0), 100.0, b, Dir::Up, 0.0);
+    standing.head_m = 700.0;
+    let mut runner = Train::new(TrainId(1), svc, "2A09", TrainTypeId(0), 100.0, b, Dir::Up, 20.0);
+    runner.head_m = 300.0;
+    runner.last_passed_aspect = Some(signalbox_core::aspect::Aspect::Green);
+    sim.insert_train(standing);
+    sim.insert_train(runner);
+    let ev = sim.run_for(60.0);
+    let tb = sec(sim.world(), "TB");
+    let hits: Vec<_> = ev.iter().filter(|e| matches!(e, Event::Collision { .. })).collect();
+    assert_eq!(hits, vec![&Event::Collision { train: TrainId(1), other: TrainId(0), section: tb }]);
+}
+
+#[test]
 fn time_advances_by_ticks() {
     let mut sim = Sim::new(world("plain_line"), 1);
     assert_eq!(sim.now_s(), 6.0 * 3600.0);
