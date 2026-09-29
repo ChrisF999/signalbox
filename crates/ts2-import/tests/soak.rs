@@ -33,3 +33,14 @@ fn drain_runs_its_whole_timetable() {
     assert!(r.still_running.is_empty(), "{r:?}");
     assert_eq!(r.waiting_to_enter, 0, "{r:?}");
 }
+
+/// Three sim-hours from 05:00:15. Slow in debug builds: run with
+/// `scripts/cargo test --release -p ts2-import --test soak -- --ignored`.
+#[test]
+#[ignore]
+fn liverpool_street_runs_three_hours() {
+    let r = run("liverpool-st", 3.0);
+    assert_safe("liverpool-st", &r);
+    assert!(r.max_fringe_wait_s < 1800.0, "{r:?}");
+    assert!(r.exited + r.stabled > 0, "{r:?}");
+}
