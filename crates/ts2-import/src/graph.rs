@@ -15,7 +15,7 @@ use crate::ts2::{Item, Port, Ts2};
 /// Length of points legs and spacer segments.
 pub const SPACER_M: f64 = 1.0;
 const SWING_S: f64 = 5.0;
-/// An end with a platform line this close in rear is a buffer stop.
+/// An end with a stopping platform this close in rear is a buffer stop.
 const PLATFORM_SEARCH_M: f64 = 400.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -310,7 +310,21 @@ pub fn build(ts2: &Ts2, entry_ends: &BTreeSet<String>, report: &mut Report) -> R
     }
 
     // Ends: boundary if trains enter there or no platform is close in rear.
-    let platform_segs: BTreeSet<&str> = g.platforms.iter().map(|p| p.segment.as_str()).collect();
+    // Only platforms some train stops at count: a pass-only timing point just
+    // before the edge of the map (Liverpool Street's HAKNYNM, BOWJ) is no terminal.
+    let stops: BTreeSet<(&str, &str)> = ts2
+        .services
+        .values()
+        .flat_map(|s| &s.lines)
+        .filter(|l| l.must_stop)
+        .map(|l| (l.place_code.as_str(), l.track_code.as_str()))
+        .collect();
+    let platform_segs: BTreeSet<&str> = g
+        .platforms
+        .iter()
+        .filter(|p| stops.contains(&(p.place.as_str(), p.platform.as_str())))
+        .map(|p| p.segment.as_str())
+        .collect();
     for (ti, node) in &g.end_nodes {
         let boundary = entry_ends.contains(ti) || !near_platform(node, &b.segments, &at, &platform_segs);
         let kind = if boundary { NodeKindFile::Boundary } else { NodeKindFile::BufferStop };

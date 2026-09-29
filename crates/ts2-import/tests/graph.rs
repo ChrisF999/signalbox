@@ -11,6 +11,11 @@ fn load(name: &str) -> Ts2 {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
+fn load_json(name: &str) -> serde_json::Value {
+    let path = format!("{}/tests/data/{name}.json", env!("CARGO_MANIFEST_DIR"));
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
 fn mini() -> (Graph, Report) {
     let mut r = Report::default();
     let ends = BTreeSet::from(["1".to_string()]);
@@ -33,6 +38,29 @@ fn ends_are_classified() {
     assert!(matches!(node(&g, "N10"), NodeKindFile::Boundary), "no platform within 400 m");
     assert_eq!(g.boundaries, BTreeSet::from(["N1".to_string(), "N10".to_string()]));
     assert_eq!(r.count(report::END_CLASS), 3);
+}
+
+/// Mini with line 8 (the plain line to end 10) made a timing point of place
+/// `TIM`, and one service calling there, stopping or not.
+fn mini_with_timing_point(must_stop: bool) -> Graph {
+    let mut v: serde_json::Value = load_json("mini");
+    v["trackItems"]["8"]["placeCode"] = "TIM".into();
+    v["trackItems"]["8"]["trackCode"] = "X".into();
+    v["services"]["S1"]["lines"].as_array_mut().unwrap().insert(
+        0,
+        serde_json::json!({"__type__": "ServiceLine", "placeCode": "TIM", "trackCode": "X",
+            "mustStop": must_stop, "scheduledArrivalTime": "", "scheduledDepartureTime": "06:01:00"}),
+    );
+    let ts2: Ts2 = serde_json::from_value(v).unwrap();
+    graph::build(&ts2, &BTreeSet::from(["1".to_string()]), &mut Report::default()).unwrap()
+}
+
+#[test]
+fn a_pass_only_platform_before_an_end_leaves_it_a_boundary() {
+    // Liverpool Street's exits (ends 512, 531, 557, 582) sit just past the
+    // HAKNYNM and BOWJ timing points, which no train stops at.
+    assert!(matches!(node(&mini_with_timing_point(false), "N10"), NodeKindFile::Boundary));
+    assert!(matches!(node(&mini_with_timing_point(true), "N10"), NodeKindFile::BufferStop));
 }
 
 #[test]
