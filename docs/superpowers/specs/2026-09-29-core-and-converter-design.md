@@ -145,6 +145,15 @@ points (route and overlap) is detected in position, the route becomes
 **Locked**: its sections are locked in the route direction and its points are
 locked.
 
+Amended during Plan 2 (rulings):
+- A new route may take over the overlap of the route it continues (the route
+  whose exit is its entrance), and a route's overlap may lie over the path of the
+  route that continues from its exit signal — in either setting order. The
+  section stays owned by the continuing route's path.
+- A signal's *active* route is one whose first path section has not yet been
+  released: once the train has cleared that section, the entrance may set
+  another route (section ownership still rejects any real conflict).
+
 ### 4.3 Signal controls and aspects
 
 The entrance signal may show a proceed aspect only if its route is Locked, all
@@ -215,6 +224,10 @@ A driver model picks a target speed as the minimum of:
   within sighting (stop a margin in rear of it), a signal showing Y within
   sighting (plan to stop at the *next* signal), a platform stop mark if the
   train calls there, a lower line speed ahead, or a buffer stop.
+
+A signal beyond sighting distance is assumed to show the most restrictive
+aspect the last signal passed still allows (amended in Plan 2: TS2 layouts space
+signals closer than braking distance, so "green after green" is not assumed).
 
 Acceleration is `accel` toward target, braking at `service_brake`, or
 `emergency_brake` after a SPAD. The acceleration formula includes a gradient
@@ -310,8 +323,8 @@ controller rulings marked (R).
 - `PointsItem` → `Points` node: toe = previous end, normal = next end,
   reverse = reverse end.
 - `EndItem` → `Boundary` or `BufferStop` (R): an end is a **Boundary** if any
-  train enters there, or if no platform line (a line with a `placeCode`) lies
-  within 400 m in rear of it; otherwise it is a **BufferStop** (terminal
+  train enters there, or if no platform line that some service stops at lies
+  within 400 m in rear of it (pass-only timing points do not count); otherwise it is a **BufferStop** (terminal
   platforms, sidings). The classification of every end is listed in the report.
 - Orphan fragments not connected to anything a route or train uses are
   dropped with a warning.
@@ -354,13 +367,19 @@ controller rulings marked (R).
   pre-set) → a normal route, with a warning.
 - A main signal that is still the entrance of no route and whose track ahead
   reaches the next signal or an end without passing facing points gets a
-  generated **automatic** route to it (plain-line automatic signals). Any other
-  signal with no route is reported.
+  generated route to it, set by the signaller like any other (not automatic,
+  so it can never permanently lock track other routes need). Any other signal
+  with no route is reported.
+- An automatic route must be the only route from its signal and may share
+  track only with its own continuations; otherwise it is demoted to a normal
+  route (with a warning).
 - Overlaps are generated: the sections beyond the exit signal up to about 180 m,
   extended to the next section boundary. Beyond facing points the overlap uses
   the positions the TS2 route set there, if it passed them; otherwise the overlap
   stops before those points (with a warning). Exits to a buffer stop or
-  boundary have no overlap.
+  boundary have no overlap, and neither does an automatic route whose exit is
+  a controlled signal (one that begins routes set by hand), since an automatic
+  route holds its overlap permanently.
 - Every generated route is checked with the core route tracer before output;
   a route that fails is dropped with a warning (never silently).
 
