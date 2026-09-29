@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Run cargo inside Docker: this host has no Rust toolchain.
+# Run cargo inside the official Rust Docker image, for machines without a local toolchain.
 # Override the image with SIGNALBOX_RUST_IMAGE if needed.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-image="${SIGNALBOX_RUST_IMAGE:-rust:1.98-descry}"
+image="${SIGNALBOX_RUST_IMAGE:-rust:1.98-slim-bookworm}"
 exec docker run --rm -i \
   -u "$(id -u):$(id -g)" \
   -v "$root:/w" -w /w \
