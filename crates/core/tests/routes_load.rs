@@ -105,3 +105,46 @@ fn rejects_bad_time_and_bad_ranges() {
     let e = load_with("terminus", |v| v["options"]["min_dwell_s"] = json!([60, 30])).unwrap_err();
     assert!(matches!(e, LoadError::Other(_)), "{e:?}");
 }
+
+fn bad_route(e: LoadError) -> String {
+    match e {
+        LoadError::BadRoute { problem, .. } => problem,
+        other => panic!("expected BadRoute, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_path_that_skips_the_points_section() {
+    let e = load_with("junction", |v| v["routes"][0]["path"] = json!(["TE"])).unwrap_err();
+    assert!(matches!(e, LoadError::BadRoute { .. }), "{e:?}");
+}
+
+#[test]
+fn rejects_points_set_against_the_declared_path() {
+    let e = load_with("junction", |v| v["routes"][0]["points"][0]["position"] = json!("reverse")).unwrap_err();
+    assert!(matches!(e, LoadError::BadRoute { .. }), "{e:?}");
+}
+
+#[test]
+fn rejects_signal_in_the_middle_of_a_section() {
+    let e = load_with("plain_line", |v| v["signals"][0]["offset_m"] = json!(500)).unwrap_err();
+    assert!(bad_route(e).contains("section boundary"));
+}
+
+#[test]
+fn rejects_points_required_outside_path_and_overlap() {
+    let e = load_with("junction", |v| v["routes"][2]["path"] = json!(["TW"])).unwrap_err();
+    assert!(bad_route(e).contains("neither path nor overlap"));
+}
+
+#[test]
+fn rejects_overlap_on_a_node_exit() {
+    let e = load_with("plain_line", |v| v["routes"][1]["overlap"] = json!(["TA"])).unwrap_err();
+    assert!(bad_route(e).contains("cannot have an overlap"));
+}
+
+#[test]
+fn rejects_self_looping_segment() {
+    let e = load_with("plain_line", |v| v["segments"][1]["to"] = json!("J1")).unwrap_err();
+    assert!(matches!(e, LoadError::Other(_)), "{e:?}");
+}

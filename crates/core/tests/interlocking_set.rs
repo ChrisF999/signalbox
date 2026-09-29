@@ -82,8 +82,20 @@ fn next_route_takes_over_the_overlap() {
 /// Terminus plus signal S0 in rear of S1, whose route overlap runs over P normal.
 fn terminus_with_s0() -> Rig {
     let w = load_with("terminus", |v| {
+        // Split the approach so S0 stands on a section boundary.
+        v["sections"].as_array_mut().unwrap().push(json!({"name": "TIN0", "area": "Box"}));
+        v["nodes"].as_array_mut().unwrap().push(json!({"name": "J0", "kind": "joint"}));
+        v["segments"][0] = json!(
+            {"name": "in", "from": "J0", "to": "J", "length_m": 1500, "line_speed_kmh": 100, "section": "TIN"}
+        );
+        v["segments"].as_array_mut().unwrap().push(json!(
+            {"name": "in0", "from": "W", "to": "J0", "length_m": 500, "line_speed_kmh": 100, "section": "TIN0"}
+        ));
+        for i in [2, 3] {
+            v["routes"][i]["path"] = json!(["TP", "TIN", "TIN0"]);
+        }
         v["signals"].as_array_mut().unwrap().push(json!(
-            {"name": "S0", "area": "Box", "segment": "in", "offset_m": 500, "direction": "up", "aspects": 3}
+            {"name": "S0", "area": "Box", "segment": "in0", "offset_m": 500, "direction": "up", "aspects": 3}
         ));
         v["routes"].as_array_mut().unwrap().push(json!({
             "entrance": "S0", "exit": {"kind": "signal", "name": "S1"}, "path": ["TIN"],

@@ -87,6 +87,9 @@ pub(super) fn build_network(f: &WorldFile) -> Result<Network, LoadError> {
         }
         let a = NodeId(get(&nodes, "node", &s.from, &s.name)?);
         let b = NodeId(get(&nodes, "node", &s.to, &s.name)?);
+        if a == b {
+            return Err(other(format!("segment `{}`: from and to must be different nodes", s.name)));
+        }
         let section = SectionId(get(&sections, "section", &s.section, &s.name)?);
         let id = SegmentId::from_idx(net.segments.len());
         net.sections[section.idx()].segments.push(id);
@@ -261,6 +264,18 @@ fn build_routes(f: &WorldFile, net: &Network) -> Result<Vec<RouteDef>, LoadError
         if path.is_empty() {
             return Err(bad("path is empty"));
         }
+        if matches!(exit, Exit::Node(_)) && !overlap.is_empty() {
+            return Err(bad("a route to a buffer stop or boundary cannot have an overlap"));
+        }
+        for &(p, _) in path_points.iter().chain(overlap_points.iter()) {
+            let sec = net.points_section(p).expect("checked to be points above");
+            if !path.contains(&sec) && !overlap.contains(&sec) {
+                return Err(bad(&format!(
+                    "points `{}` are required but their section is in neither path nor overlap",
+                    net.nodes[p.idx()].name
+                )));
+            }
+        }
         let chain: Vec<SectionId> = path.iter().chain(overlap.iter()).copied().collect();
         for pair in chain.windows(2) {
             if !net.sections_touch(pair[0], pair[1]) {
@@ -279,6 +294,32 @@ fn build_routes(f: &WorldFile, net: &Network) -> Result<Vec<RouteDef>, LoadError
             }
             if overlap.contains(&sec) && !overlap_points.iter().any(|&(p, _)| p == id) {
                 return Err(bad(&format!("overlap crosses points `{}` without a required position", n.name)));
+            }
+        }
+        let traced = net.trace_route(entrance, &path_points, &overlap_points, overlap.len()).map_err(|e| bad(&e))?;
+        let names = |v: &[SectionId]| -> String {
+            v.iter().map(|s| net.sections[s.idx()].name.as_str()).collect::<Vec<_>>().join(", ")
+        };
+        if traced.path != path {
+            return Err(bad(&format!(
+                "declared path [{}] but the track from the entrance runs through [{}]",
+                names(&path),
+                names(&traced.path)
+            )));
+        }
+        if traced.exit != exit {
+            return Err(bad("the track from the entrance does not end at the declared exit"));
+        }
+        if traced.overlap != overlap {
+            return Err(bad(&format!(
+                "declared overlap [{}] but the track beyond the exit runs through [{}]",
+                names(&overlap),
+                names(&traced.overlap)
+            )));
+        }
+        for &(p, _) in path_points.iter().chain(overlap_points.iter()) {
+            if !traced.points_crossed.contains(&p) {
+                return Err(bad(&format!("points `{}` are required but the route does not cross them", net.nodes[p.idx()].name)));
             }
         }
         out.push(RouteDef {

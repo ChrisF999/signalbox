@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::*;
+use crate::routes::Exit;
 
 /// Direction relative to a segment: `Up` runs from node `a` to node `b`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -347,5 +348,149 @@ impl Network {
         };
         let ea = ends(a);
         ends(b).iter().any(|n| ea.contains(n))
+    }
+}
+
+/// Points positions taken from a route's requirement lists (path first, then
+/// overlap). Points not listed read as "moving", so the walk cannot pass them.
+struct Listed<'a>(&'a [(NodeId, PointsPos)], &'a [(NodeId, PointsPos)]);
+
+impl PointsView for Listed<'_> {
+    fn position(&self, node: NodeId) -> Option<PointsPos> {
+        self.0.iter().chain(self.1.iter()).find(|&&(n, _)| n == node).map(|&(_, p)| p)
+    }
+}
+
+/// What walking a route over the track found.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TracedRoute {
+    /// Sections from just past the entrance signal to the exit, consecutive
+    /// segments of one section collapsed.
+    pub path: Vec<SectionId>,
+    /// The first signal facing the same way that stands at a segment end, or
+    /// the buffer stop / boundary where the track ends.
+    pub exit: Exit,
+    /// Up to `overlap_len` sections beyond a signal exit (empty for a node exit).
+    pub overlap: Vec<SectionId>,
+    /// Points nodes the walk passed over, in order.
+    pub points_crossed: Vec<NodeId>,
+}
+
+impl Network {
+    /// Whether a signal stands at the end of its segment in the direction it faces.
+    fn at_facing_end(&self, at: Position) -> bool {
+        let s = &self.segments[at.segment.idx()];
+        (s.along(at.offset_m, at.dir) - s.length_m).abs() < 1e-6
+    }
+
+    /// Like `next`, but `Ok(None)` only at a real end of track; points that
+    /// are unlisted or set against the walk are an error.
+    fn step_checked(
+        &self,
+        seg: SegmentId,
+        dir: Dir,
+        pts: &impl PointsView,
+    ) -> Result<Option<(SegmentId, Dir)>, String> {
+        if let Some(x) = self.next(seg, dir, pts) {
+            return Ok(Some(x));
+        }
+        let n = &self.nodes[self.segments[seg.idx()].end_node(dir).idx()];
+        match n.kind {
+            NodeKind::BufferStop | NodeKind::Boundary => Ok(None),
+            _ => Err(format!("the route cannot pass points `{}`: not listed, or set against the route", n.name)),
+        }
+    }
+
+    /// Walk the track from `entrance` using only the route's own points
+    /// requirements, and report the sections, exit and overlap it really has.
+    /// The caller compares the result with what the route declares.
+    pub fn trace_route(
+        &self,
+        entrance: SignalId,
+        points: &[(NodeId, PointsPos)],
+        overlap_points: &[(NodeId, PointsPos)],
+        overlap_len: usize,
+    ) -> Result<TracedRoute, String> {
+        let view = Listed(points, overlap_points);
+        let sig = &self.signals[entrance.idx()];
+        if !self.at_facing_end(sig.at) {
+            return Err(format!("signal `{}` does not stand on a section boundary", sig.name));
+        }
+        let (mut seg, mut dir) = (sig.at.segment, sig.at.dir);
+        let sig_section = self.segments[seg.idx()].section;
+        let Some((s, d)) = self.step_checked(seg, dir, &view)? else {
+            return Err(format!("there is no track beyond signal `{}`", sig.name));
+        };
+        if self.segments[s.idx()].section == sig_section {
+            return Err(format!("signal `{}` does not stand on a section boundary", sig.name));
+        }
+        (seg, dir) = (s, d);
+        let limit = 2 * self.segments.len() + 2;
+        let mut path: Vec<SectionId> = Vec::new();
+        let mut crossed: Vec<NodeId> = Vec::new();
+        let mut steps = 0;
+        let exit = loop {
+            steps += 1;
+            if steps > limit {
+                return Err("the route loops back on itself".into());
+            }
+            let section = self.segments[seg.idx()].section;
+            if path.last() != Some(&section) {
+                path.push(section);
+            }
+            let end = self.segments[seg.idx()].end_node(dir);
+            let here_signal = self.signals_on[seg.idx()]
+                .iter()
+                .copied()
+                .find(|&g| self.signals[g.idx()].at.dir == dir && self.at_facing_end(self.signals[g.idx()].at));
+            if let Some(g) = here_signal {
+                if let Some((ns, _)) = self.step_checked(seg, dir, &view).ok().flatten() {
+                    if self.segments[ns.idx()].section == section {
+                        return Err(format!(
+                            "exit signal `{}` does not stand on a section boundary",
+                            self.signals[g.idx()].name
+                        ));
+                    }
+                }
+                break Exit::Signal(g);
+            }
+            if matches!(self.nodes[end.idx()].kind, NodeKind::BufferStop | NodeKind::Boundary) {
+                break Exit::Node(end);
+            }
+            if matches!(self.nodes[end.idx()].kind, NodeKind::Points { .. }) {
+                crossed.push(end);
+            }
+            match self.step_checked(seg, dir, &view)? {
+                Some((ns, nd)) => (seg, dir) = (ns, nd),
+                None => unreachable!("only buffer stops and boundaries end the track"),
+            }
+        };
+        let mut overlap: Vec<SectionId> = Vec::new();
+        if matches!(exit, Exit::Signal(_)) {
+            let mut cur = self.segments[seg.idx()].section;
+            // Run on to the far end of the last overlap section so the points
+            // inside it are crossed too.
+            loop {
+                steps += 1;
+                if steps > limit {
+                    return Err("the overlap loops back on itself".into());
+                }
+                let end = self.segments[seg.idx()].end_node(dir);
+                let Some((ns, nd)) = self.step_checked(seg, dir, &view)? else { break };
+                let sec = self.segments[ns.idx()].section;
+                if sec != cur && overlap.len() >= overlap_len {
+                    break;
+                }
+                if matches!(self.nodes[end.idx()].kind, NodeKind::Points { .. }) {
+                    crossed.push(end);
+                }
+                (seg, dir) = (ns, nd);
+                if sec != cur {
+                    overlap.push(sec);
+                    cur = sec;
+                }
+            }
+        }
+        Ok(TracedRoute { path, exit, overlap, points_crossed: crossed })
     }
 }
