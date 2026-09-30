@@ -24,6 +24,10 @@ required-features = ["dev-auth"]
 name = "e2e"
 required-features = ["dev-auth"]
 
+[[test]]
+name = "client"
+required-features = ["dev-auth"]
+
 [features]
 # Adds /auth/dev?user=<name> (tests and bots only; never in the release image).
 dev-auth = []
@@ -45,5 +49,6 @@ tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync", "
 
 [dev-dependencies]
 signalbox-bot = { path = "../bot" }
+signalbox-client-core = { path = "../client-core" }
 ts2-import = { path = "../ts2-import" }
 rusqlite.workspace = true
