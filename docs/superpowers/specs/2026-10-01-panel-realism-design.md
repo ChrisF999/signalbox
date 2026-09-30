@@ -26,6 +26,8 @@ https://claude.ai/artifact/Kt6TDwNEWY8ecY68dnrKF9
 | 6 | Auto-working and labels | Blue ○A button by each automatic signal (hollow off, filled on, clickable = the existing auto-working menu command); uppercase grey labels, with a direction arrow where the layout gives one; ochre platform blocks with the platform number inside |
 | 7 | Fringe | Track outside the player's area drawn hollow (outline only), not dimmed; fringe signals, numbers and headcodes grey rather than dimmed colours |
 | 8 | Booked platforms | A simplifier panel (always available); click a headcode for its schedule as a toggle. Default: off |
+| 10 | Direction arrows | Automatic arrows on every running line from signal facing, plus optional hand-authored line names (`UP MAIN`, `DOWN MAIN`) per layout |
+| 11 | Signal prefixes | Both: a box prefix per layout and a workstation letter per area, e.g. `LA121`; single-area layouts omit the workstation letter |
 | 9 | Flashing | Only for transitional or abnormal states: points moving / not detected, the selected entrance, a cancelled route whose approach locking is timing out. Rejected-command feedback becomes a steady alarm line plus a brief outline on the signal, not a flash |
 
 ## 2. Drawing (client-ui)
@@ -44,9 +46,34 @@ https://claude.ai/artifact/Kt6TDwNEWY8ecY68dnrKF9
   drawn for an empty berth. Fringe headcodes grey.
 - Fringe track: outlined, not filled. Fringe elements never clickable except a fringe signal or exit
   that ends one of the player's routes (D1 §3 exception, unchanged).
-- Direction arrows: TS2 labels carry no direction, so arrows appear only where a label's text already
-  contains one; no arrows are invented.
-- Signal numbers are the layout's own names (TS2 names), with no invented box prefix.
+- Direction arrows (owner decision 10): every running line gets small grey direction-of-travel arrows,
+  derived from the facing of the signals along it (a line whose signals face both ways, e.g. a single line,
+  gets a double arrow), placed at the ends of the player's visible track and at intervals along long
+  stretches. Line names are optional and hand-authored per layout (§2.1).
+- Signal prefixes (owner decision 11, "both"): each layout has a box prefix, and each player area is a
+  workstation with its own letter. A signal is displayed as `<box><workstation><number>` (e.g. `LA121`,
+  `LB72`, `LC101` on Liverpool Street); a single-area layout omits the workstation letter (`L121`).
+  Display only: wire names, commands, saves and the areas file's boundary/seed names keep the plain TS2
+  names. Hover text, menus, alarms, the simplifier and the enquiry window all use the displayed form. The
+  top bar shows the workstation, e.g. `Workstation B · Bethnal Green`.
+
+### 2.1 Per-layout display data
+
+- Prefixes live in the layout's areas file (`layouts/<name>.areas.json`, applied by `ts2-import
+  --areas`): an optional top-level `"prefix"` (the box, 1–3 capital letters) and an optional per-area
+  `"workstation"` (one capital letter). Defaults: the box prefix is the first letter of the layout's title;
+  workstation letters are A, B, C… in file order. ts2-import writes them into the world (areas carry their
+  workstation letter; the world carries the box prefix), and the game sends them in the `Layout`
+  (`Layout.box_prefix`, `AreaInfo.workstation`, `#[serde(default)]`).
+- Line names come from an optional `layouts/<name>.lines.json`, applied by `ts2-import --lines`: a list of
+  `{ "name": "UP MAIN", "direction": "up"|"down", "through": [signal or section names] }`; the converter
+  writes each as a label with an arrow at the named stretch's ends in the world's `layout` labels. Unknown
+  names are hard errors, like the areas file. The owner's three layouts get hand-written line files
+  (Liverpool Street, Drain, Gretz), using the TS2 data's own hints (e.g. `SL_DN` / `SL_UP` platform names);
+  where the real line names are not known, those lines get arrows only.
+- Defaults chosen for the shipped layouts (editable in the areas files): Liverpool Street `L` (A Liverpool
+  Street, B Bethnal Green, C Hackney & Bow), Drain `W` (A Bank, B Waterloo), Gretz `G` (A Gretz, B Tournan
+  & Marles, C Mortcerf & Coulommiers).
 
 ## 3. Simplifier and headcode enquiry
 
