@@ -20,6 +20,10 @@ path = "src/bin/signalbox-server.rs"
 name = "front"
 required-features = ["dev-auth"]
 
+[[test]]
+name = "e2e"
+required-features = ["dev-auth"]
+
 [features]
 # Adds /auth/dev?user=<name> (tests and bots only; never in the release image).
 dev-auth = []
@@ -41,4 +45,5 @@ tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync", "
 
 [dev-dependencies]
 signalbox-bot = { path = "../bot" }
+ts2-import = { path = "../ts2-import" }
 rusqlite.workspace = true

@@ -2025,6 +2025,7 @@ dependencies = [
  "signalbox-protocol",
  "thiserror 2.0.21",
  "tokio",
+ "ts2-import",
 ]
 
 [[package]]

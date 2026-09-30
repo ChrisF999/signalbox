@@ -12,7 +12,7 @@ path = "src/lib.rs"
 signalbox-protocol = { path = "../protocol" }
 futures-util.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["net", "io-util"] }
+tokio = { workspace = true, features = ["net", "io-util", "time", "macros"] }
 tokio-tungstenite.workspace = true
 
 [dev-dependencies]
