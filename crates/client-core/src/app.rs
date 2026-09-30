@@ -26,6 +26,9 @@ pub const FLASH_S: f64 = 2.0;
 /// the connection is dead though it never closed: reconnect as if it had.
 pub const WATCHDOG_S: f64 = 20.0;
 
+/// The holder the view names for an area nobody holds (`game::ROBOT`).
+pub const ROBOT: &str = "robot";
+
 /// Seconds to wait before retry number `attempt` (0-based).
 pub fn backoff_s(attempt: u32) -> f64 {
     (FIRST_BACKOFF_S * f64::from(1u32 << attempt.min(8))).min(MAX_BACKOFF_S)
@@ -75,6 +78,12 @@ impl InGame {
     /// The area you hold; `None` while spectating.
     pub fn area(&self) -> Option<&str> {
         self.bot.area()
+    }
+
+    /// Whether your clock votes count (owner decision 12): you hold an
+    /// area, or nobody does (every area is the robot's).
+    pub fn can_vote(&self) -> bool {
+        self.area().is_some() || self.view().is_some_and(|v| v.holders.values().all(|h| h == ROBOT))
     }
 
     /// The chosen entrance signal.

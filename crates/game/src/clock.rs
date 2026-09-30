@@ -1,5 +1,7 @@
-//! The game clock: pause and speed change only when every holder agrees
-//! (spec §3.5). Real time is whatever the caller says it is.
+//! The game clock: pause and speed change only when every voter agrees
+//! (spec §3.5, amended by the realism spec's owner decision 12: the voters
+//! are the holders, or every connected player while nobody holds an area;
+//! `Game` decides who they are). Real time is whatever the caller says it is.
 
 use std::collections::BTreeSet;
 
@@ -21,8 +23,8 @@ pub struct OpenVote {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VoteError {
-    /// Only players holding an area vote.
-    NotAHolder,
+    /// Not one of the voters (a spectator while someone holds an area).
+    NotAVoter,
     /// Speeds are 1, 2, 4 or 8.
     BadSpeed,
 }
@@ -56,9 +58,9 @@ impl GameClock {
     }
 
     /// `voter` proposes, or agrees to, `proposal`. Returns it if it applied.
-    pub fn vote(&mut self, voter: &str, proposal: Proposal, holders: &BTreeSet<String>) -> Result<Option<Proposal>, VoteError> {
-        if !holders.contains(voter) {
-            return Err(VoteError::NotAHolder);
+    pub fn vote(&mut self, voter: &str, proposal: Proposal, voters: &BTreeSet<String>) -> Result<Option<Proposal>, VoteError> {
+        if !voters.contains(voter) {
+            return Err(VoteError::NotAVoter);
         }
         if let Proposal::Speed { x } = proposal {
             if !SPEEDS.contains(&x) {
@@ -73,18 +75,18 @@ impl GameClock {
         } else {
             self.vote = Some(OpenVote { proposal, agreed: BTreeSet::from([voter.to_string()]), left_s: VOTE_LAPSE_S });
         }
-        Ok(self.settle(holders))
+        Ok(self.settle(voters))
     }
 
-    /// Apply the open proposal if every holder has agreed. With no holders
-    /// at all nobody can agree, so the proposal is dropped.
-    pub fn settle(&mut self, holders: &BTreeSet<String>) -> Option<Proposal> {
+    /// Apply the open proposal if every voter has agreed. With no voters at
+    /// all nobody can agree, so the proposal is dropped.
+    pub fn settle(&mut self, voters: &BTreeSet<String>) -> Option<Proposal> {
         let v = self.vote.as_ref()?;
-        if holders.is_empty() {
+        if voters.is_empty() {
             self.vote = None;
             return None;
         }
-        if !holders.iter().all(|h| v.agreed.contains(h)) {
+        if !voters.iter().all(|h| v.agreed.contains(h)) {
             return None;
         }
         let p = v.proposal;

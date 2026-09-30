@@ -176,6 +176,7 @@ impl UiApp {
         let view = g.view().cloned();
         let areas: Vec<String> = g.layout().map(|l| l.areas.clone()).unwrap_or_default();
         let holding = g.area().is_some();
+        let can_vote = g.can_vote();
         let mut act: Vec<Box<dyn FnOnce(&mut App)>> = Vec::new();
         egui::Panel::top("bar").show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
@@ -183,13 +184,16 @@ impl UiApp {
                 if let Some(v) = &view {
                     ui.label(RichText::new(fmt_hms(v.sim_time)).monospace().size(16.0));
                     ui.label(if v.paused { "paused".to_string() } else { format!("{}×", v.speed) });
-                    let pause = if v.paused { Proposal::Resume } else { Proposal::Pause };
-                    if ui.button(proposal_text(pause)).clicked() {
-                        act.push(Box::new(move |a| a.vote(pause)));
-                    }
-                    for x in [1u8, 2, 4, 8] {
-                        if ui.selectable_label(!v.paused && v.speed == x, format!("{x}×")).clicked() {
-                            act.push(Box::new(move |a| a.vote(Proposal::Speed { x })));
+                    // Only voters get the buttons (owner decision 12).
+                    if can_vote {
+                        let pause = if v.paused { Proposal::Resume } else { Proposal::Pause };
+                        if ui.button(proposal_text(pause)).clicked() {
+                            act.push(Box::new(move |a| a.vote(pause)));
+                        }
+                        for x in [1u8, 2, 4, 8] {
+                            if ui.selectable_label(!v.paused && v.speed == x, format!("{x}×")).clicked() {
+                                act.push(Box::new(move |a| a.vote(Proposal::Speed { x })));
+                            }
                         }
                     }
                     if let Some(vote) = &v.vote {

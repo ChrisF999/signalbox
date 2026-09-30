@@ -29,6 +29,7 @@ https://claude.ai/artifact/Kt6TDwNEWY8ecY68dnrKF9
 | 10 | Direction arrows | Automatic arrows on every running line from signal facing, plus optional hand-authored line names (`UP MAIN`, `DOWN MAIN`) per layout |
 | 11 | Signal prefixes | Both: a box prefix per layout and a workstation letter per area, e.g. `LA121`; single-area layouts omit the workstation letter |
 | 9 | Flashing | Only for transitional or abnormal states: points moving / not detected, the selected entrance, a cancelled route whose approach locking is timing out. Rejected-command feedback becomes a steady alarm line plus a brief outline on the signal, not a flash |
+| 12 | Clock votes with nobody holding an area | When every area is robot-run, every connected spectator votes on pause and speed (unanimity as before, so a lone spectator's vote applies at once); as soon as anyone holds an area only holders vote again. Amends the server spec §3.5 (see §7) |
 
 ## 2. Drawing (client-ui)
 
@@ -111,3 +112,13 @@ https://claude.ai/artifact/Kt6TDwNEWY8ecY68dnrKF9
 
 Exact NR fonts and sizes (paywalled standards); detail views for track-circuit IDs; ARS; level
 crossings (no layout has them yet); train graphs; D2 desktop specifics beyond reusing these settings.
+
+## 7. Clock votes (owner decision 12, 2026-10-01)
+
+Amends `2026-09-30-server-and-protocol-design.md` §3.5, which let only holders vote and kept the clock as it was
+while nobody held an area. The voters are now the holders (connected or within their grace period) when any area is
+held, and otherwise every connected player; the robot never votes. A proposal still needs every voter and still lapses
+after 30 s. Whenever the voters change — a claim, a release, a grace period running out, a player connecting, a
+spectator leaving — the open proposal is settled again, so a spectator who agreed and then claims an area completes
+it, and a claim leaves a spectators' proposal waiting for the new holder. A vote from someone who is not a voter is
+still refused with `not_a_holder`. The client offers the clock buttons exactly to voters.

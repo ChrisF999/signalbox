@@ -328,6 +328,7 @@ impl Game {
         });
         p.connected = true;
         p.gone_s = 0.0;
+        self.settle_vote();
         self.resync(player)
     }
 
@@ -345,6 +346,7 @@ impl Game {
         }
         if p.area.is_none() {
             self.players.remove(player);
+            self.settle_vote();
             return;
         }
         p.connected = false;
@@ -436,13 +438,22 @@ impl Game {
         self.sim.world().net.areas[a.idx()].name.clone()
     }
 
-    fn holder_set(&self) -> BTreeSet<String> {
-        self.holders.iter().flatten().cloned().collect()
+    /// Who decides the clock (owner decision 12, amending spec §3.5): every
+    /// holder, connected or in their grace period; while nobody holds an
+    /// area, every connected player. The robot never votes.
+    pub fn voters(&self) -> BTreeSet<String> {
+        let holders: BTreeSet<String> = self.holders.iter().flatten().cloned().collect();
+        if !holders.is_empty() {
+            return holders;
+        }
+        self.players.iter().filter(|(_, p)| p.connected).map(|(name, _)| name.clone()).collect()
     }
 
+    /// The voters changed: an open proposal may now be complete, or have
+    /// nobody left to agree to it.
     fn settle_vote(&mut self) {
-        let holders = self.holder_set();
-        self.clock.settle(&holders);
+        let voters = self.voters();
+        self.clock.settle(&voters);
     }
 
     fn claim(&mut self, player: &str, area: &str) -> Vec<Out> {
@@ -497,10 +508,12 @@ impl Game {
     }
 
     fn vote(&mut self, player: &str, proposal: Proposal) -> Vec<Out> {
-        let holders = self.holder_set();
-        match self.clock.vote(player, proposal, &holders) {
+        let voters = self.voters();
+        match self.clock.vote(player, proposal, &voters) {
             Ok(_) => vec![],
-            Err(VoteError::NotAHolder) => vec![error(player, codes::NOT_A_HOLDER, "only players holding an area vote")],
+            Err(VoteError::NotAVoter) => {
+                vec![error(player, codes::NOT_A_HOLDER, "while anyone holds an area, only holders vote")]
+            }
             Err(VoteError::BadSpeed) => vec![error(player, codes::BAD_SPEED, "speed must be 1, 2, 4 or 8")],
         }
     }

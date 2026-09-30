@@ -50,11 +50,11 @@ fn every_holder_must_agree() {
 }
 
 #[test]
-fn only_holders_vote_and_only_listed_speeds() {
+fn only_voters_vote_and_only_listed_speeds() {
     let h = holders(&["alice"]);
     let mut c = GameClock::new(false);
-    assert_eq!(c.vote("sam", Proposal::Pause, &h), Err(VoteError::NotAHolder));
-    assert_eq!(c.vote("robot", Proposal::Pause, &h), Err(VoteError::NotAHolder));
+    assert_eq!(c.vote("sam", Proposal::Pause, &h), Err(VoteError::NotAVoter));
+    assert_eq!(c.vote("robot", Proposal::Pause, &h), Err(VoteError::NotAVoter));
     for x in [0, 3, 16, 255] {
         assert_eq!(c.vote("alice", Proposal::Speed { x }, &h), Err(VoteError::BadSpeed), "{x}");
     }

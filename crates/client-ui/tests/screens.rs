@@ -241,6 +241,28 @@ fn right_click_opens_the_menu_for_what_is_under_the_pointer() {
     assert!(has_text(&out, "Interpose"));
 }
 
+/// Owner decision 12: a spectator gets the clock buttons exactly while
+/// nobody holds an area.
+#[test]
+fn a_spectator_votes_only_while_nobody_holds_an_area() {
+    let mut r = Rig::in_game(drawn_twobox(), None);
+    let out = r.frame();
+    let pause = texts(&out).into_iter().find(|(t, _)| t == "pause").expect("every area is the robot's").1.center();
+    r.click(pause, PointerButton::Primary);
+    for _ in 0..3 {
+        r.frame();
+    }
+    assert!(r.view().paused, "a lone spectator's pause applies at once");
+    r.game.connect("bob");
+    r.game.handle("bob", ClientMsg::Claim { area: s("East") });
+    for _ in 0..3 {
+        r.frame();
+    }
+    let out = r.frame();
+    assert!(has_text(&out, "East: bob"), "{:?}", texts(&out));
+    assert!(!texts(&out).iter().any(|(t, _)| t == "resume" || t == "2×"), "no clock buttons now: {:?}", texts(&out));
+}
+
 #[test]
 fn a_layout_without_geometry_says_so() {
     let world = signalbox_core::world::World::from_json(

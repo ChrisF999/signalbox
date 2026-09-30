@@ -3,7 +3,7 @@
 
 mod common;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use common::*;
 use game::areas::AreaMap;
@@ -318,6 +318,84 @@ fn grace_expiry_completes_a_vote() {
     g.advance(10.0);
     assert_eq!(g.holder("East"), None);
     assert!(g.clock().paused, "bob's grace ran out, leaving alice as the only holder");
+}
+
+/// Owner decision 12: with every area robot-run, the spectators vote.
+#[test]
+fn a_lone_spectator_runs_the_clock_of_a_robot_only_game() {
+    let mut g = game();
+    join(&mut g, "sam", None);
+    assert_eq!(g.voters(), BTreeSet::from([s("sam")]));
+    assert!(send(&mut g, "sam", ClientMsg::Vote { proposal: Proposal::Pause }).is_empty());
+    assert!(g.clock().paused, "a lone voter's proposal applies at once");
+    send(&mut g, "sam", ClientMsg::Vote { proposal: Proposal::Speed { x: 4 } });
+    send(&mut g, "sam", ClientMsg::Vote { proposal: Proposal::Resume });
+    assert_eq!((g.clock().paused, g.clock().speed), (false, 4));
+}
+
+#[test]
+fn spectators_of_a_robot_only_game_must_all_agree() {
+    let mut g = game();
+    join(&mut g, "sam", None);
+    join(&mut g, "tom", None);
+    send(&mut g, "sam", ClientMsg::Vote { proposal: Proposal::Pause });
+    assert!(!g.clock().paused && g.clock().vote.is_some(), "tom has not agreed");
+    send(&mut g, "tom", ClientMsg::Vote { proposal: Proposal::Pause });
+    assert!(g.clock().paused);
+}
+
+#[test]
+fn a_spectator_who_leaves_can_complete_a_spectators_vote() {
+    let mut g = game();
+    join(&mut g, "sam", None);
+    join(&mut g, "tom", None);
+    send(&mut g, "sam", ClientMsg::Vote { proposal: Proposal::Pause });
+    g.disconnect("tom");
+    assert!(g.clock().paused, "sam is the only voter left, and agreed");
+}
+
+#[test]
+fn a_claim_stops_the_spectators_votes_counting() {
+    let mut g = game();
+    join(&mut g, "sam", None);
+    join(&mut g, "tom", None);
+    send(&mut g, "sam", ClientMsg::Vote { proposal: Proposal::Pause });
+    join(&mut g, "alice", Some("West"));
+    assert_eq!(g.voters(), BTreeSet::from([s("alice")]));
+    assert!(!g.clock().paused && g.clock().vote.is_some(), "re-settled: alice has not agreed");
+    let out = send(&mut g, "tom", ClientMsg::Vote { proposal: Proposal::Pause });
+    assert_eq!(error_codes(&out, "tom"), [codes::NOT_A_HOLDER]);
+    assert!(!g.clock().paused);
+    send(&mut g, "alice", ClientMsg::Vote { proposal: Proposal::Pause });
+    assert!(g.clock().paused);
+    send(&mut g, "alice", ClientMsg::Release);
+    assert_eq!(g.voters(), BTreeSet::from([s("alice"), s("sam"), s("tom")]), "nobody holds an area again");
+}
+
+#[test]
+fn a_spectator_who_agreed_and_then_claims_completes_the_vote() {
+    let mut g = game();
+    join(&mut g, "sam", None);
+    join(&mut g, "tom", None);
+    send(&mut g, "sam", ClientMsg::Vote { proposal: Proposal::Speed { x: 8 } });
+    claim(&mut g, "sam", "East");
+    assert_eq!(g.clock().speed, 8, "sam is now the only voter, and agreed");
+}
+
+#[test]
+fn a_holder_in_grace_still_counts_and_spectators_still_do_not() {
+    let mut g = game();
+    join(&mut g, "alice", Some("West"));
+    join(&mut g, "sam", None);
+    g.disconnect("alice");
+    assert_eq!(g.voters(), BTreeSet::from([s("alice")]), "alice holds West through her grace period");
+    let out = send(&mut g, "sam", ClientMsg::Vote { proposal: Proposal::Pause });
+    assert_eq!(error_codes(&out, "sam"), [codes::NOT_A_HOLDER]);
+    g.advance(GRACE_S);
+    assert_eq!(g.holder("West"), None);
+    assert_eq!(g.voters(), BTreeSet::from([s("sam")]), "the grace ran out: now sam decides");
+    send(&mut g, "sam", ClientMsg::Vote { proposal: Proposal::Pause });
+    assert!(g.clock().paused);
 }
 
 #[test]
