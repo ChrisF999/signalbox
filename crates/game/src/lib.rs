@@ -4,3 +4,4 @@
 
 pub mod areas;
 pub mod layout;
+pub mod view;
