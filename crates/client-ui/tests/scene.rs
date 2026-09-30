@@ -88,3 +88,31 @@ fn automatic_routes_are_listed_on_their_entrance() {
     assert_eq!(sc.signals[0].auto_routes, [s("W1-A")]);
     assert!(sc.signals[1].auto_routes.is_empty());
 }
+
+#[test]
+fn exits_know_their_fringe_and_routes() {
+    let sc = Scene::build(&layout_for(Some("West"))).unwrap();
+    let exits: Vec<(&str, bool, bool)> = sc.exits.iter().map(|e| (e.node.as_str(), e.fringe, e.route_exit)).collect();
+    assert_eq!(exits, [("E", true, true), ("N", true, true), ("W", false, true)]);
+    let a = sc.signals.iter().find(|s| s.name == "A").unwrap();
+    assert!(a.route_exit, "W1-A ends at A");
+    let sc = Scene::build(&layout_for(None)).unwrap();
+    assert!(sc.exits.iter().all(|e| !e.fringe && !e.route_exit));
+    assert!(sc.signals.iter().all(|s| !s.route_exit));
+}
+
+#[test]
+fn absurd_coordinates_are_left_out() {
+    let mut l = layout_for(Some("West"));
+    let g = l.geometry.as_mut().unwrap();
+    g.signals.iter_mut().find(|s| s.signal == "A").unwrap().x = 3e38;
+    g.lines[0].y2 = -3e38;
+    g.labels.push(protocol::LabelGeom { text: s("far"), x: 0.0, y: 1.0e7 + 1.0 });
+    let sc = Scene::build(&l).unwrap();
+    assert!(sc.signals.iter().all(|s| s.name != "A"));
+    assert_eq!(sc.tracks.len(), 1);
+    assert!(sc.labels.iter().all(|l| l.text != "far"));
+    let all = sc.all.unwrap();
+    assert!(all.min.is_finite() && all.max.is_finite() && all.center().is_finite());
+    assert!(sc.fit_bounds().unwrap().width() <= 1.0e7);
+}

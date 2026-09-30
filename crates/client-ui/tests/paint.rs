@@ -92,10 +92,34 @@ fn points_show_the_lying_leg_whole_and_a_gap_in_the_other() {
     assert!(legs.contains(&[c, n]), "normal lies: whole");
     assert!(legs.contains(&[c + (rv - c) * GAP, rv]), "reverse: from the gap");
     r.view.points.insert(s("P"), PointsView { position: PointsPos::Reverse, moving: true, locked: false });
-    let lit = lines_of(&r.draw(None, &[], None, 0.0), TRACK_FREE);
-    assert!(lit.contains(&[c, rv]) && lit.contains(&[c + (n - c) * GAP, n]));
-    let dark = lines_of(&r.draw(None, &[], None, 0.3), TRACK_FREE);
-    assert!(!dark.contains(&[c, rv]), "while moving, the lying leg flashes");
+    let open = lines_of(&r.draw(None, &[], None, 0.0), TRACK_FREE);
+    assert!(open.contains(&[c, rv]) && open.contains(&[c + (n - c) * GAP, n]));
+    assert!(!open.contains(&[c, c + (n - c) * GAP]), "the gap open");
+    let shut = lines_of(&r.draw(None, &[], None, 0.3), TRACK_FREE);
+    assert!(shut.contains(&[c, rv]), "the lying leg stays while moving");
+    assert!(shut.contains(&[c + (n - c) * GAP, n]) && shut.contains(&[c, c + (n - c) * GAP]), "while moving, the gap flashes");
+    r.view.points.get_mut("P").unwrap().moving = false;
+    let still = lines_of(&r.draw(None, &[], None, 0.3), TRACK_FREE);
+    assert!(!still.contains(&[c, c + (n - c) * GAP]), "a gap that is not moving stays open");
+}
+
+#[test]
+fn fringe_exit_markers_are_dim() {
+    let r = Rig::new(Some("West"));
+    let d = r.draw(None, &[], None, 0.0);
+    let square = |at: Pos2| {
+        d.shapes
+            .iter()
+            .find_map(|s| match s {
+                Shape::Rect(rs) if rs.rect.width() == 7.0 && rs.rect.center() == at => Some(rs.stroke.color),
+                _ => None,
+            })
+            .unwrap()
+    };
+    assert_eq!(square(r.at(0.0, 0.0)), TRACK_FREE, "W is West's");
+    assert_eq!(square(r.at(400.0, 0.0)), dim(TRACK_FREE), "E is East's");
+    let lit = r.draw(None, &[ExitName::Node(s("E"))], None, 0.0);
+    assert!(lit.shapes.iter().any(|s| matches!(s, Shape::Rect(rs) if rs.rect.width() == 7.0 && rs.stroke.color == SELECT)), "a lit exit is lit in full");
 }
 
 #[test]

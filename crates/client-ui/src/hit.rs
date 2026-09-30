@@ -45,13 +45,13 @@ where
 pub fn hit_test(scene: &Scene, cam: &Camera, screen: Rect, p: Pos2) -> Option<Hit> {
     let at = |q: Pos2| cam.to_screen(screen, q);
     if let Some(s) = nearest(scene.signals.iter().map(|s| (s, at(s.at).distance(p)))) {
-        return Some(Hit { target: Target::Signal(s.name.clone()), clickable: s.operable });
+        return Some(Hit { target: Target::Signal(s.name.clone()), clickable: s.operable || s.route_exit });
     }
     if let Some(b) = scene.berths.iter().find(|b| berth_rect(cam, screen, b.at, b.offset_px).contains(p)) {
         return Some(Hit { target: Target::Berth(b.name.clone()), clickable: b.operable });
     }
     if let Some(e) = nearest(scene.exits.iter().map(|e| (e, at(e.at).distance(p)))) {
-        return Some(Hit { target: Target::Exit(e.node.clone()), clickable: true });
+        return Some(Hit { target: Target::Exit(e.node.clone()), clickable: e.route_exit });
     }
     if let Some(pm) = nearest(scene.points.iter().map(|m| (m, at(m.at).distance(p)))) {
         return Some(Hit { target: Target::Points(pm.name.clone()), clickable: pm.operable });

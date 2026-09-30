@@ -110,13 +110,16 @@ fn points_shapes(out: &mut Vec<Shape>, p: &PointsMark, to: &dyn Fn(Pos2) -> Pos2
         out.push(Shape::line_segment([c, to(t)], stroke));
     }
     if let Some(l) = lie {
-        if !moving || blink_on(st.time) {
-            out.push(Shape::line_segment([c, to(l)], stroke));
-        }
+        out.push(Shape::line_segment([c, to(l)], stroke));
     }
     if let Some(o) = other {
         let end = to(o);
-        out.push(Shape::line_segment([c + (end - c) * GAP, end], stroke));
+        let gap_end = c + (end - c) * GAP;
+        out.push(Shape::line_segment([gap_end, end], stroke));
+        // While moving the gap flashes: closed in the dark half of the blink.
+        if moving && !blink_on(st.time) {
+            out.push(Shape::line_segment([c, gap_end], stroke));
+        }
     }
 }
 
@@ -140,7 +143,7 @@ pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawi
     for e in &scene.exits {
         let lit = st.exits.contains(&ExitName::Node(e.node.clone()));
         let r = Rect::from_center_size(to(e.at), vec2(7.0, 7.0));
-        d.shapes.push(Shape::rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.5, if lit { SELECT } else { TRACK_FREE }), StrokeKind::Middle));
+        d.shapes.push(Shape::rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.5, if lit { SELECT } else { shade(TRACK_FREE, e.fringe) }), StrokeKind::Middle));
     }
     for s in &scene.signals {
         let at = to(s.at);

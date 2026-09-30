@@ -38,6 +38,8 @@ pub struct SignalMark {
     pub operable: bool,
     /// Automatic routes starting here (an "A" is drawn, lit while one auto-works).
     pub auto_routes: Vec<String>,
+    /// Ends a route you can set, so it takes the click that sets it even on the fringe.
+    pub route_exit: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -54,6 +56,10 @@ pub struct BerthMark {
 pub struct ExitMark {
     pub node: String,
     pub at: Pos2,
+    /// On no section of your own (dimmed).
+    pub fringe: bool,
+    /// Ends a route you can set: clickable.
+    pub route_exit: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -86,9 +92,12 @@ pub struct Scene {
     pub all: Option<Rect>,
 }
 
+/// Coordinates beyond this are nonsense and left out, so bounds, centres
+/// and fits stay finite.
+pub const MAX_COORD: f64 = 1.0e7;
+
 fn pt(x: f64, y: f64) -> Option<Pos2> {
-    let p = pos2(x as f32, y as f32);
-    (p.x.is_finite() && p.y.is_finite()).then_some(p)
+    (x.abs() <= MAX_COORD && y.abs() <= MAX_COORD).then(|| pos2(x as f32, y as f32))
 }
 
 fn grow(r: &mut Option<Rect>, p: Pos2) {
@@ -106,6 +115,7 @@ impl Scene {
         let seg_of: BTreeMap<&str, (&str, &str, &str)> =
             l.segments.iter().map(|s| (s.name.as_str(), (s.section.as_str(), s.from.as_str(), s.to.as_str()))).collect();
         let other_area = |area: &str| l.area.as_deref().is_some_and(|mine| mine != area);
+        let exit_of_yours = |exit: &ExitName| l.routes.iter().any(|r| r.operable && &r.exit == exit);
         let mut sc = Scene::default();
         for line in &g.lines {
             let (Some(a), Some(b), Some(&(section, _, _))) = (pt(line.x1, line.y1), pt(line.x2, line.y2), seg_of.get(line.segment.as_str()))
@@ -144,6 +154,7 @@ impl Scene {
                 fringe: other_area(&info.area),
                 operable: info.operable,
                 auto_routes: l.routes.iter().filter(|r| r.automatic && r.entrance == s.signal).map(|r| r.name.clone()).collect(),
+                route_exit: exit_of_yours(&ExitName::Signal(s.signal.clone())),
             });
             for b in l.berths.iter().filter(|b| b.signal.as_deref() == Some(s.signal.as_str())) {
                 if let Some(bat) = pt(s.berth_x, s.berth_y) {
@@ -169,7 +180,17 @@ impl Scene {
             .collect();
         for n in &exit_nodes {
             if let Some(&at) = node_at.get(n) {
-                sc.exits.push(ExitMark { node: n.to_string(), at });
+                // Fringe unless one of your own sections reaches the node
+                // (nothing is fringe to a spectator).
+                let own = l.area.is_none() || l.segments.iter().any(|s| {
+                    (s.from == *n || s.to == *n) && fringe_of.get(s.section.as_str()) == Some(&false)
+                });
+                sc.exits.push(ExitMark {
+                    node: n.to_string(),
+                    at,
+                    fringe: !own,
+                    route_exit: exit_of_yours(&ExitName::Node(n.to_string())),
+                });
             }
         }
         for b in &l.berths {

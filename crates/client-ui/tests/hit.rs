@@ -55,3 +55,19 @@ fn a_spectator_can_hover_but_not_work() {
     assert_eq!(hit_test(&sc, &cam, screen, at(&cam, screen, 215.0, 5.0)), hit(Target::Signal(s("C")), false));
     assert_eq!(hit_test(&sc, &cam, screen, at(&cam, screen, 207.5, 0.0)), hit(Target::Points(s("P")), false));
 }
+
+#[test]
+fn the_exit_of_a_route_you_can_set_is_clickable_even_on_the_fringe() {
+    let (sc, cam, screen) = setup(Some("East"));
+    assert_eq!(hit_test(&sc, &cam, screen, at(&cam, screen, 100.0, 5.0)), hit(Target::Signal(s("W2")), true), "W2 ends C-W2 and D-W2");
+    assert_eq!(hit_test(&sc, &cam, screen, at(&cam, screen, 200.0, -5.0)), hit(Target::Signal(s("A")), false), "A ends none of East's routes");
+    let (sc, cam, screen) = setup(Some("West"));
+    assert_eq!(hit_test(&sc, &cam, screen, at(&cam, screen, 400.0, 0.0)), hit(Target::Exit(s("E")), true), "E: West's A-E, on the fringe");
+}
+
+#[test]
+fn a_spectator_cannot_click_an_exit_marker() {
+    let (sc, cam, screen) = setup(None);
+    let w = sc.exits.iter().find(|e| e.node == "W").unwrap().at;
+    assert_eq!(hit_test(&sc, &cam, screen, at(&cam, screen, w.x, w.y)), hit(Target::Exit(s("W")), false));
+}
