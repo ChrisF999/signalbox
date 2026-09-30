@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the browser client (scripts/build-web.sh; output target/web/) in a
+# Build the browser client (scripts/build-web.sh; output target/web-dist/) in a
 # local tools image: the Rust image plus the wasm32 target and
 # wasm-bindgen-cli, from the wasm-tools stage of deploy/Dockerfile. The
 # image is built on first use and tagged by the wasm-bindgen version in
