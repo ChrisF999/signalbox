@@ -26,10 +26,18 @@ struct Shared {
     generation: u64,
     /// Every frame the app sent, in order.
     sent: Vec<ClientFrame>,
+    /// Calls to `connect`.
+    connects: u64,
     task: Option<AbortHandle>,
 }
 
 /// `Transport` over `bot::net::Conn` on a tokio task.
+///
+/// Unlike the browser's, which hands the app the raw text, this one gets
+/// frames already parsed by `Conn::recv` and re-encodes them: a frame the
+/// app could not read would instead end this connection. The front sends
+/// none here, so the unreadable-frame path is not exercised (client-core's
+/// own tests cover it over `MemTransport`).
 struct NetTransport {
     base: String,
     cookie: Option<String>,
@@ -63,6 +71,7 @@ impl Transport for NetTransport {
                 t.abort();
             }
             s.generation += 1;
+            s.connects += 1;
             s.state = ConnState::Connecting;
             s.inbox.clear();
             s.generation
@@ -140,6 +149,14 @@ impl NetHandle {
     fn take_sent(&self) -> Vec<ClientFrame> {
         std::mem::take(&mut self.0.lock().unwrap().sent)
     }
+
+    fn state(&self) -> ConnState {
+        self.0.lock().unwrap().state
+    }
+
+    fn connects(&self) -> u64 {
+        self.0.lock().unwrap().connects
+    }
 }
 
 /// Tick the app every 20 ms on a real clock until `done` holds.
@@ -176,7 +193,7 @@ fn liverpool_json() -> String {
 #[tokio::test]
 async fn a_client_sets_a_route_on_liverpool_street() {
     let f = front_with("client-lst", &[("liverpool-st", liverpool_json())]).await;
-    let (mut app, _h, clock) = logged_in(&f, "ann").await;
+    let (mut app, h, clock) = logged_in(&f, "ann").await;
     drive(&mut app, clock, "the lobby", |a| a.layouts().iter().any(|l| l.name == "liverpool-st")).await;
     app.create_game("liverpool-st", Some(7), None);
     drive(&mut app, clock, "the first view", |a| a.game().is_some_and(|g| g.view().is_some())).await;
@@ -189,24 +206,46 @@ async fn a_client_sets_a_route_on_liverpool_street() {
         a.game().and_then(|g| g.view()).is_some_and(|v| !v.trains.is_empty())
     })
     .await;
-    let candidates: Vec<RouteInfo> = layout.routes.iter().filter(|r| r.operable && !r.automatic).cloned().collect();
+    // The robot worked Liverpool Street until the claim, so some routes may
+    // already be set: only a route that is not in the view when clicked, and
+    // whose `set_route` the client is seen to send, proves the clicks worked.
+    // Several routes can share an entrance and exit (different points); the
+    // front sets one of them, so a pair is tried once and any of its routes
+    // appearing counts.
+    let mut tried: Vec<(String, ExitName)> = Vec::new();
     let mut set = None;
-    for r in candidates.iter().take(8) {
-        let refusals = app.game().unwrap().log().entries().filter(|e| e.text.starts_with("Refused")).count();
+    for r in layout.routes.iter().filter(|r| r.operable && !r.automatic) {
+        if tried.len() == 8 {
+            break;
+        }
+        let pair = (r.entrance.clone(), r.exit.clone());
+        let names: Vec<String> =
+            layout.routes.iter().filter(|o| o.entrance == r.entrance && o.exit == r.exit).map(|o| o.name.clone()).collect();
+        let any_set = |a: &App| names.iter().any(|n| a.game().unwrap().view().unwrap().routes.contains_key(n));
+        if tried.contains(&pair) || any_set(&app) {
+            continue;
+        }
+        tried.push(pair);
+        let cmd = PlayerCommand::SetRoute { entrance: r.entrance.clone(), exit: r.exit.clone() };
+        // The refusal of exactly this command: a count of all refusals would
+        // stop growing once the log is at its cap.
+        let refused_line = format!("Refused: {}", client_core::text::command_text(&cmd));
+        let refused = |a: &App| a.game().unwrap().log().entries().any(|e| e.text.starts_with(&refused_line));
+        assert!(!refused(&app));
+        h.take_sent();
         app.click(&Target::Signal(r.entrance.clone()));
         assert_eq!(app.game().unwrap().selected(), Some(r.entrance.as_str()));
         assert!(app.valid_exits().contains(&r.exit));
+        assert!(!any_set(&app), "{} is not set when its exit is clicked", r.name);
         app.click(&match &r.exit {
             ExitName::Signal(s) => Target::Signal(s.clone()),
             ExitName::Node(n) => Target::Exit(n.clone()),
         });
-        drive(&mut app, clock, "the route or a refusal", |a| {
-            let g = a.game().unwrap();
-            g.view().unwrap().routes.contains_key(&r.name) || g.log().entries().filter(|e| e.text.starts_with("Refused")).count() > refusals
-        })
-        .await;
-        if app.game().unwrap().view().unwrap().routes.contains_key(&r.name) {
-            set = Some(r.name.clone());
+        assert_eq!(h.take_sent(), [ClientFrame::Game(ClientMsg::Command { cmd })], "the clicks sent exactly this set_route");
+        drive(&mut app, clock, "the route or a refusal", |a| any_set(a) || refused(a)).await;
+        let g = app.game().unwrap();
+        if let Some(n) = names.iter().find(|n| g.view().unwrap().routes.contains_key(*n)) {
+            set = Some(n.clone());
             break;
         }
     }
@@ -248,9 +287,18 @@ async fn a_dropped_connection_rejoins_with_one_join() {
 #[tokio::test]
 async fn without_a_session_the_client_asks_for_a_login() {
     let f = front("client-401").await;
-    let (t, _h) = NetTransport::new(&f.base, None);
+    let (t, h) = NetTransport::new(&f.base, None);
     let clock = Instant::now();
     let mut app = App::new(Box::new(t), 0.0);
     drive(&mut app, clock, "the refusal", |a| a.wants_login()).await;
+    // It stays there: no retry (twice the first backoff and more), nothing sent.
+    let until = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < until {
+        app.tick(clock.elapsed().as_secs_f64());
+        assert!(app.wants_login());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!((h.state(), h.connects()), (ConnState::Unauthorized, 1), "no second attempt");
+    assert!(h.take_sent().is_empty());
     f.running.stop().await;
 }
