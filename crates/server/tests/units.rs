@@ -45,6 +45,9 @@ fn config_defaults_and_overrides() {
     assert_eq!((o.issuer.as_str(), o.client_id.as_str(), o.client_secret.as_str()), (OIDC[0].1, "sbx", "s3cret"));
     assert!(c.game_bin.ends_with("signalbox-game"), "next to the running binary: {}", c.game_bin.display());
     assert_eq!(c.web_dir, PathBuf::from("/opt/signalbox/web"));
+    assert!(c.admins.is_empty(), "nobody is an admin unless named");
+    let c = cfg(&with(&[("SIGNALBOX_ADMINS", " skye, ,ann ,")])).unwrap();
+    assert_eq!(c.admins, ["skye", "ann"]);
     let c = cfg(&with(&[
         ("SIGNALBOX_ADDR", "127.0.0.1:1"),
         ("SIGNALBOX_DATA", "/d"),
@@ -146,6 +149,8 @@ fn the_placeholder_page_escapes_every_name() {
         areas: vec![AreaHolder { name: "Hackney & Bow".into(), holder: None }],
         players: vec![],
         error: Some("<b>bad</b>".into()),
+        creator: None,
+        can_delete: false,
     }];
     let page = index_page("a<b", &games, &[LayoutInfo { name: "drain".into(), areas: vec![] }]);
     assert!(!page.contains("<script>") && !page.contains("<b>bad"), "{page}");

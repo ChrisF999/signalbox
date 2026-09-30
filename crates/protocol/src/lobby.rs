@@ -28,6 +28,9 @@ pub enum LobbyMsg {
     Join { game: String },
     /// Back to the lobby.
     Leave,
+    /// Delete a saved or crashed game for good (owner decision 13): its
+    /// creator or an admin only. Answered with the new `games` list.
+    DeleteGame { game: String },
 }
 
 /// Front → client.
@@ -63,6 +66,12 @@ pub struct GameInfo {
     /// Why a crashed game stopped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Who created it; `None` for saves from before owner decision 13.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creator: Option<String>,
+    /// Whether the user this list was sent to may delete it now.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub can_delete: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,7 +89,7 @@ pub struct LayoutInfo {
 }
 
 /// `"type"` tags of `LobbyMsg`.
-pub const LOBBY_MSG_TYPES: [&str; 5] = ["list_games", "list_layouts", "create_game", "join", "leave"];
+pub const LOBBY_MSG_TYPES: [&str; 6] = ["list_games", "list_layouts", "create_game", "join", "leave", "delete_game"];
 /// `"type"` tags of `ClientMsg`.
 pub const CLIENT_MSG_TYPES: [&str; 5] = ["claim", "release", "command", "vote", "resync"];
 /// `"type"` tags of `LobbyReply`.

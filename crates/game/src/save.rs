@@ -80,6 +80,9 @@ pub struct SaveSummary {
     pub tick: u64,
     /// Sim time of the newest snapshot, seconds since midnight.
     pub sim_time: f64,
+    /// Who created the game (meta `creator`); `None` in saves from before
+    /// owner decision 13, which only admins may delete.
+    pub creator: Option<String>,
 }
 
 /// Read a save's meta and newest snapshot tick through a read-only
@@ -109,6 +112,8 @@ pub fn read_summary(path: &Path) -> Result<SaveSummary, SaveError> {
         .query_row("SELECT MAX(tick) FROM snapshots", [], |r| r.get::<_, Option<i64>>(0))?
         .ok_or_else(|| SaveError::Bad("no snapshot".into()))?;
     let tick = tick as u64;
+    let creator: Option<String> =
+        conn.query_row("SELECT value FROM meta WHERE key = 'creator'", [], |r| r.get(0)).optional()?;
     Ok(SaveSummary {
         layout: meta_value("layout")?,
         seed,
@@ -116,6 +121,7 @@ pub fn read_summary(path: &Path) -> Result<SaveSummary, SaveError> {
         last_played,
         tick,
         sim_time: f64::from(start_s) + tick as f64 * TICK_S,
+        creator,
     })
 }
 
@@ -166,6 +172,14 @@ impl SaveDb {
         let conn = Connection::open(path)?;
         wal(&conn)?;
         Ok(SaveDb { conn, busy: Cell::new(Duration::ZERO) })
+    }
+
+    /// Record who created the game (meta `creator`, owner decision 13). A
+    /// plain meta row: older readers ignore it and older saves lack it, so
+    /// the save schema stays 2.
+    pub fn set_creator(&self, user: &str) -> Result<(), SaveError> {
+        self.conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('creator', ?1)", params![user])?;
+        Ok(())
     }
 
     /// Wall time spent writing commands and snapshots so far.

@@ -52,6 +52,7 @@ pub async fn start(cfg: Config) -> Result<Running, String> {
             saves_dir: cfg.data_dir.join("saves"),
             sockets_dir: cfg.data_dir.join("sockets"),
             empty_exit_s: process::EMPTY_EXIT_S,
+            admins: cfg.admins.iter().cloned().collect(),
         },
         layouts,
     )?;

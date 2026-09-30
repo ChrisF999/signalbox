@@ -128,7 +128,25 @@ fn read_summary_reads_meta_and_the_newest_snapshot() {
     assert_eq!(sum.areas, [s("West"), s("East")]);
     assert_eq!(sum.sim_time, 7.0 * 3600.0 + 3.0);
     assert!(sum.last_played > 1_700_000_000, "{}", sum.last_played);
+    assert_eq!(sum.creator, None, "nobody recorded");
     assert!(Game::resume(&path).is_ok(), "reading left the save usable");
+}
+
+/// Owner decision 13: the save names its creator; a save without the row
+/// (every save from before) reads as `None`.
+#[test]
+fn the_creator_is_kept_in_the_save() {
+    let path = temp_save("creator");
+    let mut g = Game::create(&path, &twobox_json(), meta()).unwrap();
+    g.set_creator("Hackney & Bow's ann").unwrap();
+    drop(g);
+    assert_eq!(read_summary(&path).unwrap().creator.as_deref(), Some("Hackney & Bow's ann"));
+    let mut g = Game::resume(&path).unwrap();
+    assert!(g.save_now().is_empty());
+    drop(g);
+    assert_eq!(read_summary(&path).unwrap().creator.as_deref(), Some("Hackney & Bow's ann"), "resuming keeps it");
+    let mut unsaved = Game::new(twobox(), meta());
+    unsaved.set_creator("ann").unwrap();
 }
 
 #[test]

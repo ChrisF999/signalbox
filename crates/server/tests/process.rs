@@ -61,14 +61,33 @@ fn arguments_parse_and_bad_ones_are_explained() {
     assert_eq!(a.empty_exit, Duration::from_secs(2));
     assert_eq!(
         a.create,
-        Some(CreateArgs { world: PathBuf::from("w.json"), layout_name: s("drain"), seed: 9, start: Some(s("06:05:00")) })
+        Some(CreateArgs {
+            world: PathBuf::from("w.json"),
+            layout_name: s("drain"),
+            seed: 9,
+            start: Some(s("06:05:00")),
+            creator: None,
+        })
     );
     let err = |v: &[&str]| Args::parse(&args(v)).unwrap_err();
     assert_eq!(err(&["--socket", "x"]), "--save is required");
     assert_eq!(err(&["--save", "x"]), "--socket is required");
     assert_eq!(err(&["--save"]), "--save needs a value");
     assert_eq!(err(&["--save", "x", "--socket", "y", "--create"]), "--create needs --layout");
-    assert_eq!(err(&["--save", "x", "--socket", "y", "--seed", "1"]), "--layout, --layout-name, --seed and --start need --create");
+    assert_eq!(
+        err(&["--save", "x", "--socket", "y", "--seed", "1"]),
+        "--layout, --layout-name, --seed, --start and --creator need --create"
+    );
+    assert_eq!(
+        err(&["--save", "x", "--socket", "y", "--creator", "ann"]),
+        "--layout, --layout-name, --seed, --start and --creator need --create"
+    );
+    let a = Args::parse(&args(&[
+        "--save", "g.sqlite", "--socket", "g.sock", "--create", "--layout", "w.json", "--layout-name", "drain", "--seed", "9",
+        "--creator", "Hackney & Bow's ann",
+    ]))
+    .unwrap();
+    assert_eq!(a.create.unwrap().creator.as_deref(), Some("Hackney & Bow's ann"));
     assert_eq!(err(&["--save", "x", "--socket", "y", "--frobnicate"]), "unknown argument `--frobnicate`");
     assert_eq!(err(&["--save", "x", "--socket", "y", "--create", "--start", "24:00"]), "bad --start `24:00`");
 }

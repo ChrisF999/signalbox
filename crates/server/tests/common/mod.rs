@@ -37,6 +37,7 @@ pub fn dev_config(root: &Path, layouts_dir: PathBuf) -> Config {
         session_key: vec![7; 64],
         game_bin: PathBuf::from(GAME_BIN),
         web_dir: root.join("web"),
+        admins: vec![],
     }
 }
 

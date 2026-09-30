@@ -36,6 +36,10 @@ fn lobby_messages() {
     );
     check_client(ClientFrame::Lobby(LobbyMsg::Join { game: s("g-abcdefgh2345") }), json!({"type": "join", "game": "g-abcdefgh2345"}));
     check_client(ClientFrame::Lobby(LobbyMsg::Leave), json!({"type": "leave"}));
+    check_client(
+        ClientFrame::Lobby(LobbyMsg::DeleteGame { game: s("g-abcdefgh2345") }),
+        json!({"type": "delete_game", "game": "g-abcdefgh2345"}),
+    );
 }
 
 #[test]
@@ -67,6 +71,8 @@ fn lobby_replies() {
                     ],
                     players: vec![s("ann"), s("sam")],
                     error: None,
+                    creator: None,
+                    can_delete: false,
                 },
                 GameInfo {
                     id: s("g-zzzzzzzzzzzz"),
@@ -76,6 +82,8 @@ fn lobby_replies() {
                     areas: vec![],
                     players: vec![],
                     error: Some(s("resume: bad snapshot")),
+                    creator: Some(s("sam")),
+                    can_delete: true,
                 },
             ],
         }),
@@ -84,7 +92,7 @@ fn lobby_replies() {
              "areas": [{"name": "Liverpool Street", "holder": "ann"}, {"name": "Bethnal Green"}],
              "players": ["ann", "sam"]},
             {"id": "g-zzzzzzzzzzzz", "layout": "drain", "state": "crashed", "sim_time": 3600.0,
-             "areas": [], "players": [], "error": "resume: bad snapshot"}
+             "areas": [], "players": [], "error": "resume: bad snapshot", "creator": "sam", "can_delete": true}
         ]}),
     );
     check_server(
@@ -102,6 +110,19 @@ fn lobby_replies() {
         json!({"type": "error", "code": "unknown_game", "message": "no game `g-x`"}),
     );
     check_server(ServerFrame::Lobby(LobbyReply::Games { games: vec![] }), json!({"type": "games", "games": []}));
+    check_server(
+        ServerFrame::error(codes::NOT_ALLOWED, "only its creator or an admin may delete a game"),
+        json!({"type": "error", "code": "not_allowed", "message": "only its creator or an admin may delete a game"}),
+    );
+    assert_eq!(codes::GAME_RUNNING, "game_running");
+}
+
+#[test]
+fn a_games_list_from_before_deletion_still_reads() {
+    let old = json!({"type": "games", "games": [{"id": "g-abcdefgh2345", "layout": "drain", "state": "saved",
+                                                "sim_time": 0.0, "areas": [], "players": []}]});
+    let Ok(ServerFrame::Lobby(LobbyReply::Games { games })) = ServerFrame::from_json(&old.to_string()) else { panic!() };
+    assert_eq!((games[0].creator.clone(), games[0].can_delete), (None, false));
 }
 
 #[test]

@@ -80,6 +80,8 @@ fn the_lobby_lists_games_and_layouts_and_sends_what_you_ask() {
         areas: vec![AreaHolder { name: s("West"), holder: None }],
         players: vec![s("bob")],
         error: None,
+        creator: Some(s("bob")),
+        can_delete: false,
     };
     h.push(ServerFrame::Lobby(LobbyReply::Games { games: vec![info.clone()] }));
     h.push(ServerFrame::Lobby(LobbyReply::Layouts { layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West")] }] }));
@@ -89,12 +91,14 @@ fn the_lobby_lists_games_and_layouts_and_sends_what_you_ask() {
     app.refresh();
     app.create_game("twobox", Some(5), Some(s("07:30")));
     app.join("g-one");
+    app.delete_game("g-old");
     assert_eq!(
         h.take_sent(),
         [
             lobby(LobbyMsg::ListGames),
             lobby(LobbyMsg::CreateGame { layout: s("twobox"), seed: Some(5), start: Some(s("07:30")) }),
             lobby(LobbyMsg::Join { game: s("g-one") }),
+            lobby(LobbyMsg::DeleteGame { game: s("g-old") }),
         ]
     );
     h.push(ServerFrame::error(codes::UNKNOWN_LAYOUT, "no layout `x`"));

@@ -22,6 +22,8 @@ services:
     environment:
       SIGNALBOX_PUBLIC_URL: https://ra.tail3e0c1e.ts.net:50160
       OIDC_ISSUER: https://auth.skyes.lgbt/application/o/signalbox/
+      # May delete anyone's saved game from the lobby (creators may delete their own).
+      SIGNALBOX_ADMINS: skye
     ports:
       - "127.0.0.1:9160:9160"
     volumes:

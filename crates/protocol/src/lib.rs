@@ -33,4 +33,8 @@ pub mod codes {
     pub const NOT_IN_GAME: &str = "not_in_game";
     pub const TOO_MANY_GAMES: &str = "too_many_games";
     pub const GAME_STOPPED: &str = "game_stopped";
+    /// `delete_game` by someone who is neither the creator nor an admin.
+    pub const NOT_ALLOWED: &str = "not_allowed";
+    /// `delete_game` for a game that is starting or running.
+    pub const GAME_RUNNING: &str = "game_running";
 }

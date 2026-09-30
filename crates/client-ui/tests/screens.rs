@@ -131,6 +131,8 @@ fn the_lobby_lists_games_and_creates_one() {
         areas: vec![AreaHolder { name: s("West"), holder: Some(s("bob")) }, AreaHolder { name: s("East"), holder: None }],
         players: vec![s("bob")],
         error: Some(s("disk full")),
+        creator: Some(s("bob")),
+        can_delete: false,
     };
     r.h.push(ServerFrame::Lobby(LobbyReply::Games { games: vec![info] }));
     r.frame();
@@ -141,6 +143,40 @@ fn the_lobby_lists_games_and_creates_one() {
     let create = texts(&out).into_iter().find(|(t, _)| t == "Create").unwrap().1.center();
     r.click(create, PointerButton::Primary);
     assert_eq!(r.lobby_sent, [LobbyMsg::CreateGame { layout: s("twobox"), seed: None, start: None }]);
+}
+
+/// Owner decision 13: Delete only where the front says you may, and only
+/// after an in-page confirmation.
+#[test]
+fn deleting_a_game_asks_first() {
+    let mut r = Rig::lobby(drawn_twobox());
+    let game = |id: &str, can_delete: bool| GameInfo {
+        id: s(id),
+        layout: s("twobox"),
+        state: GameState::Saved,
+        sim_time: 25_200.0,
+        areas: vec![],
+        players: vec![],
+        error: None,
+        creator: Some(s("ann")),
+        can_delete,
+    };
+    r.h.push(ServerFrame::Lobby(LobbyReply::Games { games: vec![game("g-mine", true), game("g-theirs", false)] }));
+    r.frame();
+    let out = r.frame();
+    let find = |out: &FullOutput, want: &str| texts(out).into_iter().filter(|(t, _)| t == want).map(|(_, at)| at.center()).collect::<Vec<_>>();
+    let deletes = find(&out, "Delete");
+    assert_eq!(deletes.len(), 1, "only g-mine: {:?}", texts(&out));
+    r.click(deletes[0], PointerButton::Primary);
+    let out = r.frame();
+    assert!(has_text(&out, "Delete for good?"));
+    r.click(find(&out, "Cancel")[0], PointerButton::Primary);
+    let out = r.frame();
+    assert!(!has_text(&out, "Delete for good?") && r.lobby_sent.is_empty(), "cancelled: nothing sent");
+    r.click(find(&out, "Delete")[0], PointerButton::Primary);
+    let out = r.frame();
+    r.click(find(&out, "Yes, delete")[0], PointerButton::Primary);
+    assert_eq!(r.lobby_sent, [LobbyMsg::DeleteGame { game: s("g-mine") }]);
 }
 
 #[test]

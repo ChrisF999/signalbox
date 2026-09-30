@@ -7,7 +7,7 @@
 //! created or joined (`Starting`), so `Connect` and client messages sent
 //! while the child is still starting queue in order.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
@@ -47,6 +47,8 @@ pub struct SupervisorConfig {
     /// Passed to every game as `--empty-exit-s` (`process::EMPTY_EXIT_S`
     /// outside tests).
     pub empty_exit_s: u64,
+    /// May delete any saved or crashed game (owner decision 13).
+    pub admins: BTreeSet<String>,
 }
 
 /// A client socket's handle on the supervisor.
@@ -87,7 +89,7 @@ struct State {
 }
 
 enum Start {
-    Create { world: PathBuf, layout: String, seed: u64, start: Option<String> },
+    Create { world: PathBuf, layout: String, seed: u64, start: Option<String>, creator: String },
     Resume,
 }
 
@@ -265,7 +267,9 @@ impl Supervisor {
     pub fn handle_frame(self: &Arc<Self>, user: &str, conn: u64, f: ClientFrame) {
         match f {
             ClientFrame::Game(msg) => self.to_game(user, conn, msg),
-            ClientFrame::Lobby(LobbyMsg::ListGames) => self.reply(user, conn, frame(LobbyReply::Games { games: self.list_games() })),
+            ClientFrame::Lobby(LobbyMsg::ListGames) => {
+                self.reply(user, conn, frame(LobbyReply::Games { games: self.list_games_for(user) }))
+            }
             ClientFrame::Lobby(LobbyMsg::ListLayouts) => {
                 self.reply(user, conn, frame(LobbyReply::Layouts { layouts: self.layouts.infos() }))
             }
@@ -276,10 +280,11 @@ impl Supervisor {
                         Self::leave(&mut st, user);
                     }
                 }
-                self.reply(user, conn, frame(LobbyReply::Games { games: self.list_games() }));
+                self.reply(user, conn, frame(LobbyReply::Games { games: self.list_games_for(user) }));
             }
             ClientFrame::Lobby(LobbyMsg::CreateGame { layout, seed, start }) => self.create(user, conn, layout, seed, start),
             ClientFrame::Lobby(LobbyMsg::Join { game }) => self.join(user, conn, game),
+            ClientFrame::Lobby(LobbyMsg::DeleteGame { game }) => self.delete_game(user, conn, game),
         }
     }
 
@@ -355,7 +360,7 @@ impl Supervisor {
         Self::enter(&mut st, user, &id);
         drop(st);
         let seed = seed.unwrap_or_else(rand::random);
-        self.spawn_game(id, rx, Start::Create { world, layout, seed, start });
+        self.spawn_game(id, rx, Start::Create { world, layout, seed, start, creator: user.to_string() });
     }
 
     fn join(self: &Arc<Self>, user: &str, conn: u64, game: String) {
@@ -395,6 +400,11 @@ impl Supervisor {
             Self::enter(&mut st, user, &game);
             return;
         }
+        if !path.exists() {
+            // Deleted meanwhile (deletion holds the lock while it unlinks).
+            push(&st, user, c, ServerFrame::error(codes::UNKNOWN_GAME, format!("no game `{game}`")));
+            return;
+        }
         if let Err(f) = Self::room_for_one_more(&st) {
             push(&st, user, c, f);
             return;
@@ -406,9 +416,78 @@ impl Supervisor {
         self.spawn_game(game, rx, Start::Resume);
     }
 
+    // ---- deleting (owner decision 13) ----
+
+    /// The game's creator, or an admin.
+    fn may_delete(&self, user: &str, creator: Option<&str>) -> bool {
+        self.cfg.admins.contains(user) || creator == Some(user)
+    }
+
+    /// Delete a saved or crashed game: its save file and the SQLite files
+    /// beside it, and a crashed game's entry. Everyone gets the new list.
+    fn delete_game(&self, user: &str, conn: u64, game: String) {
+        if !valid_game_id(&game) {
+            return self.reply(user, conn, ServerFrame::error(codes::UNKNOWN_GAME, format!("no game `{game}`")));
+        }
+        let path = self.save_path(&game);
+        let creator = read_summary(&path).ok().and_then(|s| s.creator);
+        {
+            let mut st = self.lock();
+            let Some(c) = Self::current(&st, user, conn) else { return };
+            let refuse = |code: &str, why: String| push(&st, user, c, ServerFrame::error(code, why));
+            match st.games.get(&game).map(|e| &e.phase) {
+                Some(Phase::Starting | Phase::Running) => {
+                    return refuse(codes::GAME_RUNNING, format!("`{game}` is running; it can be deleted once it is saved"));
+                }
+                None if !path.exists() => return refuse(codes::UNKNOWN_GAME, format!("no game `{game}`")),
+                Some(Phase::Crashed(_)) | None => {}
+            }
+            if !self.may_delete(user, creator.as_deref()) {
+                return refuse(codes::NOT_ALLOWED, "only its creator or an admin may delete a game".into());
+            }
+            for suffix in ["", "-wal", "-shm"] {
+                let file = self.cfg.saves_dir.join(format!("{game}.sqlite{suffix}"));
+                match std::fs::remove_file(&file) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => {
+                        eprintln!("signalbox-server: cannot delete {}: {e}", file.display());
+                        return refuse(codes::SAVE_FAILED, format!("could not delete `{game}`: {e}"));
+                    }
+                }
+            }
+            st.games.remove(&game);
+        }
+        eprintln!("signalbox-server: {user} deleted {game}");
+        self.broadcast_games();
+    }
+
+    /// `games` as `user` may act on them.
+    fn for_user(&self, mut games: Vec<GameInfo>, user: &str) -> Vec<GameInfo> {
+        for g in &mut games {
+            g.can_delete = g.state != GameState::Running && self.may_delete(user, g.creator.as_deref());
+        }
+        games
+    }
+
+    /// Every client gets the games list, as they may act on it.
+    fn broadcast_games(&self) {
+        let games = self.list_games();
+        let st = self.lock();
+        for (user, c) in &st.clients {
+            push(&st, user, c, frame(LobbyReply::Games { games: self.for_user(games.clone(), user) }));
+        }
+    }
+
     // ---- the lobby ----
 
-    /// Every game: live ones from memory, the rest from their save files.
+    /// The games list as `user` sees it (`can_delete` set for them).
+    pub fn list_games_for(&self, user: &str) -> Vec<GameInfo> {
+        self.for_user(self.list_games(), user)
+    }
+
+    /// Every game: live ones from memory, the rest from their save files
+    /// (`can_delete` false: see `list_games_for`).
     pub fn list_games(&self) -> Vec<GameInfo> {
         let saves = scan_saves(&self.cfg.saves_dir);
         let st = self.lock();
@@ -423,6 +502,8 @@ impl Supervisor {
                     areas: s.areas.iter().map(|a| AreaHolder { name: a.clone(), holder: None }).collect(),
                     players: vec![],
                     error: None,
+                    creator: s.creator.clone(),
+                    can_delete: false,
                 },
                 Err(e) => GameInfo {
                     id: id.clone(),
@@ -432,6 +513,8 @@ impl Supervisor {
                     areas: vec![],
                     players: vec![],
                     error: Some(e.clone()),
+                    creator: None,
+                    can_delete: false,
                 },
             };
             out.insert(id.clone(), info);
@@ -450,6 +533,8 @@ impl Supervisor {
                 areas: areas_order.iter().map(|a| AreaHolder { name: a.clone(), holder: None }).collect(),
                 players: vec![],
                 error: None,
+                creator: None,
+                can_delete: false,
             });
             info.layout = e.layout.clone();
             match &e.phase {
@@ -489,11 +574,12 @@ impl Supervisor {
         let mut cmd = Command::new(&self.cfg.game_bin);
         cmd.arg("--save").arg(self.save_path(&id)).arg("--socket").arg(&socket);
         cmd.arg("--empty-exit-s").arg(self.cfg.empty_exit_s.to_string());
-        if let Start::Create { world, layout, seed, start } = &start {
+        if let Start::Create { world, layout, seed, start, creator } = &start {
             cmd.arg("--create").arg("--layout").arg(world).arg("--layout-name").arg(layout).arg("--seed").arg(seed.to_string());
             if let Some(s) = start {
                 cmd.arg("--start").arg(s);
             }
+            cmd.arg("--creator").arg(creator);
         }
         cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(true);
         // Its own process group: a terminal's Ctrl-C reaches only the front,

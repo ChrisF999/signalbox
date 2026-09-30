@@ -183,6 +183,15 @@ impl Game {
         Ok(g)
     }
 
+    /// Record `user` as the game's creator in its save (owner decision 13);
+    /// nothing for a game without a save.
+    pub fn set_creator(&mut self, user: &str) -> Result<(), GameError> {
+        if let Some(db) = &self.save {
+            db.set_creator(user)?;
+        }
+        Ok(())
+    }
+
     /// Snapshot now and restart the autosave timer. A failure goes to every
     /// connected player as `save_failed` and is kept for
     /// `take_save_errors`; the game carries on.

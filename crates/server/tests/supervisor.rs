@@ -2,6 +2,7 @@
 //! `signalbox-game` children, relaying, duplicate logins, crashes, the
 //! outbound queue and shutdown.
 
+use std::collections::BTreeSet;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -51,6 +52,7 @@ fn rig(name: &str, empty_exit_s: u64) -> Rig {
         saves_dir: root.join("data/saves"),
         sockets_dir: root.join("data/sockets"),
         empty_exit_s,
+        admins: BTreeSet::from([s("root")]),
     };
     Rig { sup: Supervisor::new(cfg, layouts).unwrap(), root }
 }
@@ -401,6 +403,7 @@ async fn a_game_whose_binary_is_missing_is_crashed_not_fatal() {
         saves_dir: root.join("saves"),
         sockets_dir: root.join("sockets"),
         empty_exit_s: 600,
+        admins: BTreeSet::new(),
     };
     let sup = Supervisor::new(cfg, Layouts::load(&layouts_dir(&root)).unwrap()).unwrap();
     let me = sup.attach("ann");
@@ -527,6 +530,7 @@ async fn a_game_still_starting_at_shutdown_is_stopped_not_crashed() {
         saves_dir: root.join("saves"),
         sockets_dir: root.join("sockets"),
         empty_exit_s: 600,
+        admins: BTreeSet::new(),
     };
     let sup = Supervisor::new(cfg, Layouts::load(&layouts_dir(&root)).unwrap()).unwrap();
     let sock = Sock { user: s("ann"), me: sup.attach("ann") };
@@ -673,4 +677,125 @@ async fn joining_the_game_you_are_in_resyncs_without_pausing_it() {
     let status = rig.sup.status(&id).expect("running");
     assert!(!status.paused, "still running a status later: {status:?}");
     rig.sup.shutdown_all(Duration::from_secs(10)).await;
+}
+
+// ---- deleting games (owner decision 13) ----
+
+fn is_games(f: &ServerFrame) -> bool {
+    matches!(f, ServerFrame::Lobby(LobbyReply::Games { .. }))
+}
+
+/// The next games list this socket gets.
+async fn games_list(sock: &Sock) -> Vec<GameInfo> {
+    let got = until(sock, is_games).await;
+    let Some(ServerFrame::Lobby(LobbyReply::Games { games })) = got.last() else { unreachable!() };
+    games.clone()
+}
+
+async fn listed(rig: &Rig, sock: &Sock) -> Vec<GameInfo> {
+    rig.lobby(sock, LobbyMsg::ListGames);
+    games_list(sock).await
+}
+
+fn save_files(rig: &Rig, id: &str) -> Vec<String> {
+    std::fs::read_dir(rig.saves())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with(id))
+        .collect()
+}
+
+#[tokio::test]
+async fn the_creator_deletes_their_saved_game_and_everyone_sees_it_go() {
+    let rig = rig("delete", 1);
+    let ann = rig.attach("ann");
+    let id = create(&rig, &ann).await;
+    let bob = rig.attach("bob");
+    rig.lobby(&ann, LobbyMsg::DeleteGame { game: id.clone() });
+    expect_error_eventually(&ann, codes::GAME_RUNNING).await;
+    rig.lobby(&ann, LobbyMsg::Leave);
+    games_list(&ann).await;
+    let g = rig.wait_for(&id, |g| g.state == GameState::Saved).await;
+    assert_eq!((g.creator.as_deref(), g.can_delete), (Some("ann"), false), "the plain list is nobody's");
+    std::fs::write(rig.saves().join(format!("{id}.sqlite-wal")), "").unwrap();
+    std::fs::write(rig.saves().join(format!("{id}.sqlite-shm")), "").unwrap();
+    assert_eq!(listed(&rig, &ann).await[0].can_delete, true);
+    assert_eq!(listed(&rig, &bob).await[0].can_delete, false);
+    rig.lobby(&bob, LobbyMsg::DeleteGame { game: id.clone() });
+    expect_error(&bob, codes::NOT_ALLOWED).await;
+    assert_eq!(save_files(&rig, &id).len(), 3, "nothing was deleted");
+    rig.lobby(&ann, LobbyMsg::DeleteGame { game: id.clone() });
+    assert!(games_list(&ann).await.is_empty());
+    assert!(games_list(&bob).await.is_empty(), "every client gets the new list");
+    assert!(save_files(&rig, &id).is_empty(), "the save and its -wal and -shm are gone");
+    rig.lobby(&ann, LobbyMsg::Join { game: id.clone() });
+    expect_error(&ann, codes::UNKNOWN_GAME).await;
+}
+
+/// Errors can queue behind frames of the game the socket is in.
+async fn expect_error_eventually(sock: &Sock, code: &str) {
+    let got = until(sock, |f| error_code(f).is_some()).await;
+    assert_eq!(error_code(got.last().unwrap()), Some(code), "{got:?}");
+}
+
+#[tokio::test]
+async fn an_admin_deletes_anyones_game_and_saves_from_before_creators() {
+    let rig = rig("delete-admin", 600);
+    let legacy = "g-dddddddddddd";
+    let json = std::fs::read_to_string(TWOBOX).unwrap();
+    drop(Game::create(&rig.saves().join(format!("{legacy}.sqlite")), &json, GameMeta { layout: s("twobox"), seed: 2 }).unwrap());
+    let ann = rig.attach("ann");
+    let root = rig.attach("root");
+    let g = &listed(&rig, &ann).await[0];
+    assert_eq!((g.creator.clone(), g.can_delete), (None, false), "a save without a creator: admins only");
+    assert!(listed(&rig, &root).await[0].can_delete);
+    rig.lobby(&ann, LobbyMsg::DeleteGame { game: s(legacy) });
+    expect_error(&ann, codes::NOT_ALLOWED).await;
+    rig.lobby(&root, LobbyMsg::DeleteGame { game: s(legacy) });
+    assert!(games_list(&root).await.is_empty());
+    assert!(save_files(&rig, legacy).is_empty());
+}
+
+#[tokio::test]
+async fn a_running_game_is_never_deleted_not_even_by_an_admin() {
+    let rig = rig("delete-running", 600);
+    let ann = rig.attach("ann");
+    let id = create(&rig, &ann).await;
+    let root = rig.attach("root");
+    rig.lobby(&root, LobbyMsg::DeleteGame { game: id.clone() });
+    expect_error(&root, codes::GAME_RUNNING).await;
+    assert!(!listed(&rig, &root).await[0].can_delete);
+    assert_eq!(rig.info(&id).state, GameState::Running);
+    assert!(rig.saves().join(format!("{id}.sqlite")).exists());
+    rig.sup.shutdown_all(Duration::from_secs(10)).await;
+}
+
+#[tokio::test]
+async fn a_crashed_game_is_deleted_with_its_entry() {
+    let rig = rig("delete-crashed", 600);
+    let bad = "g-cccccccccccc";
+    std::fs::write(rig.saves().join(format!("{bad}.sqlite")), "this is not a database").unwrap();
+    let ann = rig.attach("ann");
+    rig.lobby(&ann, LobbyMsg::Join { game: s(bad) });
+    until(&ann, |f| *f == notice(Notice::GameCrashed)).await;
+    assert_eq!(rig.info(bad).state, GameState::Crashed);
+    let root = rig.attach("root");
+    rig.lobby(&root, LobbyMsg::DeleteGame { game: s(bad) });
+    assert!(games_list(&root).await.is_empty(), "neither the file nor the crash is listed");
+    assert!(save_files(&rig, bad).is_empty());
+}
+
+#[tokio::test]
+async fn deleting_checks_the_id_like_join() {
+    let rig = rig("delete-ids", 600);
+    let victim = rig.root.join("victim.sqlite");
+    std::fs::write(&victim, "keep me").unwrap();
+    std::fs::write(rig.saves().join("notes.sqlite"), "not a game id").unwrap();
+    let root = rig.attach("root");
+    for id in ["../victim", "g-../../victim", "notes", "", "g-aaaaaaaaaaaa", "g-AAAAAAAAAAAA"] {
+        rig.lobby(&root, LobbyMsg::DeleteGame { game: s(id) });
+        expect_error(&root, codes::UNKNOWN_GAME).await;
+    }
+    assert!(victim.exists() && rig.saves().join("notes.sqlite").exists());
 }

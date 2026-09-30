@@ -28,6 +28,7 @@ value stops the front with exit code 2 and one line saying what is wrong.
 | `SIGNALBOX_LAYOUTS` | image | `/opt/signalbox/layouts` |
 | `SIGNALBOX_GAME_BIN` | image | `/opt/signalbox/bin/signalbox-game` |
 | `SIGNALBOX_WEB` | image | `/opt/signalbox/web` (the browser client: `index.html`, `app/`; read once at start) |
+| `SIGNALBOX_ADMINS` | compose | `skye` (comma-separated usernames that may delete any saved or crashed game; a game's creator may always delete their own; default nobody) |
 | `SIGNALBOX_PUBLIC_URL` | compose | `https://ra.tail3e0c1e.ts.net:50160` (redirect URI = this + `/auth/callback`) |
 | `OIDC_ISSUER` | compose | `https://auth.skyes.lgbt/application/o/signalbox/` |
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | vault `oidc.env` | must match the provider blueprint |

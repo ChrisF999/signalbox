@@ -273,6 +273,7 @@ fn config(name: &str, issuer: &str) -> Config {
         session_key: vec![9; 64],
         game_bin: PathBuf::from(env!("CARGO_BIN_EXE_signalbox-game")),
         web_dir: root.join("web"),
+        admins: vec![],
     }
 }
 

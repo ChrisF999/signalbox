@@ -30,6 +30,8 @@ pub struct Config {
     /// The built browser client (`index.html`, `app/`); when missing, `/`
     /// keeps the placeholder page.
     pub web_dir: PathBuf,
+    /// Usernames that may delete any saved game (owner decision 13).
+    pub admins: Vec<String>,
 }
 
 pub const DEFAULT_ADDR: &str = "0.0.0.0:9160";
@@ -37,6 +39,11 @@ pub const DEFAULT_DATA: &str = "/data";
 pub const DEFAULT_LAYOUTS: &str = "/opt/signalbox/layouts";
 pub const DEFAULT_WEB: &str = "/opt/signalbox/web";
 pub const MIN_KEY_BYTES: usize = 64;
+
+/// `SIGNALBOX_ADMINS`: comma-separated usernames, blanks dropped.
+pub fn parse_admins(s: &str) -> Vec<String> {
+    s.split(',').map(str::trim).filter(|u| !u.is_empty()).map(str::to_string).collect()
+}
 
 pub fn decode_hex(s: &str) -> Option<Vec<u8>> {
     let s = s.trim();
@@ -81,6 +88,7 @@ impl Config {
                 .and_then(|e| e.parent().map(|d| d.join("signalbox-game")))
                 .ok_or("cannot find signalbox-game; set SIGNALBOX_GAME_BIN")?,
         };
-        Ok(Config { addr, data_dir, layouts_dir, public_url, oidc, session_key, game_bin, web_dir })
+        let admins = get("SIGNALBOX_ADMINS").map(|a| parse_admins(&a)).unwrap_or_default();
+        Ok(Config { addr, data_dir, layouts_dir, public_url, oidc, session_key, game_bin, web_dir, admins })
     }
 }

@@ -40,6 +40,8 @@ pub struct UiApp {
     menu_target: Option<Target>,
     headcode: String,
     new_game: NewGame,
+    /// The game whose Delete was pressed and awaits "Yes, delete".
+    confirm_delete: Option<String>,
 }
 
 impl UiApp {
@@ -54,6 +56,7 @@ impl UiApp {
             menu_target: None,
             headcode: String::new(),
             new_game: NewGame::default(),
+            confirm_delete: None,
         }
     }
 
@@ -133,6 +136,7 @@ impl UiApp {
                 return;
             }
             let mut join = None;
+            let mut delete = None;
             egui::Grid::new("games").striped(true).show(ui, |ui| {
                 for h in ["Game", "Layout", "State", "Time", "Areas", "Players", ""] {
                     ui.label(RichText::new(h).strong());
@@ -152,14 +156,34 @@ impl UiApp {
                         g.areas.iter().map(|a| format!("{} ({})", a.name, a.holder.as_deref().unwrap_or("robot"))).collect();
                     ui.label(areas.join(", "));
                     ui.label(g.players.join(", "));
-                    if ui.button(if g.state == GameState::Running { "Join" } else { "Resume" }).clicked() {
-                        join = Some(g.id.clone());
-                    }
+                    ui.horizontal(|ui| {
+                        if ui.button(if g.state == GameState::Running { "Join" } else { "Resume" }).clicked() {
+                            join = Some(g.id.clone());
+                        }
+                        // Owner decision 13: the front re-checks all of it.
+                        if g.can_delete {
+                            if self.confirm_delete.as_deref() == Some(g.id.as_str()) {
+                                ui.label(RichText::new("Delete for good?").color(ALARM));
+                                if ui.button("Yes, delete").clicked() {
+                                    delete = Some(g.id.clone());
+                                }
+                                if ui.button("Cancel").clicked() {
+                                    self.confirm_delete = None;
+                                }
+                            } else if ui.button("Delete").clicked() {
+                                self.confirm_delete = Some(g.id.clone());
+                            }
+                        }
+                    });
                     ui.end_row();
                 }
             });
             if let Some(id) = join {
                 self.core.join(&id);
+            }
+            if let Some(id) = delete {
+                self.confirm_delete = None;
+                self.core.delete_game(&id);
             }
         });
     }

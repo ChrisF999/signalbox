@@ -16,7 +16,7 @@ use tokio::sync::mpsc;
 use tokio::time::{Instant, MissedTickBehavior, interval, timeout};
 
 pub const USAGE: &str = "usage: signalbox-game --save <db> --socket <path> [--empty-exit-s <secs>] \
-[--create --layout <world.json> --layout-name <name> --seed <u64> [--start HH:MM:SS]]";
+[--create --layout <world.json> --layout-name <name> --seed <u64> [--start HH:MM:SS] [--creator <user>]]";
 /// Real seconds a game with nobody connected waits before it saves and exits.
 pub const EMPTY_EXIT_S: u64 = 600;
 pub const ADVANCE_EVERY: Duration = Duration::from_millis(100);
@@ -34,6 +34,8 @@ pub struct CreateArgs {
     pub seed: u64,
     /// Normalised "HH:MM:SS".
     pub start: Option<String>,
+    /// Recorded in the save as its creator (owner decision 13).
+    pub creator: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,7 +51,7 @@ impl Args {
     /// Parse the arguments after the program name.
     pub fn parse(args: &[String]) -> Result<Args, String> {
         let (mut save, mut socket, mut empty_exit_s, mut create) = (None, None, EMPTY_EXIT_S, false);
-        let (mut world, mut layout_name, mut seed, mut start) = (None, None, None, None);
+        let (mut world, mut layout_name, mut seed, mut start, mut creator) = (None, None, None, None, None);
         let mut it = args.iter();
         while let Some(a) = it.next() {
             let mut value = || it.next().cloned().ok_or_else(|| format!("{a} needs a value"));
@@ -67,6 +69,7 @@ impl Args {
                     let v = value()?;
                     start = Some(normalise_start(&v).ok_or_else(|| format!("bad --start `{v}`"))?);
                 }
+                "--creator" => creator = Some(value()?),
                 other => return Err(format!("unknown argument `{other}`")),
             }
         }
@@ -78,10 +81,11 @@ impl Args {
                 layout_name: layout_name.ok_or("--create needs --layout-name")?,
                 seed: seed.ok_or("--create needs --seed")?,
                 start,
+                creator,
             })
         } else {
-            if world.is_some() || layout_name.is_some() || seed.is_some() || start.is_some() {
-                return Err("--layout, --layout-name, --seed and --start need --create".into());
+            if world.is_some() || layout_name.is_some() || seed.is_some() || start.is_some() || creator.is_some() {
+                return Err("--layout, --layout-name, --seed, --start and --creator need --create".into());
             }
             None
         };
@@ -115,7 +119,11 @@ pub fn open_game(args: &Args) -> Result<Game, String> {
                 None => json,
             };
             let meta = GameMeta { layout: c.layout_name.clone(), seed: c.seed };
-            Game::create(&args.save, &json, meta).map_err(|e| format!("create: {e}"))
+            let mut g = Game::create(&args.save, &json, meta).map_err(|e| format!("create: {e}"))?;
+            if let Some(user) = &c.creator {
+                g.set_creator(user).map_err(|e| format!("create: {e}"))?;
+            }
+            Ok(g)
         }
         None => Game::resume(&args.save).map_err(|e| e.to_string()),
     }

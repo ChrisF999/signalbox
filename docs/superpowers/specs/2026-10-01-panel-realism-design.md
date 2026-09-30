@@ -30,6 +30,7 @@ https://claude.ai/artifact/Kt6TDwNEWY8ecY68dnrKF9
 | 11 | Signal prefixes | Both: a box prefix per layout and a workstation letter per area, e.g. `LA121`; single-area layouts omit the workstation letter |
 | 9 | Flashing | Only for transitional or abnormal states: points moving / not detected, the selected entrance, a cancelled route whose approach locking is timing out. Rejected-command feedback becomes a steady alarm line plus a brief outline on the signal, not a flash |
 | 12 | Clock votes with nobody holding an area | When every area is robot-run, every connected spectator votes on pause and speed (unanimity as before, so a lone spectator's vote applies at once); as soon as anyone holds an area only holders vote again. Amends the server spec §3.5 (see §7) |
+| 13 | Deleting games | A saved or crashed game can be deleted from the lobby by its creator or by an admin (`SIGNALBOX_ADMINS`); never a running one. Amends the server spec §3.1 (see §8) |
 
 ## 2. Drawing (client-ui)
 
@@ -122,3 +123,15 @@ after 30 s. Whenever the voters change — a claim, a release, a grace period ru
 spectator leaving — the open proposal is settled again, so a spectator who agreed and then claims an area completes
 it, and a claim leaves a spectators' proposal waiting for the new holder. A vote from someone who is not a voter is
 still refused with `not_a_holder`. The client offers the clock buttons exactly to voters.
+
+## 8. Deleting games (owner decision 13, 2026-10-01)
+
+Amends `2026-09-30-server-and-protocol-design.md` §3.1 (the lobby). A new lobby message `delete_game {game}` deletes
+a **saved or crashed** game for good: its save file and the SQLite `-wal`/`-shm` files beside it, under `saves/` only,
+with the id checked exactly as `join` checks it; a crashed game's entry goes too. Starting and running games are
+refused (`game_running`). Only the game's creator — recorded as a `creator` row in the save's `meta` table when the
+game is created — or an admin may delete it (`not_allowed` otherwise); admins are the usernames in the optional
+`SIGNALBOX_ADMINS` (comma-separated, default none), and saves from before this change, which have no creator, are
+theirs alone. On success every connected client gets the new `games` list. `GameInfo` gains `creator` and
+`can_delete` (computed for the user the list is sent to); the lobby shows a Delete button only where `can_delete`
+holds, with a confirm step in the page, and the front re-checks everything regardless.

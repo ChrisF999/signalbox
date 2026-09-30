@@ -428,6 +428,12 @@ impl App {
         }
     }
 
+    /// Delete a saved or crashed game (owner decision 13). The front checks
+    /// who may and answers with the new games list, or an error for the lobby.
+    pub fn delete_game(&mut self, game: &str) {
+        self.send(ClientFrame::Lobby(LobbyMsg::DeleteGame { game: game.to_string() }));
+    }
+
     pub fn join(&mut self, game: &str) {
         if self.send(ClientFrame::Lobby(LobbyMsg::Join { game: game.to_string() })) {
             self.joining = Some(Joining { game: Some(game.to_string()), rejoin: false });
