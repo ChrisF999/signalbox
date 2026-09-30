@@ -4,7 +4,10 @@
 
 pub mod areas;
 pub mod clock;
+pub mod game;
 pub mod layout;
 pub mod names;
 pub mod notices;
 pub mod view;
+
+pub use game::{GRACE_S, Game, GameMeta, GameStats, MAX_TICKS_PER_ADVANCE, Out, ROBOT};
