@@ -388,6 +388,7 @@ dependencies = [
 name = "signalbox-server"
 version = "0.1.0"
 dependencies = [
+ "rand",
  "rusqlite",
  "serde_json",
  "signalbox-core",
