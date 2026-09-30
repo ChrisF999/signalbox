@@ -37,6 +37,7 @@ pub fn diff(old: &View, new: &View) -> Option<Delta> {
     d.sections = changed(&old.sections, &new.sections);
     d.routes = sparse(&old.routes, &new.routes);
     d.berths = sparse(&old.berths, &new.berths);
+    d.trains = sparse(&old.trains, &new.trains);
     (!d.is_empty()).then_some(d)
 }
 
@@ -100,6 +101,16 @@ impl View {
                 }
                 None => {
                     self.berths.remove(k);
+                }
+            }
+        }
+        for (k, v) in &d.trains {
+            match v {
+                Some(row) => {
+                    self.trains.insert(k.clone(), row.clone());
+                }
+                None => {
+                    self.trains.remove(k);
                 }
             }
         }

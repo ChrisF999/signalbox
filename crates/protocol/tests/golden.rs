@@ -131,6 +131,7 @@ fn small_layout() -> Layout {
             automatic: false,
             operable: true,
         }],
+        geometry: None,
     }
 }
 
@@ -148,9 +149,63 @@ fn layout() {
             "berths": [{"name": "BW", "signal": null, "boundary": "W", "area": "West", "operable": true}],
             "platforms": [{"place": "EST", "platform": "1", "segment": "e", "from_m": 700.0, "to_m": 900.0}],
             "routes": [{"name": "A-E", "entrance": "A", "exit": {"kind": "node", "name": "E"},
-                        "automatic": false, "operable": true}]
+                        "automatic": false, "operable": true}],
+            "geometry": null
         }),
     );
+}
+
+#[test]
+fn layout_geometry() {
+    let mut l = small_layout();
+    l.geometry = Some(Geometry {
+        lines: vec![LineGeom { segment: s("pa"), x1: 10.0, y1: 625.0, x2: 205.5, y2: 625.0 }],
+        points: vec![PointsGeom {
+            node: s("P"),
+            x: 220.0,
+            y: 625.0,
+            toe: Some([215.0, 625.0]),
+            normal: Some([225.0, 625.0]),
+            reverse: None,
+        }],
+        signals: vec![SignalGeom {
+            signal: s("A"),
+            x: 300.0,
+            y: 25.0,
+            berth_x: 260.0,
+            berth_y: 30.0,
+            facing: Some([1.0, 0.0]),
+        }],
+        platforms: vec![PlatformGeom { place: s("EST"), platform: s("1"), x1: 0.0, y1: 0.0, x2: 300.0, y2: 15.0 }],
+        labels: vec![LabelGeom { text: s("Hackney & Bow"), x: -20.0, y: 615.0 }],
+        nodes: vec![NodeGeom { node: s("E"), x: 400.0, y: 0.0 }],
+    });
+    let want = json!({
+        "lines": [{"segment": "pa", "x1": 10.0, "y1": 625.0, "x2": 205.5, "y2": 625.0}],
+        "points": [{"node": "P", "x": 220.0, "y": 625.0, "toe": [215.0, 625.0], "normal": [225.0, 625.0], "reverse": null}],
+        "signals": [{"signal": "A", "x": 300.0, "y": 25.0, "berth_x": 260.0, "berth_y": 30.0, "facing": [1.0, 0.0]}],
+        "platforms": [{"place": "EST", "platform": "1", "x1": 0.0, "y1": 0.0, "x2": 300.0, "y2": 15.0}],
+        "labels": [{"text": "Hackney & Bow", "x": -20.0, "y": 615.0}],
+        "nodes": [{"node": "E", "x": 400.0, "y": 0.0}]
+    });
+    let json = serde_json::to_value(ServerMsg::Layout(l.clone())).unwrap();
+    assert_eq!(json["geometry"], want);
+    let back: ServerMsg = serde_json::from_value(json).unwrap();
+    assert_eq!(back, ServerMsg::Layout(l));
+}
+
+#[test]
+fn a_layout_or_view_from_before_d1_still_reads() {
+    let mut json = serde_json::to_value(ServerMsg::Layout(small_layout())).unwrap();
+    json.as_object_mut().unwrap().remove("geometry");
+    let ServerMsg::Layout(l) = serde_json::from_value(json).unwrap() else { panic!() };
+    assert_eq!(l.geometry, None);
+    let view = json!({
+        "type": "view", "seq": 1, "sim_time": 0.0, "speed": 1, "paused": false, "vote": null,
+        "holders": {}, "score": null, "signals": {}, "routes": {}, "points": {}, "sections": {}, "berths": {}
+    });
+    let ServerMsg::View(v) = serde_json::from_value(view).unwrap() else { panic!() };
+    assert!(v.trains.is_empty());
 }
 
 #[test]
@@ -168,6 +223,22 @@ fn view() {
         points: BTreeMap::from([(s("P"), PointsView { position: PointsPos::Normal, moving: false, locked: true })]),
         sections: BTreeMap::from([(s("TP"), SectionView { occupied: true, held: Held::Path })]),
         berths: BTreeMap::from([(s("BA"), s("1E01"))]),
+        trains: BTreeMap::from([
+            (
+                s("1E01"),
+                TrainRow {
+                    next_place: Some(s("EST")),
+                    next_platform: Some(s("1")),
+                    booked: Some(25500.0),
+                    late_s: 120,
+                    state: TrainState::InArea,
+                },
+            ),
+            (
+                s("2W03"),
+                TrainRow { next_place: None, next_platform: None, booked: None, late_s: 0, state: TrainState::Due },
+            ),
+        ]),
     };
     check_server(
         ServerMsg::View(v),
@@ -179,7 +250,11 @@ fn view() {
             "routes": {"A-E": {"state": "locked", "auto_working": false}},
             "points": {"P": {"position": "normal", "moving": false, "locked": true}},
             "sections": {"TP": {"occupied": true, "held": "path"}},
-            "berths": {"BA": "1E01"}
+            "berths": {"BA": "1E01"},
+            "trains": {
+                "1E01": {"next_place": "EST", "next_platform": "1", "booked": 25500.0, "late_s": 120, "state": "in_area"},
+                "2W03": {"next_place": null, "next_platform": null, "booked": null, "late_s": 0, "state": "due"}
+            }
         }),
     );
 }
@@ -193,13 +268,28 @@ fn delta_sends_only_changes_and_null_for_cleared() {
         signals: BTreeMap::from([(s("A"), Aspect::Red)]),
         routes: BTreeMap::from([(s("A-E"), None)]),
         berths: BTreeMap::from([(s("BA"), None), (s("BW1"), Some(s("2W03")))]),
+        trains: BTreeMap::from([
+            (s("1E01"), None),
+            (
+                s("2W03"),
+                Some(TrainRow {
+                    next_place: Some(s("WST")),
+                    next_platform: None,
+                    booked: Some(26100.0),
+                    late_s: 0,
+                    state: TrainState::AtPlatform,
+                }),
+            ),
+        ]),
         ..Delta::default()
     };
     check_server(
         ServerMsg::Delta(d),
         json!({
             "type": "delta", "seq": 8, "sim_time": 25216.3, "vote": null,
-            "signals": {"A": "red"}, "routes": {"A-E": null}, "berths": {"BA": null, "BW1": "2W03"}
+            "signals": {"A": "red"}, "routes": {"A-E": null}, "berths": {"BA": null, "BW1": "2W03"},
+            "trains": {"1E01": null, "2W03": {"next_place": "WST", "next_platform": null, "booked": 26100.0,
+                                             "late_s": 0, "state": "at_platform"}}
         }),
     );
     check_server(ServerMsg::Delta(Delta { seq: 9, ..Delta::default() }), json!({"type": "delta", "seq": 9}));

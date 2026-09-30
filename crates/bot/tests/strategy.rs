@@ -41,6 +41,7 @@ fn screen(berths: Vec<BerthInfo>, routes: Vec<RouteInfo>) -> Layout {
         berths,
         platforms: vec![],
         routes,
+        geometry: None,
     }
 }
 
@@ -58,6 +59,7 @@ fn view(t: f64, reds: &[&str], berths: &[(&str, &str)]) -> View {
         points: BTreeMap::new(),
         sections: BTreeMap::new(),
         berths: berths.iter().map(|(b, h)| (s(b), s(h))).collect(),
+        trains: BTreeMap::new(),
     }
 }
 

@@ -195,6 +195,7 @@ fn view(seq: u64) -> ServerFrame {
         points: Default::default(),
         sections: Default::default(),
         berths: Default::default(),
+        trains: Default::default(),
     }))
 }
 

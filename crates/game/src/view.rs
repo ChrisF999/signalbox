@@ -84,5 +84,6 @@ pub fn build_view(sim: &Sim, vis: &Visibility, shared: &Shared, seq: u64) -> Vie
         points,
         sections,
         berths,
+        trains: BTreeMap::new(),
     }
 }

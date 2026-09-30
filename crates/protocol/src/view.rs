@@ -25,6 +25,81 @@ pub struct Layout {
     pub berths: Vec<BerthInfo>,
     pub platforms: Vec<PlatformInfo>,
     pub routes: Vec<RouteInfo>,
+    /// The diagram of the visible part; `None` when the world has none.
+    #[serde(default)]
+    pub geometry: Option<Geometry>,
+}
+
+/// Diagram geometry in the layout's own coordinates (TS2 scene units, y
+/// grows downwards), limited to what the player sees.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Geometry {
+    pub lines: Vec<LineGeom>,
+    pub points: Vec<PointsGeom>,
+    pub signals: Vec<SignalGeom>,
+    pub platforms: Vec<PlatformGeom>,
+    pub labels: Vec<LabelGeom>,
+    /// Where route exits at nodes (buffer stops, boundaries) and boundary
+    /// berths are drawn.
+    pub nodes: Vec<NodeGeom>,
+}
+
+/// A segment drawn from (x1, y1) at its `from` node to (x2, y2) at its `to` node.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LineGeom {
+    pub segment: String,
+    pub x1: f64,
+    pub y1: f64,
+    pub x2: f64,
+    pub y2: f64,
+}
+
+/// Points at (x, y); each leg ends where the next drawn line starts.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PointsGeom {
+    pub node: String,
+    pub x: f64,
+    pub y: f64,
+    pub toe: Option<[f64; 2]>,
+    pub normal: Option<[f64; 2]>,
+    pub reverse: Option<[f64; 2]>,
+}
+
+/// A signal at (x, y), its berth box at (berth_x, berth_y), and `facing`,
+/// the direction a train passing it travels (not normalised).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SignalGeom {
+    pub signal: String,
+    pub x: f64,
+    pub y: f64,
+    pub berth_x: f64,
+    pub berth_y: f64,
+    pub facing: Option<[f64; 2]>,
+}
+
+/// A platform rectangle.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PlatformGeom {
+    pub place: String,
+    pub platform: String,
+    pub x1: f64,
+    pub y1: f64,
+    pub x2: f64,
+    pub y2: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NodeGeom {
+    pub node: String,
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LabelGeom {
+    pub text: String,
+    pub x: f64,
+    pub y: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -109,6 +184,34 @@ pub struct View {
     pub sections: BTreeMap<String, SectionView>,
     /// Only berths holding a headcode.
     pub berths: BTreeMap<String, String>,
+    /// Trains this player should know about, by headcode (spec D1 §4.2).
+    #[serde(default)]
+    pub trains: BTreeMap<String, TrainRow>,
+}
+
+/// In the order a train goes through them (the train list sorts by it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrainState {
+    /// Not on the railway yet.
+    Due,
+    /// Running, but outside your area.
+    Approaching,
+    InArea,
+    /// Standing at a platform (dwelling).
+    AtPlatform,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TrainRow {
+    /// The next call, `None` once the timetable is done.
+    pub next_place: Option<String>,
+    pub next_platform: Option<String>,
+    /// Booked time at the next call (arrival, else departure), seconds since midnight.
+    pub booked: Option<f64>,
+    /// How late against `booked` right now, in whole minutes, as seconds; never negative.
+    pub late_s: i64,
+    pub state: TrainState,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -182,6 +285,8 @@ pub struct Delta {
     pub sections: BTreeMap<String, SectionView>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub berths: BTreeMap<String, Option<String>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub trains: BTreeMap<String, Option<TrainRow>>,
 }
 
 impl Delta {

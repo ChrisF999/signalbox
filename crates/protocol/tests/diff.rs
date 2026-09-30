@@ -25,7 +25,12 @@ fn base() -> View {
             (s("TW2"), SectionView { occupied: false, held: Held::Path }),
         ]),
         berths: BTreeMap::from([(s("BW1"), s("1E01"))]),
+        trains: BTreeMap::from([(s("1E01"), row(TrainState::InArea, 0)), (s("2W03"), row(TrainState::Due, 0))]),
     }
+}
+
+fn row(state: TrainState, late_s: i64) -> TrainRow {
+    TrainRow { next_place: Some(s("EST")), next_platform: Some(s("1")), booked: Some(25500.0), late_s, state }
 }
 
 fn changed() -> View {
@@ -44,6 +49,9 @@ fn changed() -> View {
     v.sections.insert(s("TW1"), SectionView { occupied: true, held: Held::Overlap });
     v.berths.remove("BW1");
     v.berths.insert(s("BA"), s("1E01"));
+    v.trains.insert(s("1E01"), row(TrainState::AtPlatform, 60));
+    v.trains.remove("2W03");
+    v.trains.insert(s("1W05"), row(TrainState::Approaching, 0));
     v
 }
 
@@ -111,4 +119,23 @@ fn a_gap_is_refused_and_leaves_the_view_alone() {
     let mut v = base();
     assert_eq!(v.apply(&d), Err(SeqGap { have: 1, got: 3 }));
     assert_eq!(v, base());
+}
+
+#[test]
+fn trains_travel_like_berths_changed_added_and_removed() {
+    let d = diff(&base(), &changed()).unwrap();
+    assert_eq!(
+        d.trains,
+        BTreeMap::from([
+            (s("1E01"), Some(row(TrainState::AtPlatform, 60))),
+            (s("1W05"), Some(row(TrainState::Approaching, 0))),
+            (s("2W03"), None),
+        ])
+    );
+    let json = serde_json::to_value(&d).unwrap();
+    assert!(json["trains"]["2W03"].is_null(), "{json}");
+    let mut same = base();
+    same.seq = 2;
+    same.trains.insert(s("1E01"), row(TrainState::InArea, 0));
+    assert_eq!(diff(&base(), &same), None, "an unchanged row is not sent");
 }

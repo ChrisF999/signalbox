@@ -51,6 +51,7 @@ async fn decide_runs_at_most_twice_a_second_whoever_calls_it() {
             .iter()
             .map(|n| RouteInfo { name: format!("{n}-X"), entrance: s(n), exit: ExitName::Signal(s("X")), automatic: false, operable: true })
             .collect(),
+        geometry: None,
     };
     let view = View {
         seq: 1,
@@ -65,6 +66,7 @@ async fn decide_runs_at_most_twice_a_second_whoever_calls_it() {
         points: BTreeMap::new(),
         sections: BTreeMap::new(),
         berths: (0..3).map(|i| (format!("B{i}"), format!("1A0{i}"))).collect(),
+        trains: BTreeMap::new(),
     };
 
     let mut p = NetPlayer::new("ann", Conn::connect(&base, None).await.unwrap());

@@ -21,6 +21,7 @@ fn view(seq: u64) -> View {
         points: BTreeMap::new(),
         sections: BTreeMap::new(),
         berths: BTreeMap::new(),
+        trains: BTreeMap::new(),
     }
 }
 

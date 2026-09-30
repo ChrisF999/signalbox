@@ -117,5 +117,6 @@ pub fn build_layout(w: &World, map: &AreaMap, vis: &Visibility, you: &str) -> La
                 }
             })
             .collect(),
+        geometry: None,
     }
 }
