@@ -21,7 +21,9 @@ pub const MAX_BACKOFF_S: f64 = 10.0;
 pub const FLASH_S: f64 = 2.0;
 /// In a game with an open connection and nothing received for this long,
 /// join the game again: the front answers with a fresh layout and view, or
-/// with the error that ends the game (a lost `game_crashed`, say).
+/// with the error that ends the game (a lost `game_crashed`, say). If that
+/// join goes unanswered for as long again (even a paused game answers it),
+/// the connection is dead though it never closed: reconnect as if it had.
 pub const WATCHDOG_S: f64 = 20.0;
 
 /// Seconds to wait before retry number `attempt` (0-based).
@@ -129,6 +131,8 @@ pub struct App {
     pub(crate) me: Option<String>,
     /// When the last frame arrived (or the connection opened), for the watchdog.
     pub(crate) last_frame: f64,
+    /// The watchdog sent a join on this connection and no frame has come since.
+    pub(crate) watchdog_join_sent: bool,
 }
 
 impl App {
@@ -149,6 +153,7 @@ impl App {
             joining: None,
             me: None,
             last_frame: now,
+            watchdog_join_sent: false,
         }
     }
 
@@ -164,12 +169,10 @@ impl App {
                 self.link = Link::Open;
                 self.was_open = true;
                 self.last_frame = now;
+                self.watchdog_join_sent = false;
                 self.on_open();
             }
-            (Link::Connecting | Link::Open, ConnState::Closed) => {
-                self.link = Link::Waiting { retry_at: now + backoff_s(self.attempt) };
-                self.attempt = self.attempt.saturating_add(1);
-            }
+            (Link::Connecting | Link::Open, ConnState::Closed) => self.lost(),
             (Link::Connecting | Link::Open, ConnState::Unauthorized) => self.link = Link::LoginNeeded,
             (Link::Waiting { retry_at }, _) if now >= retry_at => {
                 self.transport.connect();
@@ -178,8 +181,12 @@ impl App {
             _ => {}
         }
         if self.link == Link::Open && now - self.last_frame >= WATCHDOG_S {
-            if let Some(game) = self.game.as_ref().map(|g| g.id.clone()) {
+            if self.watchdog_join_sent {
+                // Unanswered: the socket is dead; the next connection rejoins.
+                self.lost();
+            } else if let Some(game) = self.game.as_ref().map(|g| g.id.clone()) {
                 self.last_frame = now;
+                self.watchdog_join_sent = true;
                 // A rejoin: if the game is gone, its error ends the game.
                 self.joining = Some(Joining { game: Some(game.clone()), rejoin: true });
                 self.send(ClientFrame::Lobby(LobbyMsg::Join { game }));
@@ -190,6 +197,12 @@ impl App {
                 g.flash = None;
             }
         }
+    }
+
+    /// The connection is gone: wait out the backoff, then connect again.
+    fn lost(&mut self) {
+        self.link = Link::Waiting { retry_at: self.now + backoff_s(self.attempt) };
+        self.attempt = self.attempt.saturating_add(1);
     }
 
     pub fn link(&self) -> Link {
@@ -269,6 +282,7 @@ impl App {
             self.attempt = 0;
         }
         self.last_frame = self.now;
+        self.watchdog_join_sent = false;
         match ServerFrame::from_json(text) {
             Ok(ServerFrame::Lobby(r)) => self.lobby_reply(r),
             Ok(ServerFrame::Game(m)) => self.game_msg(m),

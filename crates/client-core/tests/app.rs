@@ -464,15 +464,54 @@ fn twenty_silent_seconds_in_a_game_join_it_again_once() {
     assert_eq!(h.take_sent(), [lobby(LobbyMsg::Join { game: s("g-one") })]);
     app.tick(21.5);
     app.tick(40.9);
-    assert!(h.take_sent().is_empty(), "once, then the timer starts again");
+    assert!(h.take_sent().is_empty(), "once");
+    assert_eq!((app.link(), h.connects()), (Link::Open, 1));
+}
+
+/// Twenty more silent seconds after the watchdog's join: even a paused game
+/// answers a join, so the connection is dead though it never closed. It is
+/// treated as closed: back off, then connect again and rejoin.
+#[test]
+fn a_watchdog_join_unanswered_for_twenty_seconds_reconnects() {
+    let (mut app, h) = in_game(); // last frame at 1.0
+    app.tick(21.0);
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::Join { game: s("g-one") })]);
+    app.tick(40.9);
+    assert_eq!(app.link(), Link::Open, "19.9 s after the join is not yet dead");
     app.tick(41.0);
+    assert_eq!(app.link(), Link::Waiting { retry_at: 41.0 + FIRST_BACKOFF_S });
+    assert!(h.take_sent().is_empty(), "no third join down a dead socket");
+    app.tick(41.0 + FIRST_BACKOFF_S);
+    assert_eq!((app.link(), h.connects()), (Link::Connecting, 2), "a new connection");
+    h.open();
+    app.tick(41.6);
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::Join { game: s("g-one") })], "the rejoin");
+    assert_eq!(app.game().unwrap().id, "g-one", "still in the game");
+    h.push(joined("g-one"));
+    h.push(view(9));
+    app.tick(41.7);
+    app.tick(61.6);
+    assert!(h.take_sent().is_empty(), "the new connection's watchdog starts afresh");
+    app.tick(61.7);
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::Join { game: s("g-one") })], "a join first, not a reconnect");
+    assert_eq!(h.connects(), 2);
+}
+
+/// Any frame after the watchdog's join (a paused game's answer, a delta)
+/// shows the connection alive: no reconnect, and the watchdog starts over.
+#[test]
+fn a_frame_after_the_watchdog_join_keeps_the_connection() {
+    let (mut app, h) = in_game(); // last frame at 1.0
+    app.tick(21.0);
     assert_eq!(h.take_sent(), [lobby(LobbyMsg::Join { game: s("g-one") })]);
     h.push(delta(2));
+    app.tick(30.0);
+    app.tick(49.9);
+    assert!(h.take_sent().is_empty());
+    assert_eq!((app.link(), h.connects()), (Link::Open, 1), "no reconnect");
     app.tick(50.0);
-    app.tick(69.9);
-    assert!(h.take_sent().is_empty(), "a frame resets it");
-    app.tick(70.0);
-    assert_eq!(h.take_sent(), [lobby(LobbyMsg::Join { game: s("g-one") })]);
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::Join { game: s("g-one") })], "silence again: a join, not a reconnect");
+    assert_eq!((app.link(), h.connects()), (Link::Open, 1));
     assert_eq!(app.game().unwrap().view().unwrap().seq, 2);
 }
 
