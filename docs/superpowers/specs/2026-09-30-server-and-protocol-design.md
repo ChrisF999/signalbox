@@ -382,3 +382,11 @@ Two implementation plans, each independently testable:
 Browser client (D); exact train positions in views; public (non-tailnet)
 hosting; replay/spectate UI; chat; per-player permissions beyond area
 ownership; Darwin timetables (E); level-2 signalling.
+
+## 15. Amendments (C1 planning, 2026-09-30)
+
+Recorded in full in the header of `docs/superpowers/plans/2026-09-30-c1-game-and-protocol.md`. In short:
+commands on the wire use names, not ids (§3.2); the `game` binary moves to C2 (§13); the fringe is a
+directed track walk (a train's possible moves, points toe↔leg only), not an undirected section flood
+(§4.5); a route from a boundary signal runs into the next area and belongs to the box in rear (§5);
+the robot runs every `ROBOT_EVERY_TICKS` ticks; Drain and Gretz area files ship alongside Liverpool Street.
