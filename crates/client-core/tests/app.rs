@@ -359,3 +359,138 @@ fn an_unasked_joined_enters_the_game() {
     app.tick(2.6);
     assert_eq!(h.take_sent(), [lobby(LobbyMsg::Join { game: s("g-one") })], "and it is the game to rejoin");
 }
+
+// ---- fix round 1: a lost `joined`, lobby errors in a game, the watchdog ----
+
+fn layout(you: &str) -> ServerFrame {
+    ServerFrame::Game(ServerMsg::Layout(Layout {
+        title: s("Two boxes"),
+        you: s(you),
+        area: None,
+        areas: vec![s("West")],
+        sections: vec![],
+        segments: vec![],
+        signals: vec![],
+        points: vec![],
+        berths: vec![],
+        platforms: vec![],
+        routes: vec![],
+        geometry: None,
+    }))
+}
+
+/// C2: an overflowing outbox can lose the `joined`; the layout and view
+/// that follow it still say which game you are in.
+#[test]
+fn a_lost_joined_is_made_good_by_the_layout_and_view() {
+    let (mut app, h) = open_app();
+    app.join("g-one");
+    h.push(layout("ann"));
+    h.push(view(4));
+    app.tick(1.0);
+    let g = app.game().expect("in the game without a `joined`");
+    assert_eq!((g.id.as_str(), g.you.as_str(), g.view().unwrap().seq), ("g-one", "ann", 4));
+    assert_eq!(g.layout_gen(), 1);
+    h.push(ServerFrame::error(codes::NOT_HOLDING, "you hold no area"));
+    app.tick(2.0);
+    assert!(app.game().is_some(), "the join is over: a later error is no failed join");
+}
+
+#[test]
+fn game_frames_in_the_lobby_without_a_join_are_still_dropped() {
+    let (mut app, h) = open_app();
+    h.push(layout("ann"));
+    h.push(view(4));
+    app.tick(1.0);
+    assert!(app.game().is_none());
+}
+
+#[test]
+fn a_lost_joined_after_a_reconnect_ends_the_rejoin_at_the_view() {
+    let (mut app, h) = in_game();
+    h.close();
+    app.tick(2.0);
+    app.tick(2.5);
+    h.open();
+    app.tick(2.6);
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::Join { game: s("g-one") })]);
+    h.push(layout("ann"));
+    h.push(view(30));
+    app.tick(2.7);
+    h.push(ServerFrame::error(codes::BAD_SPEED, "no such speed"));
+    app.tick(2.8);
+    let g = app.game().expect("the rejoin succeeded; a later error does not undo it");
+    assert_eq!(g.view().unwrap().seq, 30);
+    assert_eq!(g.log().entries().last().unwrap().text, "Error: no such speed");
+}
+
+#[test]
+fn a_lobby_error_in_a_game_is_an_alarm_not_an_exit() {
+    let (mut app, h) = in_game();
+    h.push(ServerFrame::error(codes::NOT_IN_GAME, "join a game first"));
+    app.tick(2.0);
+    let g = app.game().expect("still in the game");
+    let last = g.log().entries().last().unwrap();
+    assert_eq!((last.text.as_str(), last.alarm), ("Error: join a game first", true));
+    assert_eq!(app.lobby_note(), None);
+    assert!(h.take_sent().is_empty());
+}
+
+#[test]
+fn a_stopped_game_returns_to_the_lobby_with_a_banner() {
+    let (mut app, h) = in_game();
+    h.push(ServerFrame::error(codes::GAME_STOPPED, "the game stopped; join it again to resume it"));
+    h.push(view(2));
+    app.tick(2.0);
+    assert!(app.game().is_none());
+    assert_eq!(app.lobby_note(), Some("The game stopped. Join it again to resume it."));
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::ListGames)]);
+    h.close();
+    app.tick(3.0);
+    app.tick(3.5);
+    h.open();
+    app.tick(3.6);
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::ListLayouts), lobby(LobbyMsg::ListGames)], "no rejoin");
+}
+
+/// Twenty silent seconds in a game (a lost `game_crashed`, say): join the
+/// game again once; the front answers with a fresh view or an eviction.
+#[test]
+fn twenty_silent_seconds_in_a_game_join_it_again_once() {
+    let (mut app, h) = in_game(); // last frame at 1.0
+    app.tick(20.9);
+    assert!(h.take_sent().is_empty(), "19.9 s is not yet silent");
+    app.tick(21.0);
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::Join { game: s("g-one") })]);
+    app.tick(21.5);
+    app.tick(40.9);
+    assert!(h.take_sent().is_empty(), "once, then the timer starts again");
+    app.tick(41.0);
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::Join { game: s("g-one") })]);
+    h.push(delta(2));
+    app.tick(50.0);
+    app.tick(69.9);
+    assert!(h.take_sent().is_empty(), "a frame resets it");
+    app.tick(70.0);
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::Join { game: s("g-one") })]);
+    assert_eq!(app.game().unwrap().view().unwrap().seq, 2);
+}
+
+#[test]
+fn the_watchdog_sleeps_in_the_lobby_and_without_a_connection() {
+    let (mut app, h) = open_app();
+    app.tick(100.0);
+    assert!(h.take_sent().is_empty(), "the lobby is quiet by nature");
+    let (mut app, h) = in_game();
+    h.close();
+    app.tick(2.0);
+    app.reconnect_now();
+    app.tick(30.0);
+    h.open();
+    app.tick(30.1);
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::Join { game: s("g-one") })], "the rejoin only");
+    app.tick(50.0);
+    assert!(h.take_sent().is_empty(), "the timer starts when the connection opens");
+    app.tick(50.1);
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::Join { game: s("g-one") })]);
+}

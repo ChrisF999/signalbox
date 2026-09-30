@@ -7,7 +7,7 @@
 use bot::Bot;
 use protocol::{
     ClientFrame, ClientMsg, GameInfo, Layout, LayoutInfo, LobbyMsg, LobbyReply, Notice, PlayerCommand, Proposal, ServerFrame,
-    ServerMsg, View,
+    ServerMsg, View, codes,
 };
 
 use crate::log::Log;
@@ -19,6 +19,10 @@ pub const FIRST_BACKOFF_S: f64 = 0.5;
 pub const MAX_BACKOFF_S: f64 = 10.0;
 /// How long a refused command's entrance signal flashes.
 pub const FLASH_S: f64 = 2.0;
+/// In a game with an open connection and nothing received for this long,
+/// join the game again: the front answers with a fresh layout and view, or
+/// with the error that ends the game (a lost `game_crashed`, say).
+pub const WATCHDOG_S: f64 = 20.0;
 
 /// Seconds to wait before retry number `attempt` (0-based).
 pub fn backoff_s(attempt: u32) -> f64 {
@@ -95,6 +99,15 @@ impl InGame {
     }
 }
 
+/// A `join` or `create_game` whose `joined` has not come yet.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Joining {
+    /// The game asked for; `None` for a new game, whose id only `joined` gives.
+    pub(crate) game: Option<String>,
+    /// Sent by a reconnect: if it fails, the game is over for this client.
+    pub(crate) rejoin: bool,
+}
+
 pub struct App {
     pub(crate) transport: Box<dyn Transport>,
     pub(crate) link: Link,
@@ -110,8 +123,12 @@ pub struct App {
     pub(crate) game: Option<InGame>,
     /// The game to rejoin after a reconnect.
     pub(crate) rejoin: Option<String>,
-    /// A rejoin was sent and its `joined` has not come yet.
-    pub(crate) rejoining: bool,
+    /// A join was sent and neither its `joined` nor its layout or view has come.
+    pub(crate) joining: Option<Joining>,
+    /// Your name, from the last `joined`.
+    pub(crate) me: Option<String>,
+    /// When the last frame arrived (or the connection opened), for the watchdog.
+    pub(crate) last_frame: f64,
 }
 
 impl App {
@@ -129,7 +146,9 @@ impl App {
             lobby_note: None,
             game: None,
             rejoin: None,
-            rejoining: false,
+            joining: None,
+            me: None,
+            last_frame: now,
         }
     }
 
@@ -144,6 +163,7 @@ impl App {
             (Link::Connecting, ConnState::Open) => {
                 self.link = Link::Open;
                 self.was_open = true;
+                self.last_frame = now;
                 self.on_open();
             }
             (Link::Connecting | Link::Open, ConnState::Closed) => {
@@ -156,6 +176,12 @@ impl App {
                 self.link = Link::Connecting;
             }
             _ => {}
+        }
+        if self.link == Link::Open && now - self.last_frame >= WATCHDOG_S {
+            if let Some(game) = self.game.as_ref().map(|g| g.id.clone()) {
+                self.last_frame = now;
+                self.send(ClientFrame::Lobby(LobbyMsg::Join { game }));
+            }
         }
         if let Some(g) = self.game.as_mut() {
             if g.flash.as_ref().is_some_and(|(_, until)| now >= *until) {
@@ -200,7 +226,7 @@ impl App {
         match self.rejoin.clone() {
             // The full layout and view that follow `joined` are the one resync.
             Some(game) => {
-                self.rejoining = true;
+                self.joining = Some(Joining { game: Some(game.clone()), rejoin: true });
                 self.send(ClientFrame::Lobby(LobbyMsg::Join { game }));
             }
             None => {
@@ -231,7 +257,7 @@ impl App {
     fn to_lobby(&mut self, note: Option<String>) {
         self.game = None;
         self.rejoin = None;
-        self.rejoining = false;
+        self.joining = None;
         self.lobby_note = note;
         self.send(ClientFrame::Lobby(LobbyMsg::ListGames));
     }
@@ -240,6 +266,7 @@ impl App {
         if self.link == Link::Open {
             self.attempt = 0;
         }
+        self.last_frame = self.now;
         match ServerFrame::from_json(text) {
             Ok(ServerFrame::Lobby(r)) => self.lobby_reply(r),
             Ok(ServerFrame::Game(m)) => self.game_msg(m),
@@ -261,15 +288,19 @@ impl App {
             LobbyReply::Games { games } => self.games = games,
             LobbyReply::Layouts { layouts } => self.layouts = layouts,
             LobbyReply::Joined { game, you } => {
-                self.rejoining = false;
+                self.joining = None;
+                self.me = Some(you.clone());
                 self.rejoin = Some(game.clone());
                 self.lobby_note = None;
                 if self.game.as_ref().is_none_or(|g| g.id != game) {
                     self.game = Some(InGame::new(game, you));
                 }
             }
-            LobbyReply::Error { message, .. } => {
-                if self.rejoining {
+            LobbyReply::Error { code, message } => {
+                let joining = self.joining.take();
+                if code == codes::GAME_STOPPED {
+                    self.to_lobby(Some("The game stopped. Join it again to resume it.".into()));
+                } else if joining.is_some_and(|j| j.rejoin) {
                     self.to_lobby(Some(format!("Could not rejoin the game: {message}")));
                 } else if let Some(g) = self.game.as_mut() {
                     let t = g.sim_time();
@@ -289,6 +320,9 @@ impl App {
                 g.log.push(t, notice_text(&Notice::Replaced).0, true);
             }
             return;
+        }
+        if matches!(m, ServerMsg::Layout(_) | ServerMsg::View(_)) {
+            self.joined_by_frame(&m);
         }
         let Some(g) = self.game.as_mut() else { return };
         match &m {
@@ -315,6 +349,27 @@ impl App {
         }
     }
 
+    /// A layout or view while a join waits for its `joined`: the `joined`
+    /// may have been lost (an overflowing outbox on the front), and what
+    /// follows it says as much. A view only counts from the lobby, since a
+    /// view of the game being left can still be on its way; a layout only
+    /// comes after a `joined`.
+    fn joined_by_frame(&mut self, m: &ServerMsg) {
+        let Some(Joining { game: Some(id), .. }) = self.joining.clone() else { return };
+        let you = match m {
+            ServerMsg::Layout(l) => l.you.clone(),
+            _ => self.me.clone().unwrap_or_default(),
+        };
+        match &self.game {
+            Some(g) if g.id == id => {}
+            Some(_) if !matches!(m, ServerMsg::Layout(_)) => return,
+            _ => self.game = Some(InGame::new(id.clone(), you)),
+        }
+        self.joining = None;
+        self.rejoin = Some(id);
+        self.lobby_note = None;
+    }
+
     // ---- lobby ----
 
     pub fn games(&self) -> &[GameInfo] {
@@ -335,11 +390,15 @@ impl App {
 
     /// `start` is "HH:MM" or "HH:MM:SS"; the front checks it.
     pub fn create_game(&mut self, layout: &str, seed: Option<u64>, start: Option<String>) {
-        self.send(ClientFrame::Lobby(LobbyMsg::CreateGame { layout: layout.to_string(), seed, start }));
+        if self.send(ClientFrame::Lobby(LobbyMsg::CreateGame { layout: layout.to_string(), seed, start })) {
+            self.joining = Some(Joining { game: None, rejoin: false });
+        }
     }
 
     pub fn join(&mut self, game: &str) {
-        self.send(ClientFrame::Lobby(LobbyMsg::Join { game: game.to_string() }));
+        if self.send(ClientFrame::Lobby(LobbyMsg::Join { game: game.to_string() })) {
+            self.joining = Some(Joining { game: Some(game.to_string()), rejoin: false });
+        }
     }
 
     /// Back to the lobby (the front answers with the games list).
@@ -347,7 +406,7 @@ impl App {
         self.send(ClientFrame::Lobby(LobbyMsg::Leave));
         self.game = None;
         self.rejoin = None;
-        self.rejoining = false;
+        self.joining = None;
     }
 
     // ---- game ----
