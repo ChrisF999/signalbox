@@ -11,4 +11,4 @@ pub mod notices;
 pub mod save;
 pub mod view;
 
-pub use game::{GRACE_S, Game, GameError, GameMeta, GameStats, MAX_TICKS_PER_ADVANCE, Out, ROBOT, SNAPSHOT_EVERY_S};
+pub use game::{GRACE_S, Game, GameError, GameMeta, GameStats, GameStatus, MAX_TICKS_PER_ADVANCE, Out, ROBOT, SNAPSHOT_EVERY_S};

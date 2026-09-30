@@ -4,6 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::time::Duration;
 
 use protocol::{ClientMsg, Layout, Notice, PlayerCommand, Proposal, Rejection, ServerMsg, View, codes};
 use signalbox_core::events::{Command, Event};
@@ -62,6 +63,26 @@ pub struct GameStats {
     pub sim_rejections: usize,
 }
 
+/// What the process shell and the lobby need to know about a running game.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GameStatus {
+    /// Seconds since midnight.
+    pub sim_time: f64,
+    pub tick: u64,
+    pub paused: bool,
+    pub speed: u8,
+    /// Every area, by name, with its holder (`None` = the robot).
+    pub holders: BTreeMap<String, Option<String>>,
+    /// Every known player in name order, and whether they are connected
+    /// (a disconnected holder stays listed through the grace period).
+    pub players: Vec<(String, bool)>,
+    /// How many players are connected.
+    pub connected: usize,
+    pub stats: GameStats,
+    /// Wall time spent writing the save so far.
+    pub save_busy: Duration,
+}
+
 struct Player {
     area: Option<AreaId>,
     connected: bool,
@@ -91,6 +112,10 @@ pub struct Game {
     save: Option<SaveDb>,
     /// Real seconds of running since the last snapshot.
     since_snapshot_s: f64,
+    /// Tick of the newest snapshot written or loaded.
+    last_snapshot: Option<u64>,
+    /// Save failures not yet taken by the caller.
+    save_errors: Vec<String>,
 }
 
 fn error(player: &str, code: &str, message: &str) -> Out {
@@ -116,6 +141,7 @@ impl Game {
         let mut g = Game::new(world, meta);
         db.write_snapshot(&g.sim.snapshot())?;
         g.save = Some(db);
+        g.last_snapshot = Some(0);
         Ok(g)
     }
 
@@ -124,6 +150,7 @@ impl Game {
         let db = SaveDb::open(path)?;
         let saved = db.load()?;
         let world = World::from_json(&saved.world_json)?;
+        let snapshot_tick = saved.snapshot.tick;
         let (sim, robot_ran) =
             resume_sim(world, saved.snapshot, saved.last_seq, &saved.commands).map_err(GameError::Resume)?;
         let mut g = Game::from_sim(sim, saved.meta, true);
@@ -149,21 +176,61 @@ impl Game {
         senders.resize(queue.len(), ROBOT.to_string());
         g.queued = senders.into_iter().zip(queue).collect();
         g.save = Some(db);
+        g.last_snapshot = Some(snapshot_tick);
         Ok(g)
     }
 
     /// Snapshot now and restart the autosave timer. A failure goes to every
-    /// connected player as `save_failed`; the game carries on.
+    /// connected player as `save_failed` and is kept for
+    /// `take_save_errors`; the game carries on.
     pub fn save_now(&mut self) -> Vec<Out> {
         self.since_snapshot_s = 0.0;
         let Some(db) = &self.save else { return vec![] };
         match db.write_snapshot(&self.sim.snapshot()) {
-            Ok(()) => vec![],
+            Ok(()) => {
+                self.last_snapshot = Some(self.sim.tick());
+                vec![]
+            }
             Err(e) => self.save_failed(&e.to_string()),
         }
     }
 
-    fn save_failed(&self, why: &str) -> Vec<Out> {
+    /// Tick of the newest snapshot this game wrote or resumed from; `None`
+    /// for a game without a save.
+    pub fn last_snapshot_tick(&self) -> Option<u64> {
+        self.last_snapshot
+    }
+
+    /// Save failures since the last call, oldest first (each was also sent
+    /// to the connected players as `save_failed`).
+    pub fn take_save_errors(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.save_errors)
+    }
+
+    /// Pause the clock without a vote and drop any open proposal: the last
+    /// player has left (spec section 2.2). Players resume it by vote.
+    pub fn pause_for_empty(&mut self) {
+        self.clock.paused = true;
+        self.clock.vote = None;
+    }
+
+    pub fn status(&self) -> GameStatus {
+        let net = &self.sim.world().net;
+        GameStatus {
+            sim_time: self.sim.now_s(),
+            tick: self.sim.tick(),
+            paused: self.clock.paused,
+            speed: self.clock.speed,
+            holders: net.areas.iter().zip(&self.holders).map(|(a, h)| (a.name.clone(), h.clone())).collect(),
+            players: self.players.iter().map(|(n, p)| (n.clone(), p.connected)).collect(),
+            connected: self.players.values().filter(|p| p.connected).count(),
+            stats: self.stats.clone(),
+            save_busy: self.save.as_ref().map_or(Duration::ZERO, SaveDb::busy),
+        }
+    }
+
+    fn save_failed(&mut self, why: &str) -> Vec<Out> {
+        self.save_errors.push(why.to_string());
         self.players
             .iter()
             .filter(|(_, p)| p.connected)
@@ -191,6 +258,8 @@ impl Game {
             stats: GameStats::default(),
             save: None,
             since_snapshot_s: 0.0,
+            last_snapshot: None,
+            save_errors: Vec::new(),
         }
     }
 

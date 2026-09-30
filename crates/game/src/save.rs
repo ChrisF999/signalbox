@@ -2,12 +2,14 @@
 //! snapshots and every command ever submitted. Only this module does I/O,
 //! and only it reads the wall clock (for timestamps the sim never sees).
 
+use std::cell::Cell;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use signalbox_core::events::Command;
-use signalbox_core::sim::{Sim, SimState};
+use signalbox_core::sim::{Sim, SimState, TICK_S};
+use signalbox_core::time::parse_hms;
 use signalbox_core::world::World;
 use signalbox_core::world::file::WorldFile;
 
@@ -61,6 +63,60 @@ pub struct Saved {
 
 pub struct SaveDb {
     conn: Connection,
+    /// Wall time spent in `append_command` and `write_snapshot`.
+    busy: Cell<Duration>,
+}
+
+/// What the lobby shows for a save, read without writing anything.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SaveSummary {
+    pub layout: String,
+    pub seed: u64,
+    /// Area names in world order.
+    pub areas: Vec<String>,
+    /// Unix seconds.
+    pub last_played: u64,
+    /// Tick of the newest snapshot.
+    pub tick: u64,
+    /// Sim time of the newest snapshot, seconds since midnight.
+    pub sim_time: f64,
+}
+
+/// Read a save's meta and newest snapshot tick through a read-only
+/// connection (spec §7.1: the front only ever reads `meta`). Safe while the
+/// game process has the file open (WAL readers do not block the writer).
+pub fn read_summary(path: &Path) -> Result<SaveSummary, SaveError> {
+    if !path.exists() {
+        return Err(SaveError::Bad(format!("no save file {}", path.display())));
+    }
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+    let meta_value = |key: &str| -> Result<String, SaveError> {
+        conn.query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| r.get(0))
+            .optional()?
+            .ok_or_else(|| SaveError::Bad(format!("meta `{key}` is missing")))
+    };
+    let schema = meta_value("schema")?;
+    if schema != SAVE_SCHEMA.to_string() {
+        return Err(SaveError::Bad(format!("unsupported save schema {schema}")));
+    }
+    let bad = |what: &str, e: &dyn std::fmt::Display| SaveError::Bad(format!("meta {what}: {e}"));
+    let seed = meta_value("seed")?.parse::<u64>().map_err(|e| bad("seed", &e))?;
+    let last_played = meta_value("last_played")?.parse::<u64>().map_err(|e| bad("last_played", &e))?;
+    let areas: Vec<String> = serde_json::from_str(&meta_value("areas")?).map_err(|e| bad("areas", &e))?;
+    let start = meta_value("start")?;
+    let start_s = parse_hms(&start).ok_or_else(|| bad("start", &start))?;
+    let tick: i64 = conn
+        .query_row("SELECT MAX(tick) FROM snapshots", [], |r| r.get::<_, Option<i64>>(0))?
+        .ok_or_else(|| SaveError::Bad("no snapshot".into()))?;
+    let tick = tick as u64;
+    Ok(SaveSummary {
+        layout: meta_value("layout")?,
+        seed,
+        areas,
+        last_played,
+        tick,
+        sim_time: f64::from(start_s) + tick as f64 * TICK_S,
+    })
 }
 
 fn now_text() -> String {
@@ -99,7 +155,7 @@ impl SaveDb {
         }
         tx.execute("INSERT INTO world (id, json) VALUES (1, ?1)", params![world_json])?;
         tx.commit()?;
-        Ok(SaveDb { conn })
+        Ok(SaveDb { conn, busy: Cell::new(Duration::ZERO) })
     }
 
     /// An existing save file.
@@ -109,19 +165,37 @@ impl SaveDb {
         }
         let conn = Connection::open(path)?;
         wal(&conn)?;
-        Ok(SaveDb { conn })
+        Ok(SaveDb { conn, busy: Cell::new(Duration::ZERO) })
+    }
+
+    /// Wall time spent writing commands and snapshots so far.
+    pub fn busy(&self) -> Duration {
+        self.busy.get()
+    }
+
+    fn timed<T>(&self, f: impl FnOnce() -> Result<T, SaveError>) -> Result<T, SaveError> {
+        let t = Instant::now();
+        let r = f();
+        self.busy.set(self.busy.get() + t.elapsed());
+        r
     }
 
     pub fn append_command(&self, tick: u64, player: &str, area: &str, cmd: &Command) -> Result<(), SaveError> {
-        let json = serde_json::to_string(cmd).expect("commands serialise");
-        self.conn.execute(
-            "INSERT INTO commands (tick, player, area, command) VALUES (?1, ?2, ?3, ?4)",
-            params![tick as i64, player, area, json],
-        )?;
-        Ok(())
+        self.timed(|| {
+            let json = serde_json::to_string(cmd).expect("commands serialise");
+            self.conn.execute(
+                "INSERT INTO commands (tick, player, area, command) VALUES (?1, ?2, ?3, ?4)",
+                params![tick as i64, player, area, json],
+            )?;
+            Ok(())
+        })
     }
 
     pub fn write_snapshot(&self, state: &SimState) -> Result<(), SaveError> {
+        self.timed(|| self.write_snapshot_untimed(state))
+    }
+
+    fn write_snapshot_untimed(&self, state: &SimState) -> Result<(), SaveError> {
         let json = serde_json::to_string(state).expect("state serialises");
         let now = now_text();
         let tx = self.conn.unchecked_transaction()?;
