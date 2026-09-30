@@ -18,12 +18,14 @@ pub enum Target {
 }
 
 impl App {
-    /// A left click. Only signals and exits do anything.
+    /// A left click. Signals and exits select an entrance or set a route;
+    /// anything else is a dead click and clears the entrance (as a click on
+    /// nothing does: the screen sends that as `escape`).
     pub fn click(&mut self, target: &Target) {
         let exit = match target {
             Target::Signal(s) => ExitName::Signal(s.clone()),
             Target::Exit(n) => ExitName::Node(n.clone()),
-            _ => return,
+            Target::Points(_) | Target::Berth(_) | Target::Section(_) => return self.escape(),
         };
         let Some(g) = self.game.as_mut() else { return };
         let Some(l) = g.bot.layout() else { return };

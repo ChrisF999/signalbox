@@ -61,8 +61,11 @@ fn the_selection_clears_on_the_entrance_again_esc_or_a_dead_click() {
     assert_eq!(t.app.game().unwrap().selected(), Some("W2"), "another entrance takes over");
     t.app.click(&Target::Exit(s("E")));
     assert_eq!(t.app.game().unwrap().selected(), None, "not an exit of W2's routes");
-    t.app.click(&Target::Points(s("P")));
-    t.app.click(&Target::Berth(s("BA")));
+    for dead in [Target::Points(s("P")), Target::Berth(s("BA")), Target::Section(s("TW1")), sig("C")] {
+        t.app.click(&sig("W1"));
+        t.app.click(&dead);
+        assert_eq!(t.app.game().unwrap().selected(), None, "a dead click on {dead:?}");
+    }
     assert!(t.h.take_sent().is_empty(), "nothing was sent");
 }
 
