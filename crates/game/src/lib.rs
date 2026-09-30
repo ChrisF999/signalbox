@@ -4,4 +4,6 @@
 
 pub mod areas;
 pub mod layout;
+pub mod names;
+pub mod notices;
 pub mod view;
