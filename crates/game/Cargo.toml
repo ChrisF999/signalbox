@@ -1,0 +1,17 @@
+[package]
+name = "signalbox-game"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "game"
+path = "src/lib.rs"
+
+[dependencies]
+signalbox-core = { path = "../core" }
+signalbox-protocol = { path = "../protocol" }
+
+[dev-dependencies]
+serde_json.workspace = true
+ts2-import = { path = "../ts2-import" }

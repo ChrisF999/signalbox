@@ -155,6 +155,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "signalbox-game"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "signalbox-core",
+ "signalbox-protocol",
+ "ts2-import",
+]
+
+[[package]]
 name = "signalbox-protocol"
 version = "0.1.0"
 dependencies = [
