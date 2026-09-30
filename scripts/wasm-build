@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Build the browser client (scripts/build-web.sh; output target/web/) in a
+# local tools image: the Rust image plus the wasm32 target and
+# wasm-bindgen-cli, from the wasm-tools stage of deploy/Dockerfile. The
+# image is built on first use and tagged by the wasm-bindgen version in
+# Cargo.lock; override it with SIGNALBOX_WASM_IMAGE. Arguments go to
+# build-web.sh (an output directory under /w, then cargo flags).
+set -euo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+version="$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;q}' "$root/Cargo.lock")"
+image="${SIGNALBOX_WASM_IMAGE:-local/signalbox-wasm-tools:$version}"
+if ! docker image inspect "$image" >/dev/null 2>&1; then
+  docker build -f "$root/deploy/Dockerfile" --target wasm-tools \
+    --build-arg "WASM_BINDGEN_VERSION=$version" -t "$image" "$root"
+fi
+exec docker run --rm -i \
+  -u "$(id -u):$(id -g)" \
+  -v "$root:/w" -w /w \
+  -e CARGO_HOME=/w/.cargo-home \
+  "$image" scripts/build-web.sh "$@"

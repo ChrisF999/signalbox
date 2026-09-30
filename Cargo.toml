@@ -11,6 +11,7 @@ members = [
     "crates/server",
     "crates/client-core",
     "crates/client-ui",
+    "crates/client-web",
 ]
 
 [workspace.package]
@@ -36,3 +37,16 @@ openidconnect = { version = "4", default-features = false, features = ["reqwest"
 base64 = "0.22"
 # The browser client (D1). egui for the screens; eframe (web runner, wgpu) only in client-web.
 egui = "0.36.2"
+eframe = { version = "0.36.2", default-features = false, features = ["wgpu", "default_fonts"] }
+# Pinned exactly: wasm-bindgen-cli must be this same version (scripts/build-web.sh checks).
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "0.4.79"
+web-sys = "0.3.106"
+
+# The browser client's wasm (scripts/build-web.sh): small rather than fast.
+[profile.web]
+inherits = "release"
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"

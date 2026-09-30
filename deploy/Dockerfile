@@ -1,8 +1,18 @@
 # syntax=docker/dockerfile:1
-# signalbox: the front (signalbox-server), the game process (signalbox-game)
-# and the three converted TS2 layouts. Release build: no dev login.
+# signalbox: the front (signalbox-server), the game process (signalbox-game),
+# the browser client and the three converted TS2 layouts. Release build: no
+# dev login.
 # Build from the repository root:
 #   docker build -f deploy/Dockerfile -t local/signalbox:$(git rev-parse --short HEAD) .
+
+# The browser client's toolchain: the wasm32 target and wasm-bindgen-cli at
+# the version Cargo.lock pins (scripts/build-web.sh refuses a mismatch).
+# scripts/wasm-build builds this stage alone as local/signalbox-wasm-tools:<version>.
+FROM rust:1.98-slim-bookworm AS wasm-tools
+ARG WASM_BINDGEN_VERSION=0.2.129
+RUN rustup target add wasm32-unknown-unknown \
+ && cargo install wasm-bindgen-cli --version "=${WASM_BINDGEN_VERSION}" --locked \
+ && rm -rf /usr/local/cargo/registry
 
 FROM rust:1.98-slim-bookworm AS build
 WORKDIR /src

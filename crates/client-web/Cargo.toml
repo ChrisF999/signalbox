@@ -1,0 +1,31 @@
+[package]
+name = "signalbox-client-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "signalbox_web"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+# Everything is for the browser: natively this crate builds empty, so the
+# native workspace build and CI's cache never see eframe or wgpu.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+signalbox-client-core = { path = "../client-core" }
+signalbox-client-ui = { path = "../client-ui" }
+eframe.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+web-sys = { workspace = true, features = [
+    "CloseEvent",
+    "console",
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "Location",
+    "MessageEvent",
+    "Response",
+    "WebSocket",
+    "Window",
+] }
