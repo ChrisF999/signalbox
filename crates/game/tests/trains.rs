@@ -122,3 +122,24 @@ fn trains_are_a_function_of_state() {
     }
     assert_eq!(ever.len(), 4, "{ever:?}");
 }
+
+/// An entry offered at the fringe but held there (here by a 40-minute entry
+/// delay; a blocked entry section holds it the same way) stays `Due` in the
+/// area's list however long it waits: the 30-minute window only limits
+/// entries not yet offered.
+#[test]
+fn an_entry_held_at_the_fringe_stays_due_past_the_window() {
+    let mut json: serde_json::Value = serde_json::from_str(&twobox_json()).unwrap();
+    json["options"]["entry_delay_s"] = serde_json::json!([2400, 2400]);
+    let w = signalbox_core::world::World::from_json(&json.to_string()).unwrap();
+    let mut g = Game::new(w, GameMeta { layout: "twobox".into(), seed: 1 });
+    join(&mut g, "west", Some("West"));
+    let due = |g: &Game| g.view_of("west").unwrap().trains.get("1E01").map(|r| r.state);
+    run(&mut g, 60.0, 1.0);
+    assert!(g.sim().pending_entries().iter().any(|p| p.entry == 0), "1E01 is offered and held");
+    assert_eq!(due(&g), Some(TrainState::Due));
+    run(&mut g, 1860.0, 1.0);
+    assert!(g.sim().now_s() > 25_200.0 + DUE_WINDOW_S, "held for more than 30 sim minutes");
+    assert!(g.sim().trains().is_empty() && g.sim().pending_entries().iter().any(|p| p.entry == 0), "still held");
+    assert_eq!(due(&g), Some(TrainState::Due), "still listed, still due");
+}
