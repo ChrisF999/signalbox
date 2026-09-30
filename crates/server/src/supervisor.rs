@@ -111,6 +111,11 @@ fn reserved_name() -> ServerFrame {
     ServerFrame::error(codes::RESERVED_NAME, format!("`{ROBOT}` is a reserved name"))
 }
 
+/// `robot` in any letter case.
+pub fn is_robot(user: &str) -> bool {
+    user.eq_ignore_ascii_case(ROBOT)
+}
+
 fn send_to(st: &State, game: &str, msg: ToGame) -> bool {
     st.games.get(game).and_then(|e| e.tx.as_ref()).is_some_and(|tx| tx.send(msg).is_ok())
 }
@@ -176,10 +181,16 @@ impl Supervisor {
     /// A socket for `user` opened. A socket the user already had gets
     /// `notice replaced` and is closed; the new one takes over its game
     /// (the game sees a `Connect` and resyncs, never a `Disconnect`).
+    /// While the front is stopping, the socket gets a closed outbox and
+    /// is not registered: it replaces nothing and joins nothing.
     pub fn attach(&self, user: &str) -> Attached {
         let conn = self.next_conn.fetch_add(1, Ordering::Relaxed) + 1;
         let outbox = Arc::new(Outbox::new());
         let mut st = self.lock();
+        if st.closing {
+            outbox.close();
+            return Attached { conn, outbox };
+        }
         let mut game = st.clients.remove(user).and_then(|old| {
             old.outbox.push(notice(Notice::Replaced));
             old.outbox.close();
@@ -191,9 +202,6 @@ impl Supervisor {
             } else {
                 game = None;
             }
-        }
-        if st.closing {
-            outbox.close();
         }
         st.clients.insert(user.to_string(), Client { conn, outbox: outbox.clone(), game });
         Attached { conn, outbox }
@@ -291,7 +299,7 @@ impl Supervisor {
     }
 
     fn create(self: &Arc<Self>, user: &str, conn: u64, layout: String, seed: Option<u64>, start: Option<String>) {
-        if user == ROBOT {
+        if is_robot(user) {
             return self.reply(user, conn, reserved_name());
         }
         let Some(world) = self.layouts.path(&layout) else {
@@ -325,7 +333,7 @@ impl Supervisor {
     }
 
     fn join(self: &Arc<Self>, user: &str, conn: u64, game: String) {
-        if user == ROBOT {
+        if is_robot(user) {
             return self.reply(user, conn, reserved_name());
         }
         if !valid_game_id(&game) {
@@ -456,6 +464,9 @@ impl Supervisor {
             }
         }
         cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(true);
+        // Its own process group: a terminal's Ctrl-C reaches only the front,
+        // which then stops the game in order (save first).
+        cmd.process_group(0);
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => return self.crashed(&id, format!("cannot start {}: {e}", self.cfg.game_bin.display())),

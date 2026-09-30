@@ -540,3 +540,61 @@ async fn a_game_still_starting_at_shutdown_is_stopped_not_crashed() {
         assert_ne!(f, notice(Notice::GameCrashed));
     }
 }
+
+#[tokio::test]
+async fn a_socket_opened_while_stopping_is_not_attached() {
+    let rig = rig("attach-closing", 600);
+    let ann = rig.attach("ann");
+    let id = create(&rig, &ann).await;
+    let stopping = tokio::spawn({
+        let sup = rig.sup.clone();
+        async move { sup.shutdown_all(Duration::from_secs(10)).await }
+    });
+    // Let the shutdown start (current-thread runtime: it runs on a yield).
+    for _ in 0..5 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(rig.sup.live_count(), 1, "the game is still saving");
+    let late = rig.attach("ann");
+    assert_eq!(next(&late).await, None, "no `joined`, closed at once");
+    while let Some(f) = next(&ann).await {
+        assert!(!matches!(f, ServerFrame::Game(ServerMsg::Notice(Notice::Replaced))), "the old socket was not replaced: {f:?}");
+    }
+    stopping.await.unwrap();
+    assert_eq!(rig.info(&id).state, GameState::Saved);
+}
+
+#[tokio::test]
+async fn the_robot_name_is_reserved_in_any_case() {
+    let rig = rig("robot-case", 600);
+    let ann = rig.attach("ann");
+    let id = create(&rig, &ann).await;
+    for name in ["Robot", "ROBOT", "rObOt"] {
+        let r = rig.attach(name);
+        rig.lobby(&r, LobbyMsg::CreateGame { layout: s("twobox"), seed: None, start: None });
+        expect_error(&r, codes::RESERVED_NAME).await;
+        rig.lobby(&r, LobbyMsg::Join { game: id.clone() });
+        expect_error(&r, codes::RESERVED_NAME).await;
+        assert_eq!(rig.sup.game_of(name), None, "{name}");
+    }
+    assert_eq!(rig.sup.live_count(), 1);
+    rig.sup.shutdown_all(Duration::from_secs(10)).await;
+}
+
+/// The process group of `pid` (field 5 of `/proc/<pid>/stat`).
+fn pgrp(pid: &str) -> u32 {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+    let after = &stat[stat.rfind(')').unwrap() + 2..];
+    after.split(' ').nth(2).unwrap().parse().unwrap()
+}
+
+#[tokio::test]
+async fn game_children_run_in_their_own_process_group() {
+    let rig = rig("pgrp", 600);
+    let ann = rig.attach("ann");
+    let id = create(&rig, &ann).await;
+    let pid = rig.sup.pid(&id).expect("running games have a pid");
+    assert_eq!(pgrp(&pid.to_string()), pid, "a terminal's Ctrl-C does not reach the game");
+    assert_ne!(pgrp("self"), pid);
+    rig.sup.shutdown_all(Duration::from_secs(10)).await;
+}

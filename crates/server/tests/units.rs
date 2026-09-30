@@ -110,7 +110,25 @@ fn the_rate_limit_counts_a_one_second_window() {
         assert!(l.allow(t0 + Duration::from_millis(900)));
     }
     assert!(!l.allow(t0 + Duration::from_millis(999)), "the 21st in one second");
-    assert!(l.allow(t0 + Duration::from_secs(1)), "a new window");
+    assert!(!l.allow(t0 + Duration::from_millis(1900)), "the oldest is exactly a second old: still counted");
+    assert!(l.allow(t0 + Duration::from_millis(1901)), "more than a second after the oldest");
+}
+
+#[test]
+fn the_rate_limit_window_slides() {
+    let t0 = Instant::now();
+    let mut l = RateLimit::new(t0);
+    assert!(l.allow(t0));
+    for _ in 1..MAX_MSGS_PER_S {
+        assert!(l.allow(t0 + Duration::from_millis(999)));
+    }
+    assert!(!l.allow(t0 + Duration::from_secs(1)), "20 fall within the last second");
+    let mut l = RateLimit::new(t0);
+    for _ in 0..MAX_MSGS_PER_S {
+        assert!(l.allow(t0 + Duration::from_millis(999)));
+    }
+    assert!(!l.allow(t0 + Duration::from_millis(1500)), "no burst across a window edge");
+    assert!(l.allow(t0 + Duration::from_millis(2000)), "the oldest is more than a second old");
 }
 
 #[test]

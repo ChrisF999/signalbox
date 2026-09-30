@@ -38,7 +38,8 @@ async fn nothing_but_the_login_answers_without_a_session() {
 #[tokio::test]
 async fn dev_login_takes_only_plain_names() {
     let f = front("dev-names").await;
-    for q in ["", "?user=", "?user=a%20b", "?user=%3Cscript%3E", &format!("?user={}", "a".repeat(33))] {
+    let long = format!("?user={}", "a".repeat(33));
+    for q in ["", "?user=", "?user=a%20b", "?user=%3Cscript%3E", &long, "?user=robot", "?user=Robot", "?user=ROBOT"] {
         let r = http_get(&f.base, &format!("/auth/dev{q}"), None).await.unwrap();
         assert_eq!(r.status, 400, "{q}");
         assert!(r.header("set-cookie").is_none(), "{q}");
@@ -142,4 +143,25 @@ async fn stopping_the_front_saves_and_stops_its_games() {
     let sum = game::save::read_summary(&save).unwrap();
     assert!(sum.sim_time > 25200.0, "saved on the way out: {}", sum.sim_time);
     while next(&mut ann).await.is_some() {}
+}
+
+#[tokio::test]
+async fn a_socket_opened_while_the_front_stops_is_not_attached() {
+    let f = front("stop-late").await;
+    let cookie = dev_login(&f.base, "ann").await.unwrap();
+    let mut ann = Conn::connect(&f.base, Some(&cookie)).await.unwrap();
+    create(&mut ann, "twobox").await;
+    let sup = f.running.sup.clone();
+    let base = f.base.clone();
+    let stopping = tokio::spawn(f.running.stop());
+    for _ in 0..5 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(sup.live_count(), 1, "the game is still saving");
+    let e = refused(Conn::connect(&base, Some(&cookie)).await);
+    assert!(e.to_string().contains("Connection refused"), "no longer listening: {e}");
+    assert!(matches!(http_get(&base, "/auth/dev?user=bob", None).await, Err(NetError::Io(_))), "no new logins either");
+    assert_eq!(sup.game_of("ann"), None, "nobody was attached to the game");
+    stopping.await.unwrap();
+    assert_eq!(sup.live_count(), 0);
 }

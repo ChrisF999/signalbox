@@ -71,10 +71,11 @@ impl Running {
         format!("http://{}", self.addr)
     }
 
-    /// Shut every game down (≤ `STOP_GRACE`), then stop serving.
+    /// Stop accepting connections, shut every game down (≤ `STOP_GRACE`),
+    /// then wait for the open sockets to finish.
     pub async fn stop(self) {
-        self.sup.shutdown_all(STOP_GRACE).await;
         self.stop.notify_one();
+        self.sup.shutdown_all(STOP_GRACE).await;
         let _ = tokio::time::timeout(Duration::from_secs(2), self.server).await;
     }
 }
