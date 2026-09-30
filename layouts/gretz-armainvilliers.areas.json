@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "boundaries": ["39,1V1", "39,1V2", "52,1"],
+  "areas": [
+    {"name": "Gretz", "seeds": ["3618"]},
+    {"name": "Tournan & Marles", "seeds": ["504"]},
+    {"name": "Mortcerf & Coulommiers", "seeds": ["725"]}
+  ]
+}

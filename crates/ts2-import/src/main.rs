@@ -2,13 +2,13 @@
 
 use std::process::ExitCode;
 
-use ts2_import::{convert, report};
+use ts2_import::{areas, convert, report};
 
-const USAGE: &str = "usage: ts2-import <input.json> -o <world.json> [--strict]";
+const USAGE: &str = "usage: ts2-import <input.json> -o <world.json> [--strict] [--areas <areas.json>]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (mut input, mut output, mut strict) = (None, None, false);
+    let (mut input, mut output, mut strict, mut areas_path) = (None, None, false, None);
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -19,6 +19,13 @@ fn main() -> ExitCode {
                     None => return usage(),
                 }
             }
+            "--areas" => {
+                i += 1;
+                match args.get(i) {
+                    Some(a) => areas_path = Some(a.clone()),
+                    None => return usage(),
+                }
+            }
             "--strict" => strict = true,
             a if input.is_none() && !a.starts_with('-') => input = Some(a.to_string()),
             _ => return usage(),
@@ -26,6 +33,16 @@ fn main() -> ExitCode {
         i += 1;
     }
     let (Some(input), Some(output)) = (input, output) else { return usage() };
+    let spec = match &areas_path {
+        Some(p) => match std::fs::read_to_string(p).map_err(|e| e.to_string()).and_then(|t| areas::parse(&t).map_err(|e| e.to_string())) {
+            Ok(s) => Some((p.clone(), s)),
+            Err(e) => {
+                eprintln!("{p}: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => None,
+    };
     let text = match std::fs::read_to_string(&input) {
         Ok(t) => t,
         Err(e) => {
@@ -34,7 +51,17 @@ fn main() -> ExitCode {
         }
     };
     match convert(&text) {
-        Ok(c) => {
+        Ok(mut c) => {
+            let mut counts = Vec::new();
+            if let Some((p, s)) = &spec {
+                match areas::apply(&mut c.world, s) {
+                    Ok(v) => counts = v,
+                    Err(e) => {
+                        eprintln!("{p}: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
             let json = serde_json::to_string_pretty(&c.world).expect("world serialises");
             if let Err(e) = std::fs::write(&output, json) {
                 eprintln!("{output}: {e}");
@@ -49,6 +76,9 @@ fn main() -> ExitCode {
                 c.world.services.len(),
                 c.world.entries.len()
             );
+            for a in &counts {
+                eprintln!("area {}: {} sections, {} signals", a.name, a.sections, a.signals);
+            }
             if strict && c.report.count(report::ROUTE_DROPPED) > 0 { ExitCode::FAILURE } else { ExitCode::SUCCESS }
         }
         Err(e) => {

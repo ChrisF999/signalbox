@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "boundaries": ["61", "64", "63", "66", "65", "68", "91", "90", "93", "92", "95", "94"],
+  "areas": [
+    {"name": "Liverpool Street", "seeds": ["9"]},
+    {"name": "Bethnal Green", "seeds": ["72"]},
+    {"name": "Hackney & Bow", "seeds": ["121"]}
+  ]
+}

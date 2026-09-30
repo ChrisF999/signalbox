@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "boundaries": ["73", "84"],
+  "areas": [
+    {"name": "Bank", "seeds": ["72"]},
+    {"name": "Waterloo", "seeds": ["75"]}
+  ]
+}

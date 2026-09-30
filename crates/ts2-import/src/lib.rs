@@ -1,5 +1,6 @@
 //! Convert TS2 simulations into signalbox worlds.
 
+pub mod areas;
 pub mod graph;
 pub mod layout;
 pub mod report;
