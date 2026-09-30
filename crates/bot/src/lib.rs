@@ -1,8 +1,12 @@
 //! A headless signalbox client (spec §2.1): keeps the layout and view a game
 //! sends, applies deltas, and asks for one resync when a delta goes missing.
 //! In C1 it talks to an in-process `Game`; `net` puts a WebSocket in between.
+//! Without the `net` feature this is `Bot` and `Greedy` only (no tokio), as
+//! the browser client uses it.
 
+#[cfg(feature = "net")]
 pub mod net;
+#[cfg(feature = "net")]
 pub mod play;
 pub mod strategy;
 
@@ -77,5 +81,16 @@ impl Bot {
 
     pub fn take_notices(&mut self) -> Vec<Notice> {
         std::mem::take(&mut self.notices)
+    }
+
+    /// Ask for a resync from outside (e.g. after a frame that would not
+    /// parse): the `Resync` to send, or `None` if one is already on its way.
+    pub fn request_resync(&mut self) -> Option<ClientMsg> {
+        if self.awaiting_resync {
+            return None;
+        }
+        self.awaiting_resync = true;
+        self.resyncs += 1;
+        Some(ClientMsg::Resync)
     }
 }

@@ -97,3 +97,16 @@ fn recovers_from_a_dropped_delta_against_a_real_game() {
     assert_eq!(b.view(), g.view_of("alice").as_ref());
     assert_eq!(b.layout(), g.layout_of("alice").as_ref());
 }
+
+#[test]
+fn an_outside_resync_request_is_sent_once_until_the_next_view() {
+    let mut b = Bot::new();
+    b.receive(ServerMsg::View(view(1)));
+    assert_eq!(b.request_resync(), Some(ClientMsg::Resync));
+    assert_eq!(b.request_resync(), None, "one is on its way");
+    assert_eq!(b.receive(delta(2, Aspect::Green)), None, "deltas wait for the view");
+    assert_eq!(b.view().unwrap().seq, 1);
+    b.receive(ServerMsg::View(view(3)));
+    assert_eq!(b.request_resync(), Some(ClientMsg::Resync));
+    assert_eq!(b.resyncs(), 2);
+}

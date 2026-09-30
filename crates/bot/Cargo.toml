@@ -8,12 +8,18 @@ license.workspace = true
 name = "bot"
 path = "src/lib.rs"
 
+[features]
+default = ["net"]
+# The WebSocket client and the network player (tokio). The browser client
+# uses `Bot` alone, without it.
+net = ["dep:futures-util", "dep:thiserror", "dep:tokio", "dep:tokio-tungstenite"]
+
 [dependencies]
 signalbox-protocol = { path = "../protocol" }
-futures-util.workspace = true
-thiserror.workspace = true
-tokio = { workspace = true, features = ["net", "io-util", "time", "macros"] }
-tokio-tungstenite.workspace = true
+futures-util = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["net", "io-util", "time", "macros"], optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
 
 [dev-dependencies]
 signalbox-core = { path = "../core" }

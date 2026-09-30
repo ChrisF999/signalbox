@@ -1,0 +1,13 @@
+[package]
+name = "signalbox-client-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "client_core"
+path = "src/lib.rs"
+
+[dependencies]
+signalbox-protocol = { path = "../protocol" }
+signalbox-bot = { path = "../bot", default-features = false }

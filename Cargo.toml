@@ -1,6 +1,16 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/sim-cli", "crates/ts2-import", "crates/protocol", "crates/game", "crates/bot", "crates/ipc", "crates/server"]
+members = [
+    "crates/core",
+    "crates/sim-cli",
+    "crates/ts2-import",
+    "crates/protocol",
+    "crates/game",
+    "crates/bot",
+    "crates/ipc",
+    "crates/server",
+    "crates/client-core",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,7 +22,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"
 rusqlite = { version = "0.40", features = ["bundled"] }
-rand = "0.9"
+# No default features: the sim needs no OS randomness, and getrandom does not
+# build for wasm32-unknown-unknown (the browser client). The server adds `thread_rng`.
+rand = { version = "0.9", default-features = false, features = ["std"] }
 rand_chacha = "0.9"
 tokio = "1.53"
 axum = { version = "0.8.9", features = ["ws"] }

@@ -1963,6 +1963,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "signalbox-client-core"
+version = "0.1.0"
+dependencies = [
+ "signalbox-bot",
+ "signalbox-protocol",
+]
+
+[[package]]
 name = "signalbox-core"
 version = "0.1.0"
 dependencies = [
