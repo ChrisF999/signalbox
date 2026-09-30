@@ -124,21 +124,29 @@ impl Game {
         let db = SaveDb::open(path)?;
         let saved = db.load()?;
         let world = World::from_json(&saved.world_json)?;
-        let (sim, robot_ran) = resume_sim(world, saved.snapshot, &saved.commands_after).map_err(GameError::Resume)?;
+        let (sim, robot_ran) =
+            resume_sim(world, saved.snapshot, saved.last_seq, &saved.commands).map_err(GameError::Resume)?;
         let mut g = Game::from_sim(sim, saved.meta, true);
         if robot_ran {
             g.robot_ran_at = Some(g.sim.tick());
         }
-        // The sim's queue holds the commands logged at its tick; name their
-        // senders so a sim rejection still goes back to them. A log that
-        // disagrees with the queue (a failed append) leaves them unattributed.
+        // The sim's queue holds the commands the snapshot held at this tick
+        // (logged at or under `last_seq`) followed by those replayed here;
+        // name their senders so a sim rejection still goes back to them. If
+        // the snapshot's part disagrees with the log (a failed append), that
+        // part is left unattributed.
         let queue = g.sim.snapshot().queue;
-        let logged: Vec<&Logged> = saved.commands_after.iter().filter(|c| c.tick == g.sim.tick()).collect();
-        let senders: Vec<String> = if logged.iter().map(|l| &l.command).eq(queue.iter()) {
-            logged.iter().map(|l| l.player.clone()).collect()
+        let at_end = |c: &&Logged| c.tick == g.sim.tick();
+        let held: Vec<&Logged> = saved.commands.iter().filter(at_end).filter(|c| c.seq <= saved.last_seq).collect();
+        let replayed: Vec<&Logged> = saved.commands.iter().filter(at_end).filter(|c| c.seq > saved.last_seq).collect();
+        let n_held = queue.len().saturating_sub(replayed.len());
+        let mut senders: Vec<String> = if held.iter().map(|l| &l.command).eq(queue[..n_held].iter()) {
+            held.iter().map(|l| l.player.clone()).collect()
         } else {
-            vec![ROBOT.to_string(); queue.len()]
+            vec![ROBOT.to_string(); n_held]
         };
+        senders.extend(replayed.iter().map(|l| l.player.clone()));
+        senders.resize(queue.len(), ROBOT.to_string());
         g.queued = senders.into_iter().zip(queue).collect();
         g.save = Some(db);
         Ok(g)

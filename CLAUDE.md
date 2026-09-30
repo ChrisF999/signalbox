@@ -124,8 +124,8 @@ output is byte-identical for the same input.
   (`protocol::diff`, `View::apply`); a client that sees a `seq` gap resyncs.
 - Wire commands carry names (`protocol::PlayerCommand`); the save logs core
   `Command`s with ids, since the world is copied into each save.
-- Resume (`game::save::resume_sim`) restores the newest snapshot, skips commands
-  already in its queue, and replays the log up to the last logged tick, leaving
+- Resume (`game::save::resume_sim`) restores the newest snapshot and replays the
+  log rows after its `last_seq` up to the last logged tick, leaving
   that tick's commands queued (and the robot marked as run if it logged there).
 
 ### Tests

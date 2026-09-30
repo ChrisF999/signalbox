@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use common::*;
 use game::names::resolve;
-use game::save::KEEP_SNAPSHOTS;
+use game::save::{KEEP_SNAPSHOTS, SaveError};
 use game::{Game, GameError, ROBOT};
 use protocol::*;
 use rusqlite::Connection;
@@ -76,7 +76,7 @@ fn create_writes_meta_world_and_a_first_snapshot() {
     let get = |k: &str| rows.iter().find(|(x, _)| x == k).map(|(_, v)| v.clone()).unwrap();
     assert_eq!(
         (get("schema"), get("layout"), get("seed"), get("areas"), get("start")),
-        (s("1"), s("twobox"), s("1"), s(r#"["West","East"]"#), s("07:00"))
+        (s("2"), s("twobox"), s("1"), s(r#"["West","East"]"#), s("07:00"))
     );
     assert!(get("created").parse::<u64>().is_ok(), "{}", get("created"));
     let world: String = c.query_row("SELECT json FROM world WHERE id = 1", [], |r| r.get(0)).unwrap();
@@ -329,4 +329,53 @@ fn rejections_of_commands_queued_before_a_resume_reach_their_sender() {
     let out = resumed.advance(0.1);
     assert_eq!(notices(&out, "alice"), vec![Notice::Rejected { cmd: cancel, reason: Rejection::RouteNotSet }]);
     assert_eq!(resumed.stats().sim_rejections, 1);
+}
+
+/// A command whose append failed is in the snapshot's queue but not in the
+/// log; resume must still replay the command logged after the snapshot.
+#[test]
+fn a_failed_append_does_not_make_resume_skip_a_later_command() {
+    let path = temp_save("failed-append");
+    let w1a = set_route("W1", ExitName::Signal(s("A")));
+    let ae = set_route("A", ExitName::Node(s("E")));
+    let mut reference = game();
+    join(&mut reference, "alice", Some("West"));
+    run_to_tick(&mut reference, 5);
+    command(&mut reference, "alice", w1a.clone());
+    command(&mut reference, "alice", ae.clone());
+    run_to_tick(&mut reference, 2000);
+
+    let mut saved = Game::create(&path, &twobox_json(), meta()).unwrap();
+    join(&mut saved, "alice", Some("West"));
+    run_to_tick(&mut saved, 5);
+    let fail = "CREATE TRIGGER fail BEFORE INSERT ON commands BEGIN SELECT RAISE(ABORT, 'injected'); END";
+    open(&path).execute(fail, []).unwrap();
+    let out = command(&mut saved, "alice", w1a.clone());
+    assert_eq!(error_codes(&out, "alice"), [codes::SAVE_FAILED]);
+    open(&path).execute("DROP TRIGGER fail", []).unwrap();
+    assert!(saved.save_now().is_empty());
+    assert!(command(&mut saved, "alice", ae.clone()).is_empty());
+    drop(saved);
+
+    let mut resumed = Game::resume(&path).unwrap();
+    let w = resumed.sim().world().clone();
+    assert_eq!(resumed.sim().tick(), 5);
+    assert_eq!(resumed.sim().snapshot().queue, vec![resolve(&w, &w1a).unwrap(), resolve(&w, &ae).unwrap()]);
+    rejoin(&mut resumed);
+    run_to_tick(&mut resumed, 2000);
+    assert_eq!(resumed.sim().state_hash(), reference.sim().state_hash());
+}
+
+#[test]
+fn old_schema_saves_are_rejected() {
+    let path = temp_save("old-schema");
+    drop(Game::create(&path, &twobox_json(), meta()).unwrap());
+    let c = open(&path);
+    c.execute("UPDATE meta SET value = '1' WHERE key = 'schema'", []).unwrap();
+    c.execute("ALTER TABLE snapshots DROP COLUMN last_seq", []).unwrap();
+    drop(c);
+    match resume_err(&path) {
+        GameError::Save(SaveError::Bad(m)) => assert_eq!(m, "unsupported save schema 1"),
+        e => panic!("{e:?}"),
+    }
 }

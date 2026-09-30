@@ -275,10 +275,15 @@ game process writes it; the front opens it read-only to list `meta`.
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   -- schema, layout, seed, created, last_played, areas (JSON), start
 CREATE TABLE world (id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL);
-CREATE TABLE snapshots (tick INTEGER PRIMARY KEY, saved_at TEXT NOT NULL, state TEXT NOT NULL);
+CREATE TABLE snapshots (tick INTEGER PRIMARY KEY, saved_at TEXT NOT NULL, state TEXT NOT NULL,
+                        last_seq INTEGER NOT NULL);
+  -- last_seq: the highest commands.seq when the snapshot was written (0 if none)
 CREATE TABLE commands (seq INTEGER PRIMARY KEY, tick INTEGER NOT NULL,
                        player TEXT NOT NULL, area TEXT NOT NULL, command TEXT NOT NULL);
 ```
+
+`meta.schema` is `2`. There is no migration: a save with any other schema is
+rejected (`unsupported save schema N`).
 
 ### 7.2 Writes
 
@@ -292,8 +297,12 @@ CREATE TABLE commands (seq INTEGER PRIMARY KEY, tick INTEGER NOT NULL,
 
 ### 7.3 Resume
 
-Load `world`, newest snapshot, `Sim::restore`, then replay `commands` with
-`tick >= snapshot.tick` in `seq` order, stepping to the tick the log reaches.
+Load `world`, newest snapshot, `Sim::restore`, then replay exactly the
+`commands` with `seq > snapshot.last_seq` in `seq` order, stepping to the tick
+the log reaches (its commands stay queued). Rows at or under `last_seq` are
+already in the snapshot — those at its tick are in its queue — so a command
+whose append failed never shifts what is replayed. If the rows at the tick
+resume stops on include robot commands, the robot does not run again there.
 The full command history is kept, so a game can also be replayed from tick 0
 with the seed (future replay/spectate).
 

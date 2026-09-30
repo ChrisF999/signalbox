@@ -13,14 +13,15 @@ use signalbox_core::world::file::WorldFile;
 
 use crate::game::{GameMeta, ROBOT};
 
-pub const SAVE_SCHEMA: u32 = 1;
+pub const SAVE_SCHEMA: u32 = 2;
 /// Snapshots kept; older ones are deleted.
 pub const KEEP_SNAPSHOTS: i64 = 3;
 
 const SCHEMA_SQL: &str = "
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE world (id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL);
-CREATE TABLE snapshots (tick INTEGER PRIMARY KEY, saved_at TEXT NOT NULL, state TEXT NOT NULL);
+CREATE TABLE snapshots (tick INTEGER PRIMARY KEY, saved_at TEXT NOT NULL, state TEXT NOT NULL,
+                        last_seq INTEGER NOT NULL);
 CREATE TABLE commands (seq INTEGER PRIMARY KEY, tick INTEGER NOT NULL,
                        player TEXT NOT NULL, area TEXT NOT NULL, command TEXT NOT NULL);
 ";
@@ -50,8 +51,12 @@ pub struct Saved {
     pub world_json: String,
     /// The newest snapshot.
     pub snapshot: SimState,
-    /// Commands logged at or after the snapshot's tick, in `seq` order.
-    pub commands_after: Vec<Logged>,
+    /// The highest `commands.seq` when the snapshot was written (0 if none):
+    /// rows up to it are in the snapshot already, rows after it are replayed.
+    pub last_seq: i64,
+    /// Commands logged at or after the snapshot's tick, or after `last_seq`,
+    /// in `seq` order.
+    pub commands: Vec<Logged>,
 }
 
 pub struct SaveDb {
@@ -120,9 +125,10 @@ impl SaveDb {
         let json = serde_json::to_string(state).expect("state serialises");
         let now = now_text();
         let tx = self.conn.unchecked_transaction()?;
+        let last_seq: i64 = tx.query_row("SELECT COALESCE(MAX(seq), 0) FROM commands", [], |r| r.get(0))?;
         tx.execute(
-            "INSERT OR REPLACE INTO snapshots (tick, saved_at, state) VALUES (?1, ?2, ?3)",
-            params![state.tick as i64, now, json],
+            "INSERT OR REPLACE INTO snapshots (tick, saved_at, state, last_seq) VALUES (?1, ?2, ?3, ?4)",
+            params![state.tick as i64, now, json, last_seq],
         )?;
         tx.execute(
             "DELETE FROM snapshots WHERE tick NOT IN (SELECT tick FROM snapshots ORDER BY tick DESC LIMIT ?1)",
@@ -147,46 +153,41 @@ impl SaveDb {
         let seed = meta_value("seed")?.parse::<u64>().map_err(|e| SaveError::Bad(format!("meta seed: {e}")))?;
         let meta = GameMeta { layout: meta_value("layout")?, seed };
         let world_json: String = self.conn.query_row("SELECT json FROM world WHERE id = 1", [], |r| r.get(0))?;
-        let state: Option<String> = self
+        let newest: Option<(String, i64)> = self
             .conn
-            .query_row("SELECT state FROM snapshots ORDER BY tick DESC LIMIT 1", [], |r| r.get(0))
+            .query_row("SELECT state, last_seq FROM snapshots ORDER BY tick DESC LIMIT 1", [], |r| Ok((r.get(0)?, r.get(1)?)))
             .optional()?;
-        let state = state.ok_or_else(|| SaveError::Bad("no snapshot".into()))?;
+        let (state, last_seq) = newest.ok_or_else(|| SaveError::Bad("no snapshot".into()))?;
         let snapshot: SimState = serde_json::from_str(&state).map_err(|e| SaveError::Bad(format!("snapshot: {e}")))?;
-        let mut st = self.conn.prepare("SELECT seq, tick, player, area, command FROM commands WHERE tick >= ?1 ORDER BY seq")?;
-        let rows = st.query_map(params![snapshot.tick as i64], |r| {
+        let mut st =
+            self.conn.prepare("SELECT seq, tick, player, area, command FROM commands WHERE tick >= ?1 OR seq > ?2 ORDER BY seq")?;
+        let rows = st.query_map(params![snapshot.tick as i64, last_seq], |r| {
             Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, String>(4)?))
         })?;
-        let mut commands_after = Vec::new();
+        let mut commands = Vec::new();
         for row in rows {
             let (seq, tick, player, area, json) = row?;
             let command: Command = serde_json::from_str(&json).map_err(|e| SaveError::Bad(format!("command {seq}: {e}")))?;
-            commands_after.push(Logged { seq, tick: tick as u64, player, area, command });
+            commands.push(Logged { seq, tick: tick as u64, player, area, command });
         }
-        Ok(Saved { meta, world_json, snapshot, commands_after })
+        Ok(Saved { meta, world_json, snapshot, last_seq, commands })
     }
 }
 
-/// Rebuild a saved game's sim (spec §7.3, amendment 10): restore the
-/// snapshot, skip the commands logged at its tick that it already holds in
-/// its queue, then replay the rest tick by tick, stopping at the last logged
-/// tick with that tick's commands queued. Returns the sim and whether the
-/// robot's commands are among those queued (so it must not run again there);
-/// that counts the robot commands the snapshot already held, so a game saved
-/// again straight after a resume on the robot's tick still says so.
-pub fn resume_sim(world: World, snapshot: SimState, commands: &[Logged]) -> Result<(Sim, bool), String> {
+/// Rebuild a saved game's sim (spec §7.3): restore the snapshot, then
+/// replay exactly the commands logged after it (`seq > last_seq`) tick by
+/// tick, stopping at the last logged tick with that tick's commands queued.
+/// Commands at or under `last_seq` are already in the snapshot (its queue
+/// holds those at its tick). Returns the sim and whether the robot's
+/// commands are among those logged at the tick it stops on (so it must not
+/// run again there); when nothing is replayed that includes the robot
+/// commands the snapshot already held, so a game saved again straight after
+/// a resume on the robot's tick still says so.
+pub fn resume_sim(world: World, snapshot: SimState, last_seq: i64, commands: &[Logged]) -> Result<(Sim, bool), String> {
     let start = snapshot.tick;
-    let mut skip = snapshot.queue.len();
     let mut sim = Sim::restore(world, snapshot)?;
-    let mut cmds: Vec<&Logged> = Vec::new();
-    for c in commands.iter().filter(|c| c.tick >= start) {
-        if c.tick == start && skip > 0 {
-            skip -= 1;
-            continue;
-        }
-        cmds.push(c);
-    }
-    if cmds.windows(2).any(|p| p[1].tick < p[0].tick) {
+    let cmds: Vec<&Logged> = commands.iter().filter(|c| c.seq > last_seq).collect();
+    if cmds.first().is_some_and(|c| c.tick < start) || cmds.windows(2).any(|p| p[1].tick < p[0].tick) {
         return Err("the command log goes back in time".into());
     }
     if let Some(last) = cmds.last().map(|c| c.tick) {
