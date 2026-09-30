@@ -1978,6 +1978,7 @@ name = "signalbox-game"
 version = "0.1.0"
 dependencies = [
  "rusqlite",
+ "serde",
  "serde_json",
  "signalbox-core",
  "signalbox-protocol",

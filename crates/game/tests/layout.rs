@@ -15,7 +15,7 @@ fn layout_for(area_name: Option<&str>) -> Layout {
         Some(a) => Visibility::of_area(&w, &m, area(&w, a)),
         None => Visibility::spectator(&w, &m),
     };
-    build_layout(&w, &m, &vis, "alice")
+    build_layout(&w, &m, &vis, "alice", None)
 }
 
 #[test]

@@ -373,6 +373,7 @@ fn every_client_rebuilds_the_servers_view_from_deltas() {
         deliver(&mut clients, &out);
     }
     assert_eq!(g.clock().speed, 8);
+    let mut trains_seen: BTreeMap<&'static str, usize> = BTreeMap::new();
     // 0.125 s at 8x is one robot period (10 ticks): 2400 periods = 40 sim minutes.
     for period in 0..2400u64 {
         if period == 1200 {
@@ -395,9 +396,11 @@ fn every_client_rebuilds_the_servers_view_from_deltas() {
             for (p, c) in &clients {
                 assert_eq!(c.view, g.view_of(p), "{p} at tick {}", g.sim().tick());
                 assert_eq!(c.layout, g.layout_of(p), "{p}");
+                *trains_seen.entry(p).or_default() += c.view.as_ref().map_or(0, |v| v.trains.len());
             }
         }
     }
+    assert!(trains_seen.values().all(|&n| n > 0), "every view listed trains: {trains_seen:?}");
     let st = g.stats();
     assert!(st.player_commands > 0, "{st:?}");
     assert_eq!((st.spads, st.collisions, st.invariant_violations), (0, 0, 0), "{st:?}");

@@ -7,6 +7,9 @@ use signalbox_core::world::World;
 
 pub const TWOBOX: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/twobox.json");
 
+/// A drawing of twobox, for the world's `layout` field.
+pub const TWOBOX_LAYOUT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/twobox-layout.json");
+
 pub fn twobox_json() -> String {
     std::fs::read_to_string(TWOBOX).unwrap()
 }

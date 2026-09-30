@@ -131,6 +131,16 @@ impl Sim {
         &self.st.trains
     }
 
+    /// Entries already offered at the fringe and waiting to enter, oldest first.
+    pub fn pending_entries(&self) -> &[PendingEntry] {
+        &self.st.pending
+    }
+
+    /// Index into `world().entries` of the first entry not yet offered.
+    pub fn next_entry(&self) -> usize {
+        self.st.next_entry
+    }
+
     pub fn points(&self) -> &PointsTable {
         &self.st.points
     }

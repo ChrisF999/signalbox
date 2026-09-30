@@ -5,6 +5,7 @@
 pub mod areas;
 pub mod clock;
 pub mod game;
+pub mod geometry;
 pub mod layout;
 pub mod names;
 pub mod notices;

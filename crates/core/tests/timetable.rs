@@ -108,3 +108,18 @@ fn dwelling_train_waits_for_a_red_starter() {
     let ev = run_until(&mut sim, 60.0, |e| matches!(e, Event::TrainDeparted { .. }));
     assert_eq!(count(&ev, |e| matches!(e, Event::TrainDeparted { .. })), 1);
 }
+
+#[test]
+fn offered_entries_wait_in_pending_until_they_enter() {
+    let w = load_with("terminus", |j| j["options"]["entry_delay_s"] = json!([120, 120])).unwrap();
+    let mut sim = Sim::new(w, 1);
+    assert_eq!((sim.next_entry(), sim.pending_entries().len()), (0, 0));
+    sim.step();
+    assert_eq!(sim.next_entry(), 1, "06:00's entry is offered");
+    assert_eq!(sim.pending_entries().len(), 1);
+    assert_eq!((sim.pending_entries()[0].entry, sim.pending_entries()[0].due_s), (0, 6.0 * 3600.0 + 120.0));
+    assert!(sim.trains().is_empty());
+    sim.run_for(130.0);
+    assert!(sim.pending_entries().is_empty());
+    assert_eq!(sim.trains().len(), 1);
+}

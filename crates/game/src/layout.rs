@@ -8,6 +8,7 @@ use signalbox_core::routes::Exit;
 use signalbox_core::world::World;
 
 use crate::areas::{AreaMap, Visibility};
+use crate::geometry::WorldGeometry;
 
 pub fn exit_name(w: &World, e: Exit) -> ExitName {
     match e {
@@ -16,7 +17,8 @@ pub fn exit_name(w: &World, e: Exit) -> ExitName {
     }
 }
 
-pub fn build_layout(w: &World, map: &AreaMap, vis: &Visibility, you: &str) -> Layout {
+/// `geo` is the world's geometry (`WorldGeometry::from_world`), built once per game.
+pub fn build_layout(w: &World, map: &AreaMap, vis: &Visibility, you: &str, geo: Option<&WorldGeometry>) -> Layout {
     let net = &w.net;
     let area_name = |a: AreaId| net.areas[a.idx()].name.clone();
     let section_name = |s: SectionId| net.sections[s.idx()].name.clone();
@@ -117,6 +119,6 @@ pub fn build_layout(w: &World, map: &AreaMap, vis: &Visibility, you: &str) -> La
                 }
             })
             .collect(),
-        geometry: None,
+        geometry: geo.map(|g| g.visible(w, vis)),
     }
 }

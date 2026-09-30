@@ -55,6 +55,8 @@ struct Table {
     periods: u64,
     handovers: usize,
     not_your_area: usize,
+    /// Rows in the bots' train lists, summed over every check.
+    train_rows: usize,
     /// Skip the bots' first decision: a resumed game already holds it queued.
     skip_decide: bool,
 }
@@ -62,7 +64,7 @@ struct Table {
 impl Table {
     fn new(game: Game) -> Table {
         let map = AreaMap::new(game.sim().world());
-        Table { game, map, bots: BTreeMap::new(), periods: 0, handovers: 0, not_your_area: 0, skip_decide: false }
+        Table { game, map, bots: BTreeMap::new(), periods: 0, handovers: 0, not_your_area: 0, train_rows: 0, skip_decide: false }
     }
 
     /// Hand the game's messages to the bots, and the bots' answers back.
@@ -137,6 +139,7 @@ impl Table {
             for (name, bot) in &self.bots {
                 assert_eq!(bot.view(), self.game.view_of(name).as_ref(), "{name}'s view at tick {}", self.game.sim().tick());
                 assert_eq!(bot.layout(), self.game.layout_of(name).as_ref(), "{name}'s layout");
+                self.train_rows += bot.view().map_or(0, |v| v.trains.len());
             }
         }
     }
@@ -170,6 +173,8 @@ fn play_liverpool(minutes: u64) {
     assert!(t.handovers >= 1, "no handover notice in {minutes} minutes");
     assert_eq!(t.game.holder("Bethnal Green"), None);
     assert!(t.bots.values().all(|b| b.resyncs() == 0), "in process, no delta is ever lost");
+    assert!(t.train_rows > 0, "the views listed trains");
+    assert!(t.bots.values().all(|b| b.layout().is_some_and(|l| l.geometry.is_some())), "and carried the diagram");
 }
 
 /// The first handovers into the bots' areas come at about 13 and 15 sim

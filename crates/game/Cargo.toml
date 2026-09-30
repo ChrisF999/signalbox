@@ -12,6 +12,7 @@ path = "src/lib.rs"
 signalbox-core = { path = "../core" }
 signalbox-protocol = { path = "../protocol" }
 rusqlite.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 

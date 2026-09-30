@@ -15,6 +15,7 @@ use signalbox_core::world::{LoadError, World};
 
 use crate::areas::{AreaMap, Visibility};
 use crate::clock::{GameClock, VoteError};
+use crate::geometry::WorldGeometry;
 use crate::layout::build_layout;
 use crate::names::{resolve, to_player_command, valid_headcode};
 use crate::notices::area_notices;
@@ -100,6 +101,8 @@ pub struct Game {
     spectator: Visibility,
     /// Visibility of each area's holder, by area.
     by_area: Vec<Visibility>,
+    /// The diagram, read once from the world.
+    geometry: Option<WorldGeometry>,
     /// Holder of each area, by area; `None` = the robot.
     holders: Vec<Option<String>>,
     players: BTreeMap<String, Player>,
@@ -244,12 +247,14 @@ impl Game {
         let spectator = Visibility::spectator(w, &map);
         let by_area = (0..w.net.areas.len()).map(|a| Visibility::of_area(w, &map, AreaId::from_idx(a))).collect();
         let holders = vec![None; w.net.areas.len()];
+        let geometry = WorldGeometry::from_world(w);
         Game {
             sim,
             meta,
             map,
             spectator,
             by_area,
+            geometry,
             holders,
             players: BTreeMap::new(),
             clock: GameClock::new(paused),
@@ -300,7 +305,7 @@ impl Game {
 
     pub fn layout_of(&self, player: &str) -> Option<Layout> {
         let p = self.players.get(player)?;
-        Some(build_layout(self.sim.world(), &self.map, &p.vis, player))
+        Some(build_layout(self.sim.world(), &self.map, &p.vis, player, self.geometry.as_ref()))
     }
 
     /// A player (re)connects and gets the layout and a full view.
@@ -368,7 +373,7 @@ impl Game {
             return vec![];
         }
         let seq = p.last.as_ref().map_or(1, |v| v.seq + 1);
-        let layout = build_layout(self.sim.world(), &self.map, &p.vis, player);
+        let layout = build_layout(self.sim.world(), &self.map, &p.vis, player, self.geometry.as_ref());
         let view = build_view(&self.sim, &p.vis, &shared, seq);
         p.last = Some(view.clone());
         vec![(player.to_string(), ServerMsg::Layout(layout)), (player.to_string(), ServerMsg::View(view))]
