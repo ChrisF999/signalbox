@@ -25,6 +25,8 @@ pub struct NetPlayer {
     pub lobby: Vec<LobbyReply>,
     /// Commands the strategy sent.
     pub commands_sent: usize,
+    /// When `decide` last ran for real (see `MIN_DECIDE_EVERY`).
+    last_decided: Option<Instant>,
 }
 
 impl NetPlayer {
@@ -44,6 +46,7 @@ impl NetPlayer {
             game: None,
             lobby: Vec::new(),
             commands_sent: 0,
+            last_decided: None,
         }
     }
 
@@ -103,8 +106,14 @@ impl NetPlayer {
         Ok(())
     }
 
-    /// Send what the strategy decides for the current view.
+    /// Send what the strategy decides for the current view. Within
+    /// `MIN_DECIDE_EVERY` of the last decision it does nothing and returns 0,
+    /// so the strategy runs at most twice a real second for every caller.
     pub async fn decide(&mut self) -> Result<usize, NetError> {
+        if self.last_decided.is_some_and(|t| t.elapsed() < MIN_DECIDE_EVERY) {
+            return Ok(0);
+        }
+        self.last_decided = Some(Instant::now());
         let (Some(layout), Some(view)) = (self.bot.layout(), self.bot.view()) else { return Ok(0) };
         let cmds = self.greedy.decide(layout, view);
         let n = cmds.len();

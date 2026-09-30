@@ -20,3 +20,4 @@ signalbox-core = { path = "../core" }
 signalbox-game = { path = "../game" }
 ts2-import = { path = "../ts2-import" }
 serde_json.workspace = true
+tokio = { workspace = true, features = ["rt", "sync"] }

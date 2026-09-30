@@ -99,9 +99,16 @@ async fn soak(name: &str, minutes: u64) {
         assert_eq!(nya, 0, "{} only works its own area", p.name);
     }
 
-    // Safety and traffic from the game's own counters (status comes each second).
-    tokio::time::sleep(Duration::from_millis(1500)).await;
-    let st = f.running.sup.status(&id).expect("a status");
+    // Safety and traffic from the game's own counters. Status is refreshed
+    // about once a second, so poll for a snapshot taken after the pause.
+    let deadline = Instant::now() + WAIT;
+    let st = loop {
+        if let Some(st) = f.running.sup.status(&id).filter(|st| st.paused) {
+            break st;
+        }
+        assert!(Instant::now() < deadline, "no paused status from the game within {WAIT:?}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
     let c = st.counters;
     assert_eq!((c.spads, c.collisions, c.invariant_violations), (0, 0, 0), "{c:?}");
     assert!(c.player_commands > 0, "the bots' commands reached the sim: {c:?}");
