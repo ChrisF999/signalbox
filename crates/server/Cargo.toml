@@ -1,0 +1,24 @@
+[package]
+name = "signalbox-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "signalbox-game"
+path = "src/bin/signalbox-game.rs"
+
+[dependencies]
+signalbox-core = { path = "../core" }
+signalbox-game = { path = "../game" }
+signalbox-ipc = { path = "../ipc" }
+signalbox-protocol = { path = "../protocol" }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync", "signal", "io-util", "process"] }
+
+[dev-dependencies]
+rusqlite.workspace = true
