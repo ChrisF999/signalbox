@@ -174,8 +174,9 @@ output is byte-identical for the same input.
 - The front stops accepting connections before it shuts the games down; game
   children run in their own process group, so a terminal's Ctrl-C reaches only
   the front. Names are refused when they are `robot`. `/` redirects (303) to
-  `/auth/login`, `/ws` is 401 without a session, `/auth/dev` is 404 in the
-  release build, `/auth/login` is 303 to the provider or 503 if it is unreachable.
+  `/auth/login`, `/ws` and the web client's files under `/app/` are 401
+  without a session, `/auth/dev` is 404 in the release build, `/auth/login`
+  is 303 to the provider or 503 if it is unreachable.
   `deploy/smoke.sh` checks exactly these against a running front.
 
 ### Browser client (`client-core`, `client-ui`, `client-web`)
@@ -197,7 +198,8 @@ output is byte-identical for the same input.
   exit positions are found by walking up to 4 nodes to a drawn line. The
   train list is `game::view::build_trains`, from sim state only.
 - The front serves `SIGNALBOX_WEB` from memory (`server::assets`) behind the
-  session; without that directory `/` is the C2 placeholder page.
+  session; without that directory `/` is the placeholder page (no web client
+  installed).
 - The workspace `rand` has no default features (getrandom does not build for
   wasm32-unknown-unknown); the server turns on `thread_rng`.
 
