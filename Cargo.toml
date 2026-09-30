@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/sim-cli", "crates/ts2-import", "crates/protocol", "crates/game", "crates/bot"]
+members = ["crates/core", "crates/sim-cli", "crates/ts2-import", "crates/protocol", "crates/game", "crates/bot", "crates/ipc"]
 
 [workspace.package]
 version = "0.1.0"
@@ -14,3 +14,4 @@ thiserror = "2"
 rusqlite = { version = "0.40", features = ["bundled"] }
 rand = "0.9"
 rand_chacha = "0.9"
+tokio = "1.53"
