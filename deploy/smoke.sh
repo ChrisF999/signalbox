@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Smoke-check a running signalbox front from outside: nothing but the login
-# answers without a session, and the build has no dev login.
+# answers without a session (the web client's files included), and the
+# build has no dev login.
 # usage: deploy/smoke.sh <base-url> <303|503>
 #   303: /auth/login must redirect to the provider's authorize endpoint
 #   503: the provider is not reachable (a local test run)
@@ -23,6 +24,8 @@ check() {
 }
 check / 303 "$base/auth/login"
 check /ws 401
+check /app/signalbox_web.js 401
+check /app/signalbox_web_bg.wasm 401
 check "/auth/dev?user=smoke" 404
 check /auth/logout 200
 if [[ $login == 303 ]]; then

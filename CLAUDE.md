@@ -23,6 +23,10 @@ scripts/cargo test --release -p signalbox-bot --test soak -- --ignored   # 3 h L
 scripts/cargo test -p signalbox-server                        # game process, supervisor, OIDC, release build (no /auth/dev)
 scripts/cargo test -p signalbox-server --features dev-auth    # + the front over WebSockets, 4-min Liverpool St end to end, crash
 scripts/cargo test --release -p signalbox-server --features dev-auth --test e2e -- --ignored --nocapture   # 1 sim hour; prints SQLite write cost
+scripts/cargo test -p signalbox-client-core                   # client logic: connection, lobby, clicks (in-process game)
+scripts/cargo test -p signalbox-client-ui                     # diagram and screens, headless egui (no GPU)
+scripts/cargo test -p signalbox-server --features dev-auth --test client   # client-core over the real front
+scripts/wasm-build                                            # the browser client into target/web-dist/ (tools image on first use)
 scripts/ci/test.sh                                            # the CI gate (native cargo, offline, -D warnings)
 
 scripts/cargo run -p sim-cli -- run crates/core/tests/fixtures/junction.json --robot --hours 1 --record /w/target/log.json
@@ -32,6 +36,12 @@ scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/liverpool-st.jso
 ```
 
 Paths passed through `scripts/cargo` resolve inside the container (`/w` = repo root).
+
+The stock Rust image has no wasm32 target: `scripts/wasm-build` runs
+`scripts/build-web.sh` in `local/signalbox-wasm-tools:<wasm-bindgen version>`,
+built on first use from the `wasm-tools` stage of `deploy/Dockerfile`. The
+`wasm-bindgen` crate is pinned exactly and the CLI must be the same version;
+bumping it means a new tools image and a new CI runner image (maintainer).
 
 CI (`.forgejo/workflows/ci.yml`) runs on a self-hosted Forgejo runner that builds
 **offline** with warnings as errors; adding a crate dependency means the runner's
@@ -50,7 +60,10 @@ Workspace crates: `crates/core` (library `signalbox-core`), `crates/sim-cli`
 `crates/bot` (`signalbox-bot`: headless client, its network client and the `Greedy` strategy),
 `crates/ipc` (`signalbox-ipc`: front ⇄ game frames over a Unix socket),
 `crates/server` (`signalbox-server`: lib `server`; bins `signalbox-server`, the front,
-and `signalbox-game`, one process per game). The multiplayer design is
+and `signalbox-game`, one process per game), `crates/client-core` (`signalbox-client-core`: the
+browser client's logic), `crates/client-ui` (`signalbox-client-ui`: its egui
+screens) and `crates/client-web` (`signalbox-client-web`: the wasm shell;
+design in `docs/superpowers/specs/2026-09-30-browser-client-design.md`). The multiplayer design is
 `docs/superpowers/specs/2026-09-30-server-and-protocol-design.md`; deployment is in `deploy/`
 (see `deploy/README.md`).
 
@@ -164,6 +177,29 @@ output is byte-identical for the same input.
   `/auth/login`, `/ws` is 401 without a session, `/auth/dev` is 404 in the
   release build, `/auth/login` is 303 to the provider or 503 if it is unreachable.
   `deploy/smoke.sh` checks exactly these against a running front.
+
+### Browser client (`client-core`, `client-ui`, `client-web`)
+- `client_core::App` is pure: the shell calls `tick(now)` every frame and
+  hands it a `Transport`. It keeps the layout and view in a `bot::Bot`, which
+  is why `signalbox-bot` has a default `net` feature (without it: no tokio).
+  Reconnect backoff 0.5 s doubling to 10 s, reset only once a connection
+  carries a frame; a reconnect sends one `join` (its layout and view are the
+  resync), never `resync`; `notice replaced` stops reconnecting.
+- `client-ui` uses egui only (no eframe): `UiApp::ui` is one whole frame. The
+  scene, camera, hit-testing and drawing are pure and tested as shapes; the
+  screens run in `Context::run_ui` with synthetic events (tests clear
+  `textures_delta`, there is no GPU).
+- `client-web` builds only for wasm32 (natively it is empty). WebGPU falls
+  back to WebGL2 inside egui-wgpu. A socket that closes without opening is
+  followed by `GET /ws`: 401 means the session is gone → `/auth/login`.
+- Diagram geometry is `game::geometry::WorldGeometry`, read once from the
+  world's `layout` (ts2-import writes it); points legs, signal facings and
+  exit positions are found by walking up to 4 nodes to a drawn line. The
+  train list is `game::view::build_trains`, from sim state only.
+- The front serves `SIGNALBOX_WEB` from memory (`server::assets`) behind the
+  session; without that directory `/` is the C2 placeholder page.
+- The workspace `rand` has no default features (getrandom does not build for
+  wasm32-unknown-unknown); the server turns on `thread_rng`.
 
 ### Tests
 - Core fixtures: `crates/core/tests/fixtures/{plain_line,terminus,junction}.json`.

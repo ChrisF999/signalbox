@@ -9,7 +9,7 @@ checks the `groups` claim). Nothing is on the public edge.
 
 | File | What |
 |---|---|
-| `Dockerfile` | release image: both binaries and the converted layouts `liverpool-st`, `drain`, `gretz-armainvilliers` (no dev login) |
+| `Dockerfile` | release image: both binaries, the browser client (`/opt/signalbox/web`, built by the `wasm-tools` and `web` stages) and the converted layouts `liverpool-st`, `drain`, `gretz-armainvilliers` (no dev login) |
 | `Dockerfile.dockerignore` | keeps `target/`, `.cargo-home/`, `.git/` out of the build context |
 | `docker-compose.yml` | the service; copied to `/opt/stack/apps/signalbox/` |
 | `authentik/signalbox-oidc-blueprint.yaml.example` | OAuth2 provider + application; rendered with the real secret into the vault |
@@ -27,6 +27,7 @@ value stops the front with exit code 2 and one line saying what is wrong.
 | `SIGNALBOX_DATA` | image | `/data` (volume: `saves/`, `sockets/`) |
 | `SIGNALBOX_LAYOUTS` | image | `/opt/signalbox/layouts` |
 | `SIGNALBOX_GAME_BIN` | image | `/opt/signalbox/bin/signalbox-game` |
+| `SIGNALBOX_WEB` | image | `/opt/signalbox/web` (the browser client: `index.html`, `app/`; read once at start) |
 | `SIGNALBOX_PUBLIC_URL` | compose | `https://ra.tail3e0c1e.ts.net:50160` (redirect URI = this + `/auth/callback`) |
 | `OIDC_ISSUER` | compose | `https://auth.skyes.lgbt/application/o/signalbox/` |
 | `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | vault `oidc.env` | must match the provider blueprint |
@@ -101,12 +102,14 @@ sudo -n tailscale serve --bg --https=50160 http://127.0.0.1:9160
 /home/skye-fi/projects/signalbox/deploy/smoke.sh https://ra.tail3e0c1e.ts.net:50160 303
 ```
 
-Then sign in with a browser at `https://ra.tail3e0c1e.ts.net:50160/`: the page
-says "Signed in as <username>".
+Then open `https://ra.tail3e0c1e.ts.net:50160/` in a browser: after the
+Authentik login the signalbox lobby loads (WebGPU in Chrome/Edge, WebGL2 in
+Firefox).
 
 ## What `smoke.sh` expects
 
-`/` answers 303 to `/auth/login`; `/ws` 401 without a session; `/auth/dev` 404
+`/` answers 303 to `/auth/login`; `/ws` and the web client's files under
+`/app/` 401 without a session; `/auth/dev` 404
 (the release image has no dev login); `/auth/logout` 200; `/auth/login` 303 to
 Authentik's authorize endpoint (503 if Authentik is unreachable). The display
 name `robot` is refused. Game processes run in their own process group, and on
@@ -130,6 +133,6 @@ docker run --rm -d --name signalbox-test -p 127.0.0.1:19160:9160 \
   -e OIDC_CLIENT_ID=x -e OIDC_CLIENT_SECRET=y -e SIGNALBOX_PUBLIC_URL=http://127.0.0.1:19160 \
   local/signalbox:test
 deploy/smoke.sh http://127.0.0.1:19160 503
-docker exec signalbox-test ls /opt/signalbox/layouts
+docker exec signalbox-test ls /opt/signalbox/layouts /opt/signalbox/web /opt/signalbox/web/app
 docker stop signalbox-test
 ```

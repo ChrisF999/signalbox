@@ -14,6 +14,13 @@ RUN rustup target add wasm32-unknown-unknown \
  && cargo install wasm-bindgen-cli --version "=${WASM_BINDGEN_VERSION}" --locked \
  && rm -rf /usr/local/cargo/registry
 
+FROM wasm-tools AS web
+WORKDIR /src
+COPY . .
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    scripts/build-web.sh /out/web
+
 FROM rust:1.98-slim-bookworm AS build
 WORKDIR /src
 COPY . .
@@ -33,11 +40,13 @@ RUN useradd --system --uid 10160 --user-group --home-dir /data --no-create-home 
  && install -d -o signalbox -g signalbox -m 0700 /data
 COPY --from=build /out/bin/ /opt/signalbox/bin/
 COPY --from=build /out/layouts/ /opt/signalbox/layouts/
+COPY --from=web /out/web/ /opt/signalbox/web/
 USER signalbox
 ENV SIGNALBOX_ADDR=0.0.0.0:9160 \
     SIGNALBOX_DATA=/data \
     SIGNALBOX_LAYOUTS=/opt/signalbox/layouts \
-    SIGNALBOX_GAME_BIN=/opt/signalbox/bin/signalbox-game
+    SIGNALBOX_GAME_BIN=/opt/signalbox/bin/signalbox-game \
+    SIGNALBOX_WEB=/opt/signalbox/web
 EXPOSE 9160
 VOLUME ["/data"]
 ENTRYPOINT ["/opt/signalbox/bin/signalbox-server"]
