@@ -399,3 +399,13 @@ commands on the wire use names, not ids (§3.2); the `game` binary moves to C2 (
 directed track walk (a train's possible moves, points toe↔leg only), not an undirected section flood
 (§4.5); a route from a boundary signal runs into the next area and belongs to the box in rear (§5);
 the robot runs every `ROBOT_EVERY_TICKS` ticks; Drain and Gretz area files ship alongside Liverpool Street.
+
+## 16. Amendments (C2 planning, 2026-09-30)
+
+Recorded in full in the header of `docs/superpowers/plans/2026-09-30-c2-server-and-deploy.md`. In short:
+one frame type per direction (`ClientFrame`/`ServerFrame`) carries lobby and game messages; ipc frames are
+capped at 4 MiB; the front's supervisor (lobby, game children, relay, crashes, duplicate logins, outbound
+queue, shutdown) is built and tested without HTTP, and HTTP/OIDC sit on top of it; OIDC uses `openidconnect`
+with rustls and a signed one-shot login cookie; the bot gains `Greedy`, a strategy that sees only its own
+layout and view, used by the end-to-end tests over real WebSockets; sessions are in memory (a restart logs
+everyone out) and logout is local only; the front is served on the tailnet at port 50160.
