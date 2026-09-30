@@ -155,6 +155,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "signalbox-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "signalbox-core",
+ "thiserror",
+]
+
+[[package]]
 name = "sim-cli"
 version = "0.1.0"
 dependencies = [
