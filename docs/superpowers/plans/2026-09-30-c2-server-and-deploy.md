@@ -7019,6 +7019,12 @@ docker exec -u 0 authentik-server rm /blueprints/signalbox-oidc.yaml
 ```
 Expected: `apply_blueprint` reports success (no validation errors). If it complains about the application's fields, show the owner the message before changing anything.
 
+Then check that the provider signs its ID tokens with RS256, i.e. that the blueprint's `signing_key` lookup (`!Find`) found the certificate-key pair:
+```bash
+curl -s https://auth.skyes.lgbt/application/o/signalbox/jwks/ | python3 -c 'import json,sys; ks=[k for k in json.load(sys.stdin).get("keys",[]) if k.get("kty")=="RSA"]; print(len(ks), "RSA key(s)")'
+```
+Expected: at least `1 RSA key(s)`. If it prints `0` (an empty `keys` list), the `signing_key` `!Find` matched nothing and the provider would not sign with an RSA key the front can check — stop and show the owner; do not go on to D3.
+
 **D3. Group and binding.** Ask the owner **who is in `signalbox-users`** (the snippet lists only `skye`; superuser does not bypass bindings). Append the group entry of `deploy/authentik/signalbox-access.yaml.example`, with the owner's members, under `entries:` of `/opt/stack/apps/authentik/blueprints/10-access-groups.yaml`, and the binding entry under `entries:` of `40-access-bindings.yaml` (with `sudo`, keeping the files' owner and mode). Show the diff, then apply both, 10 first, exactly as that README shows:
 ```bash
 cd /opt/stack/apps/authentik/blueprints
@@ -7054,15 +7060,26 @@ sudo -n tailscale serve --bg --https=50160 http://127.0.0.1:9160
 sudo -n tailscale serve status
 /home/skye-fi/projects/signalbox/deploy/smoke.sh https://ra.tail3e0c1e.ts.net:50160 303
 ```
-Expected: five `ok` lines. `/auth/login` answering 303 to `https://auth.skyes.lgbt/application/o/authorize/...` proves the container reached Authentik's discovery document and JWKS over HTTPS. If it is 503, `docker logs signalbox` shows `login: the login provider is unavailable: discovery: ...` with the cause (DNS, egress, TLS) — report it to the owner; the fallback (joining the container to Authentik's network with an internal issuer URL) changes the issuer the browser sees and needs its own design, so do not improvise it.
+Expected: five `ok` lines. `/auth/login` answering 303 to `https://auth.skyes.lgbt/application/o/authorize/...` proves the container reached Authentik's discovery document and JWKS over HTTPS. If it is 503, `docker logs signalbox` shows `login: the login provider is unavailable: discovery: ...` with the cause (DNS, egress, TLS) — report it to the owner; the fallback (joining the container to Authentik's network with an internal issuer URL) changes the issuer the browser sees and needs its own design, so do not improvise it. A 503 can also be an **issuer mismatch**, not network trouble: `openidconnect` compares the discovery document's `issuer` with `OIDC_ISSUER` exactly, trailing slash included. Read the `discovery:` cause in `docker logs signalbox` first; if it names an issuer mismatch, set `OIDC_ISSUER` in the compose file to exactly the `issuer` that `curl -s https://auth.skyes.lgbt/application/o/signalbox/.well-known/openid-configuration` reports, and `up -d` again.
 
 Then the owner signs in with a browser at `https://ra.tail3e0c1e.ts.net:50160/`: the page must say `Signed in as <their username>`. A user outside `signalbox-users` must be stopped by Authentik (binding) — if the owner wants that checked, use a test account, not a real person's.
+
+Then a game that saves under the hardened compose (read-only root filesystem, dropped capabilities). In the owner's signed-in browser, on the signalbox page, in the developer console:
+```js
+ws = new WebSocket('wss://ra.tail3e0c1e.ts.net:50160/ws'); ws.onmessage = e => console.log(e.data);
+ws.send(JSON.stringify({type: 'create_game', layout: 'drain'}));   // once it is open: `joined` with the game id, then `layout`, `view`
+// wait more than 60 s, note the last `sim_time`, then:
+ws.send(JSON.stringify({type: 'leave'}));
+```
+Note the game id and the last `sim_time`; the game saves when it empties. D7 then restarts the front and resumes it.
 
 **D7. Shutdown and resume check:**
 ```bash
 cd /opt/stack/apps/signalbox && sudo docker compose restart && sleep 2 && docker logs --since 1m signalbox
 ```
 Expected: `signalbox-server: stopping` followed by a new `listening` line within 20 s (games, if any, were saved; players sign in again because sessions are in memory).
+
+Then resume D6's game: the owner signs in again at `https://ra.tail3e0c1e.ts.net:50160/`, opens the socket as in D6 and sends `{"type":"join","game":"<the id>"}`. Expected: `joined`, then a `view` whose `sim_time` is at least the one noted in D6 (a resumed game starts paused). `docker logs signalbox | grep -c 'save failed'` prints `0`; any `save failed` line means the read-only root filesystem or the volume is in the way — stop and report it.
 
 **D8. Boot durability and the vault.** Check how vault-dependent plain containers are wired on ra and follow it:
 ```bash

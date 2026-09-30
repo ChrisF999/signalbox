@@ -35,6 +35,12 @@ value stops the front with exit code 2 and one line saying what is wrong.
 Sessions live in memory: restarting the front logs everyone out (games are saved
 and resume on the next join).
 
+The container's root filesystem is read-only (`read_only: true` in the
+compose file); only the `/data` volume is writable. That is enough for the
+saves: the bundled SQLite is built with `SQLITE_TEMP_STORE=2`, so its temporary
+tables and indices stay in memory, and its journal files sit next to each save
+in `/data/saves`.
+
 ## Secrets
 
 `/srv/vault/creds/signalbox/` (root, 0700) on the LUKS vault holds `oidc.env`
@@ -47,6 +53,7 @@ To create them (new client secret and session key):
 ```bash
 sudo bash -c 'set -euo pipefail; umask 077
   d=/srv/vault/creds/signalbox; install -d -m 0700 "$d"
+  test ! -e "$d/oidc.env" || { echo "oidc.env exists; not overwriting"; exit 1; }
   id=$(openssl rand -hex 20); secret=$(openssl rand -hex 32); key=$(openssl rand -hex 64)
   printf "OIDC_CLIENT_ID=%s\nOIDC_CLIENT_SECRET=%s\nSIGNALBOX_SESSION_KEY=%s\n" "$id" "$secret" "$key" > "$d/oidc.env"
   t=$(cat /home/skye-fi/projects/signalbox/deploy/authentik/signalbox-oidc-blueprint.yaml.example)
@@ -54,7 +61,9 @@ sudo bash -c 'set -euo pipefail; umask 077
   printf "%s\n" "$t" > "$d/oidc-blueprint.yaml"'
 ```
 
-(Pure bash substitution, so the secret never appears in a process list.)
+(Pure bash substitution, so the secret never appears in a process list. It
+refuses to overwrite an existing `oidc.env`: a new client secret would no longer
+match the provider Authentik already has.)
 
 ## Authentik
 
