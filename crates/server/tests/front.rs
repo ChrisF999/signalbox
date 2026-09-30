@@ -186,7 +186,7 @@ async fn the_web_client_is_served_to_a_session() {
     let r = http_get(&f.base, "/", Some(&cookie)).await.unwrap();
     assert_eq!((r.status, r.header("content-type")), (200, Some("text/html; charset=utf-8")));
     assert_eq!(r.body.as_bytes(), INDEX);
-    assert_eq!(r.header("cache-control"), Some("no-cache"));
+    assert_eq!(r.header("cache-control"), Some("private, no-cache"));
     let r = http_get(&f.base, "/app/signalbox_web_bg.wasm", Some(&cookie)).await.unwrap();
     assert_eq!((r.status, r.header("content-type")), (200, Some("application/wasm")));
     assert_eq!(r.body.as_bytes(), WASM);

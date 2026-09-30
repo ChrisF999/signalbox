@@ -61,10 +61,20 @@ impl WebAssets {
     /// placeholder page); an error when it exists without `index.html` or
     /// a file cannot be read.
     pub fn load(dir: &Path) -> Result<Option<WebAssets>, String> {
-        if !dir.exists() {
-            return Ok(None);
+        match std::fs::metadata(dir) {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(format!("{}: {e}", dir.display())),
         }
-        let index = asset(&dir.join("index.html"), "index.html")?;
+        let index_path = dir.join("index.html");
+        let meta = std::fs::symlink_metadata(&index_path).map_err(|e| format!("{}: {e}", index_path.display()))?;
+        if meta.file_type().is_symlink() {
+            return Err(format!("{} is a symlink; refusing to serve it", index_path.display()));
+        }
+        if !meta.is_file() {
+            return Err(format!("{} is not a regular file", index_path.display()));
+        }
+        let index = asset(&index_path, "index.html")?;
         let mut app = BTreeMap::new();
         let app_dir = dir.join("app");
         if app_dir.is_dir() {
@@ -72,8 +82,11 @@ impl WebAssets {
             for entry in entries {
                 let entry = entry.map_err(|e| format!("{}: {e}", app_dir.display()))?;
                 let Some(name) = entry.file_name().to_str().map(str::to_string) else { continue };
-                if valid_asset_name(&name) && entry.path().is_file() {
+                let is_file = entry.file_type().map_err(|e| format!("{}: {e}", entry.path().display()))?.is_file();
+                if valid_asset_name(&name) && is_file {
                     app.insert(name.clone(), asset(&entry.path(), &name)?);
+                } else {
+                    eprintln!("signalbox-server: web: skipping {} (not a plain regular file)", entry.path().display());
                 }
             }
         }

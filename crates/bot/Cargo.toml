@@ -8,6 +8,10 @@ license.workspace = true
 name = "bot"
 path = "src/lib.rs"
 
+[[test]]
+name = "play"
+required-features = ["net"]
+
 [features]
 default = ["net"]
 # The WebSocket client and the network player (tokio). The browser client

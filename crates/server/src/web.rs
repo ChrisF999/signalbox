@@ -128,14 +128,14 @@ async fn app_file(State(state): State<AppState>, jar: SignedCookieJar, Path(file
 }
 
 /// An asset from memory; 304 when the browser already has this version.
-/// `no-cache`: browsers revalidate every load, so a new build is picked up
+/// `private, no-cache`: browsers revalidate every load, so a new build is picked up
 /// at once while an unchanged one costs a 304.
 fn serve(a: &Asset, headers: &HeaderMap) -> Response {
     let fresh = headers
         .get(IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v.split(',').any(|t| t.trim() == a.etag));
-    let common = [(ETAG, a.etag.clone()), (CACHE_CONTROL, "no-cache".to_string())];
+    let common = [(ETAG, a.etag.clone()), (CACHE_CONTROL, "private, no-cache".to_string())];
     if fresh {
         return (StatusCode::NOT_MODIFIED, common).into_response();
     }

@@ -184,10 +184,29 @@ fn web_assets_load_index_and_plain_app_files_only() {
     std::fs::write(dir.join("app/.hidden"), "no").unwrap();
     std::fs::write(dir.join("app/sub/deep.js"), "no").unwrap();
     std::fs::write(dir.join("elsewhere.js"), "no").unwrap();
+    let outside = std::env::temp_dir().join(format!("sbx-web-outside-{}", std::process::id()));
+    std::fs::write(&outside, "secret").unwrap();
+    std::os::unix::fs::symlink(&outside, dir.join("app/link.js")).unwrap();
     let w = WebAssets::load(&dir).unwrap().unwrap();
+    let _ = std::fs::remove_file(&outside);
     assert_eq!(&w.index.body[..], b"<canvas>");
-    assert_eq!(w.app.keys().collect::<Vec<_>>(), ["signalbox_web.js", "signalbox_web_bg.wasm"]);
+    assert_eq!(w.app.keys().collect::<Vec<_>>(), ["signalbox_web.js", "signalbox_web_bg.wasm"], "symlinks are not loaded");
     assert_eq!(w.app["signalbox_web_bg.wasm"].content_type, "application/wasm");
     assert_eq!(w.app["signalbox_web.js"].etag, etag(b"import x"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_assets_refuse_a_symlinked_index_and_unreadable_dirs() {
+    let dir = std::env::temp_dir().join(format!("sbx-web-link-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let target = dir.join("real.html");
+    std::fs::write(&target, "secret").unwrap();
+    std::os::unix::fs::symlink(&target, dir.join("index.html")).unwrap();
+    let err = WebAssets::load(&dir).unwrap_err();
+    assert!(err.contains("index.html") && err.contains("symlink"), "{err}");
+    // Not NotFound (a path below a file): start must fail, not serve the placeholder.
+    assert!(WebAssets::load(&target.join("web")).is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }
