@@ -18,11 +18,14 @@ scripts/cargo test                                            # everything
 scripts/cargo test -p signalbox-core --test release           # one test file
 scripts/cargo test -p signalbox-core --test release cancel_keeps_section_under_train   # one test
 scripts/cargo test --release -p ts2-import --test soak -- --ignored   # slow Liverpool St soak
+scripts/cargo test -p signalbox-game                          # game library (twobox fixture, saves in a temp dir)
+scripts/cargo test --release -p signalbox-bot --test soak -- --ignored   # 3 h Liverpool St: two bots + robot
 scripts/ci/test.sh                                            # the CI gate (native cargo, offline, -D warnings)
 
 scripts/cargo run -p sim-cli -- run crates/core/tests/fixtures/junction.json --robot --hours 1 --record /w/target/log.json
 scripts/cargo run -p sim-cli -- replay crates/core/tests/fixtures/junction.json /w/target/log.json
 scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/drain.json -o /w/target/drain.json
+scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/liverpool-st.json -o /w/target/lst.json --areas /w/layouts/liverpool-st.areas.json
 ```
 
 Paths passed through `scripts/cargo` resolve inside the container (`/w` = repo root).
@@ -38,7 +41,11 @@ the container (e.g. `docker run ... -e UPDATE_EXPECTED=1 rust:1.98-slim-bookworm
 ## Architecture
 
 Workspace crates: `crates/core` (library `signalbox-core`), `crates/sim-cli`
-(headless run/replay), `crates/ts2-import` (TS2 → signalbox converter, lib + CLI).
+(headless run/replay), `crates/ts2-import` (TS2 → signalbox converter, lib + CLI),
+`crates/protocol` (`signalbox-protocol`: wire messages, views, deltas),
+`crates/game` (`signalbox-game`: the multiplayer game library + SQLite saves),
+`crates/bot` (`signalbox-bot`: headless client). The multiplayer design is
+`docs/superpowers/specs/2026-09-30-server-and-protocol-design.md`.
 
 ### World vs state
 - `world::World` is static: loaded from a JSON `WorldFile` (`world/file.rs`, names
@@ -103,6 +110,23 @@ any route the loader rejects, with a warning). Anything the target can't express
 a `report::Report` warning; the output always passes `World::from_file`. Generated
 names are derived from TS2 ids (`L<tiId>`, `N<tiId>`, `P<tiId><p|n|r>`, `T1..`), so
 output is byte-identical for the same input.
+
+### Multiplayer (`protocol`, `game`, `bot`)
+- Areas for converted layouts come from `layouts/<name>.areas.json`, applied by
+  `ts2-import --areas`: each area floods the section graph from its seeds and
+  stops at nodes holding boundary signals (`ts2_import::areas`).
+- `game::Game` is pure: `connect`/`handle`/`advance(real_dt)`/`flush` return
+  `(player, ServerMsg)` pairs. It maps every command to its subject's area
+  (`game::areas::AreaMap`), refuses commands outside the sender's area, and runs
+  `robot::commands` every `ROBOT_EVERY_TICKS` for areas nobody holds.
+- Views are built from sim state per player (`game::view::build_view`) — own area
+  plus a fringe walked along the track to the first signal — and sent as deltas
+  (`protocol::diff`, `View::apply`); a client that sees a `seq` gap resyncs.
+- Wire commands carry names (`protocol::PlayerCommand`); the save logs core
+  `Command`s with ids, since the world is copied into each save.
+- Resume (`game::save::resume_sim`) restores the newest snapshot, skips commands
+  already in its queue, and replays the log up to the last logged tick, leaving
+  that tick's commands queued (and the robot marked as run if it logged there).
 
 ### Tests
 - Core fixtures: `crates/core/tests/fixtures/{plain_line,terminus,junction}.json`.

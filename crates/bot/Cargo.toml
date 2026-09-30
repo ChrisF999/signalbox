@@ -1,0 +1,18 @@
+[package]
+name = "signalbox-bot"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "bot"
+path = "src/lib.rs"
+
+[dependencies]
+signalbox-protocol = { path = "../protocol" }
+
+[dev-dependencies]
+signalbox-core = { path = "../core" }
+signalbox-game = { path = "../game" }
+ts2-import = { path = "../ts2-import" }
+serde_json.workspace = true
