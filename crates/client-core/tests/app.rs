@@ -380,6 +380,9 @@ fn layout(you: &str) -> ServerFrame {
         platforms: vec![],
         routes: vec![],
         geometry: None,
+        box_prefix: String::new(),
+        workstations: BTreeMap::new(),
+        simplifier: vec![],
     }))
 }
 

@@ -28,6 +28,38 @@ pub struct Layout {
     /// The diagram of the visible part; `None` when the world has none.
     #[serde(default)]
     pub geometry: Option<Geometry>,
+    /// The box's signal prefix (`L` for Liverpool Street); may be empty.
+    #[serde(default)]
+    pub box_prefix: String,
+    /// Area → its workstation letter (realism spec §2, owner decision 11).
+    #[serde(default)]
+    pub workstations: BTreeMap<String, String>,
+    /// The timetable for your area (spectators: all of it), in running
+    /// order (realism spec §3).
+    #[serde(default)]
+    pub simplifier: Vec<SimplifierRow>,
+}
+
+/// One service in the simplifier: where it runs from and to, and its calls
+/// in the area.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SimplifierRow {
+    pub headcode: String,
+    /// The first call's place, the last call's place.
+    pub origin: Option<String>,
+    pub destination: Option<String>,
+    pub calls: Vec<SimplifierCall>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SimplifierCall {
+    pub place: String,
+    pub platform: Option<String>,
+    /// Booked times, seconds since midnight.
+    pub arr: Option<f64>,
+    pub dep: Option<f64>,
+    /// `false`: booked to pass.
+    pub stops: bool,
 }
 
 /// Diagram geometry in the layout's own coordinates (TS2 scene units, y
@@ -100,6 +132,10 @@ pub struct LabelGeom {
     pub text: String,
     pub x: f64,
     pub y: f64,
+    /// A line name's direction of travel: the arrow is drawn at (x, y)
+    /// pointing this way, the text on the other side of it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arrow: Option<[f64; 2]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

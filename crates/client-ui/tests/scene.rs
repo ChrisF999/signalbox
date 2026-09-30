@@ -69,7 +69,7 @@ fn a_scene_skips_what_the_drawing_lacks() {
     g.lines[0].x1 = f64::NAN;
     g.nodes.retain(|n| n.node != "E");
     g.signals[0].facing = None;
-    g.labels.push(protocol::LabelGeom { text: s("far"), x: f64::INFINITY, y: 0.0 });
+    g.labels.push(protocol::LabelGeom { text: s("far"), x: f64::INFINITY, y: 0.0, arrow: None });
     let sc = Scene::build(&l).unwrap();
     assert_eq!(sc.tracks.len(), 1, "the line with a NaN end is skipped");
     assert!(sc.signals.iter().all(|s| s.name != "A"));
@@ -107,7 +107,7 @@ fn absurd_coordinates_are_left_out() {
     let g = l.geometry.as_mut().unwrap();
     g.signals.iter_mut().find(|s| s.signal == "A").unwrap().x = 3e38;
     g.lines[0].y2 = -3e38;
-    g.labels.push(protocol::LabelGeom { text: s("far"), x: 0.0, y: 1.0e7 + 1.0 });
+    g.labels.push(protocol::LabelGeom { text: s("far"), x: 0.0, y: 1.0e7 + 1.0, arrow: None });
     let sc = Scene::build(&l).unwrap();
     assert!(sc.signals.iter().all(|s| s.name != "A"));
     assert_eq!(sc.tracks.len(), 1);

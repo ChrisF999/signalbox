@@ -120,5 +120,9 @@ pub fn build_layout(w: &World, map: &AreaMap, vis: &Visibility, you: &str, geo: 
             })
             .collect(),
         geometry: geo.map(|g| g.visible(w, vis)),
+        // Display data: `Game` adds it from what it builds once per game.
+        box_prefix: String::new(),
+        workstations: Default::default(),
+        simplifier: vec![],
     }
 }

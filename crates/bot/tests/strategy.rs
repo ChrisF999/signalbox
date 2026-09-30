@@ -42,6 +42,9 @@ fn screen(berths: Vec<BerthInfo>, routes: Vec<RouteInfo>) -> Layout {
         platforms: vec![],
         routes,
         geometry: None,
+        box_prefix: String::new(),
+        workstations: BTreeMap::new(),
+        simplifier: vec![],
     }
 }
 

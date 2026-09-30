@@ -52,6 +52,9 @@ async fn decide_runs_at_most_twice_a_second_whoever_calls_it() {
             .map(|n| RouteInfo { name: format!("{n}-X"), entrance: s(n), exit: ExitName::Signal(s("X")), automatic: false, operable: true })
             .collect(),
         geometry: None,
+        box_prefix: String::new(),
+        workstations: BTreeMap::new(),
+        simplifier: vec![],
     };
     let view = View {
         seq: 1,

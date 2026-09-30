@@ -66,7 +66,7 @@ fn an_area_sees_its_own_drawing_and_the_fringe() {
         SignalGeom { signal: "A".into(), x: 200.0, y: -5.0, berth_x: 190.0, berth_y: -15.0, facing: Some([100.0, 0.0]) }
     );
     assert!(g.platforms.is_empty(), "EST and NST are on East's track, not in West's fringe");
-    assert_eq!(g.labels, [LabelGeom { text: "West".into(), x: 50.0, y: -30.0 }]);
+    assert_eq!(g.labels, [LabelGeom { text: "West".into(), x: 50.0, y: -30.0, arrow: None }]);
     assert_eq!(
         g.nodes,
         [node("W", 0.0, 0.0), node("E", 400.0, 0.0), node("N", 400.0, 60.0)],

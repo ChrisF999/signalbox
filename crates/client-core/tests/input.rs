@@ -181,6 +181,9 @@ fn auto_layout() -> Layout {
         platforms: vec![],
         routes: vec![route("S1-S2", "S2", true), route("S1-S3", "S3", false)],
         geometry: None,
+        box_prefix: String::new(),
+        workstations: BTreeMap::new(),
+        simplifier: vec![],
     }
 }
 

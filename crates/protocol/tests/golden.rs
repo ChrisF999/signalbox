@@ -132,6 +132,9 @@ fn small_layout() -> Layout {
             operable: true,
         }],
         geometry: None,
+        box_prefix: String::new(),
+        workstations: BTreeMap::new(),
+        simplifier: vec![],
     }
 }
 
@@ -150,7 +153,7 @@ fn layout() {
             "platforms": [{"place": "EST", "platform": "1", "segment": "e", "from_m": 700.0, "to_m": 900.0}],
             "routes": [{"name": "A-E", "entrance": "A", "exit": {"kind": "node", "name": "E"},
                         "automatic": false, "operable": true}],
-            "geometry": null
+            "geometry": null, "box_prefix": "", "workstations": {}, "simplifier": []
         }),
     );
 }
@@ -177,7 +180,7 @@ fn layout_geometry() {
             facing: Some([1.0, 0.0]),
         }],
         platforms: vec![PlatformGeom { place: s("EST"), platform: s("1"), x1: 0.0, y1: 0.0, x2: 300.0, y2: 15.0 }],
-        labels: vec![LabelGeom { text: s("Hackney & Bow"), x: -20.0, y: 615.0 }],
+        labels: vec![LabelGeom { text: s("Hackney & Bow"), x: -20.0, y: 615.0, arrow: None }],
         nodes: vec![NodeGeom { node: s("E"), x: 400.0, y: 0.0 }],
     });
     let want = json!({
@@ -194,12 +197,57 @@ fn layout_geometry() {
     assert_eq!(back, ServerMsg::Layout(l));
 }
 
+/// Realism spec §2.1 and §3: prefixes, workstation letters, the simplifier
+/// and a line name's arrow.
+#[test]
+fn layout_display_data() {
+    let mut l = small_layout();
+    l.box_prefix = s("L");
+    l.workstations = BTreeMap::from([(s("West"), s("A")), (s("East"), s("B"))]);
+    l.simplifier = vec![SimplifierRow {
+        headcode: s("1A07"),
+        origin: Some(s("BOWJ")),
+        destination: Some(s("LIVST")),
+        calls: vec![
+            SimplifierCall { place: s("WSJ"), platform: Some(s("ML_UP")), arr: None, dep: Some(34_170.0), stops: false },
+            SimplifierCall { place: s("LIVST"), platform: Some(s("12")), arr: Some(34_380.0), dep: None, stops: true },
+        ],
+    }];
+    l.geometry = Some(Geometry {
+        labels: vec![
+            LabelGeom { text: s("UP MAIN"), x: 885.0, y: 488.0, arrow: Some([-1.0, 0.0]) },
+            LabelGeom { text: s("BANK"), x: 60.0, y: 50.0, arrow: None },
+        ],
+        ..Geometry::default()
+    });
+    let json = serde_json::to_value(ServerMsg::Layout(l.clone())).unwrap();
+    assert_eq!(json["box_prefix"], "L");
+    assert_eq!(json["workstations"], json!({"East": "B", "West": "A"}));
+    assert_eq!(
+        json["simplifier"],
+        json!([{"headcode": "1A07", "origin": "BOWJ", "destination": "LIVST", "calls": [
+            {"place": "WSJ", "platform": "ML_UP", "arr": null, "dep": 34170.0, "stops": false},
+            {"place": "LIVST", "platform": "12", "arr": 34380.0, "dep": null, "stops": true}
+        ]}])
+    );
+    assert_eq!(
+        json["geometry"]["labels"],
+        json!([{"text": "UP MAIN", "x": 885.0, "y": 488.0, "arrow": [-1.0, 0.0]}, {"text": "BANK", "x": 60.0, "y": 50.0}]),
+        "a label without an arrow is written as before"
+    );
+    let back: ServerMsg = serde_json::from_value(json).unwrap();
+    assert_eq!(back, ServerMsg::Layout(l));
+}
+
 #[test]
 fn a_layout_or_view_from_before_d1_still_reads() {
     let mut json = serde_json::to_value(ServerMsg::Layout(small_layout())).unwrap();
-    json.as_object_mut().unwrap().remove("geometry");
+    for key in ["geometry", "box_prefix", "workstations", "simplifier"] {
+        json.as_object_mut().unwrap().remove(key);
+    }
     let ServerMsg::Layout(l) = serde_json::from_value(json).unwrap() else { panic!() };
     assert_eq!(l.geometry, None);
+    assert_eq!((l.box_prefix.as_str(), l.workstations.len(), l.simplifier.len()), ("", 0, 0));
     let view = json!({
         "type": "view", "seq": 1, "sim_time": 0.0, "speed": 1, "paused": false, "vote": null,
         "holders": {}, "score": null, "signals": {}, "routes": {}, "points": {}, "sections": {}, "berths": {}
