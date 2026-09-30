@@ -163,3 +163,13 @@ fn liverpool_street_draws_everything_each_player_sees() {
         assert!(bytes < 512 * 1024, "{bytes} bytes");
     }
 }
+
+/// A line name written by `ts2-import --lines` keeps its arrow.
+#[test]
+fn a_line_names_arrow_reaches_the_client() {
+    let mut layout = twobox_layout();
+    layout["labels"].as_array_mut().unwrap().push(json!({"text": "UP MAIN", "x": 20.0, "y": -12.0, "arrow": [-1.0, 0.0]}));
+    let g = geometry_for(&twobox_with(layout), Some("West")).unwrap();
+    let up = LabelGeom { text: "UP MAIN".into(), x: 20.0, y: -12.0, arrow: Some([-1.0, 0.0]) };
+    assert!(g.labels.contains(&up), "{:?}", g.labels);
+}

@@ -4,6 +4,7 @@
 
 pub mod areas;
 pub mod clock;
+pub mod display;
 pub mod game;
 pub mod geometry;
 pub mod layout;

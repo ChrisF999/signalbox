@@ -15,6 +15,7 @@ use signalbox_core::world::{LoadError, World};
 
 use crate::areas::{AreaMap, Visibility};
 use crate::clock::{GameClock, VoteError};
+use crate::display::Display;
 use crate::geometry::WorldGeometry;
 use crate::layout::build_layout;
 use crate::names::{resolve, to_player_command, valid_headcode};
@@ -103,6 +104,8 @@ pub struct Game {
     by_area: Vec<Visibility>,
     /// The diagram, read once from the world.
     geometry: Option<WorldGeometry>,
+    /// Prefixes and simplifiers, built once from the world.
+    display: Display,
     /// Holder of each area, by area; `None` = the robot.
     holders: Vec<Option<String>>,
     players: BTreeMap<String, Player>,
@@ -257,6 +260,7 @@ impl Game {
         let by_area = (0..w.net.areas.len()).map(|a| Visibility::of_area(w, &map, AreaId::from_idx(a))).collect();
         let holders = vec![None; w.net.areas.len()];
         let geometry = WorldGeometry::from_world(w);
+        let display = Display::from_world(w);
         Game {
             sim,
             meta,
@@ -264,6 +268,7 @@ impl Game {
             spectator,
             by_area,
             geometry,
+            display,
             holders,
             players: BTreeMap::new(),
             clock: GameClock::new(paused),
@@ -314,7 +319,9 @@ impl Game {
 
     pub fn layout_of(&self, player: &str) -> Option<Layout> {
         let p = self.players.get(player)?;
-        Some(build_layout(self.sim.world(), &self.map, &p.vis, player, self.geometry.as_ref()))
+        let mut layout = build_layout(self.sim.world(), &self.map, &p.vis, player, self.geometry.as_ref());
+        self.display.fill(&mut layout, p.vis.area);
+        Some(layout)
     }
 
     /// A player (re)connects and gets the layout and a full view.
@@ -384,7 +391,8 @@ impl Game {
             return vec![];
         }
         let seq = p.last.as_ref().map_or(1, |v| v.seq + 1);
-        let layout = build_layout(self.sim.world(), &self.map, &p.vis, player, self.geometry.as_ref());
+        let mut layout = build_layout(self.sim.world(), &self.map, &p.vis, player, self.geometry.as_ref());
+        self.display.fill(&mut layout, p.vis.area);
         let view = build_view(&self.sim, &p.vis, &shared, seq);
         p.last = Some(view.clone());
         vec![(player.to_string(), ServerMsg::Layout(layout)), (player.to_string(), ServerMsg::View(view))]
