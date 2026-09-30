@@ -7,15 +7,17 @@ use std::time::{Duration, Instant};
 use axum::Router;
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{FromRef, State};
+use axum::extract::{FromRef, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum_extra::extract::cookie::{Cookie, Key, SignedCookieJar};
 use protocol::{GameInfo, LayoutInfo, codes};
+use serde::Deserialize;
 
 use crate::limit::RateLimit;
-use crate::session::{SESSION_COOKIE, Sessions};
+use crate::oidc::{Denied, LOGIN_COOKIE, LoginError, Oidc, PENDING_TTL};
+use crate::session::{SESSION_COOKIE, SESSION_TTL, Sessions, cookie};
 use crate::supervisor::Supervisor;
 
 /// Largest message or frame a client may send.
@@ -30,6 +32,8 @@ pub struct AppState {
     pub sup: Arc<Supervisor>,
     pub sessions: Arc<Sessions>,
     pub key: Key,
+    /// `None` only in a `dev-auth` build started without OIDC settings.
+    pub oidc: Option<Arc<Oidc>>,
 }
 
 impl FromRef<AppState> for Key {
@@ -39,7 +43,12 @@ impl FromRef<AppState> for Key {
 }
 
 pub fn router(state: AppState) -> Router {
-    let r = Router::new().route("/", get(index)).route("/ws", get(ws)).route("/auth/logout", get(logout));
+    let r = Router::new()
+        .route("/", get(index))
+        .route("/ws", get(ws))
+        .route("/auth/login", get(login))
+        .route("/auth/callback", get(callback))
+        .route("/auth/logout", get(logout));
     #[cfg(feature = "dev-auth")]
     let r = r.route("/auth/dev", get(dev::login));
     r.with_state(state)
@@ -96,6 +105,61 @@ pub fn index_page(user: &str, games: &[GameInfo], layouts: &[LayoutInfo]) -> Str
 async fn index(State(state): State<AppState>, jar: SignedCookieJar) -> Response {
     let Some(user) = user_of(&state, &jar) else { return Redirect::to("/auth/login").into_response() };
     Html(index_page(&user, &state.sup.list_games(), &state.sup.layouts().infos())).into_response()
+}
+
+async fn login(State(state): State<AppState>, jar: SignedCookieJar) -> Response {
+    let Some(oidc) = &state.oidc else { return (StatusCode::NOT_FOUND, "no login provider is configured").into_response() };
+    match oidc.begin().await {
+        Ok((url, login_state)) => (jar.add(cookie(LOGIN_COOKIE, &login_state, PENDING_TTL.as_secs())), Redirect::to(&url)).into_response(),
+        Err(e) => {
+            eprintln!("signalbox-server: login: {e}");
+            (StatusCode::SERVICE_UNAVAILABLE, "the login service is unavailable; try again shortly").into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct CallbackQuery {
+    state: Option<String>,
+    code: Option<String>,
+}
+
+/// The provider sends the browser back here. The `state` must be the one
+/// this browser's login cookie holds (login CSRF) and a live, unused login.
+async fn callback(State(state): State<AppState>, jar: SignedCookieJar, Query(q): Query<CallbackQuery>) -> Response {
+    let Some(oidc) = &state.oidc else { return (StatusCode::NOT_FOUND, "no login provider is configured").into_response() };
+    let started = jar.get(LOGIN_COOKIE).map(|c| c.value().to_string());
+    let jar = jar.remove(Cookie::build(LOGIN_COOKIE).path("/"));
+    let (Some(login_state), Some(code)) = (q.state, q.code) else {
+        return (StatusCode::BAD_REQUEST, jar, "the login was cancelled or failed; start again at /auth/login").into_response();
+    };
+    if started.as_deref() != Some(login_state.as_str()) {
+        return (StatusCode::BAD_REQUEST, jar, "this login was not started in this browser").into_response();
+    }
+    match oidc.finish(&login_state, &code).await {
+        Ok(user) => {
+            let id = state.sessions.create(&user);
+            (jar.add(cookie(SESSION_COOKIE, &id, SESSION_TTL.as_secs())), Redirect::to("/")).into_response()
+        }
+        Err(LoginError::BadState) => (StatusCode::BAD_REQUEST, jar, "unknown or expired login; start again").into_response(),
+        Err(LoginError::Denied(Denied::NotInGroup)) => {
+            (StatusCode::FORBIDDEN, jar, "your account is not in signalbox-users").into_response()
+        }
+        Err(LoginError::Denied(Denied::NoUsername)) => {
+            (StatusCode::FORBIDDEN, jar, "your account has no username").into_response()
+        }
+        Err(LoginError::Denied(Denied::ReservedName)) => {
+            (StatusCode::FORBIDDEN, jar, "`robot` is reserved for the automatic signaller").into_response()
+        }
+        Err(e @ LoginError::Rejected(_)) => {
+            eprintln!("signalbox-server: callback: {e}");
+            (StatusCode::FORBIDDEN, jar, "the login could not be verified").into_response()
+        }
+        Err(e @ LoginError::Unavailable(_)) => {
+            eprintln!("signalbox-server: callback: {e}");
+            (StatusCode::BAD_GATEWAY, jar, "the login service is unavailable; try again shortly").into_response()
+        }
+    }
 }
 
 async fn logout(State(state): State<AppState>, jar: SignedCookieJar) -> Response {

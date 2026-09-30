@@ -1,10 +1,12 @@
 //! signalbox's server side: the game process (`process`, run by the
 //! `signalbox-game` binary) and the front (`signalbox-server`): config,
-//! sessions, layouts, the supervisor of game processes, and the web routes.
+//! sessions, login, layouts, the supervisor of game processes, and the web
+//! routes.
 
 pub mod config;
 pub mod layouts;
 pub mod limit;
+pub mod oidc;
 pub mod outbox;
 pub mod process;
 pub mod session;
@@ -22,6 +24,7 @@ use tokio::task::JoinHandle;
 
 use crate::config::Config;
 use crate::layouts::Layouts;
+use crate::oidc::Oidc;
 use crate::session::Sessions;
 use crate::supervisor::{Supervisor, SupervisorConfig};
 use crate::web::AppState;
@@ -50,8 +53,12 @@ pub async fn start(cfg: Config) -> Result<Running, String> {
         },
         layouts,
     )?;
+    let oidc = match &cfg.oidc {
+        Some(o) => Some(Arc::new(Oidc::new(o, &cfg.public_url)?)),
+        None => None,
+    };
     let sessions = Arc::new(Sessions::new());
-    let state = AppState { sup: sup.clone(), sessions: sessions.clone(), key: Key::from(&cfg.session_key) };
+    let state = AppState { sup: sup.clone(), sessions: sessions.clone(), key: Key::from(&cfg.session_key), oidc };
     let listener = tokio::net::TcpListener::bind(cfg.addr).await.map_err(|e| format!("{}: {e}", cfg.addr))?;
     let addr = listener.local_addr().map_err(|e| e.to_string())?;
     let stop = Arc::new(Notify::new());

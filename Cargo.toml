@@ -19,3 +19,5 @@ axum = { version = "0.8.9", features = ["ws"] }
 axum-extra = { version = "0.12", features = ["cookie-signed"] }
 tokio-tungstenite = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+openidconnect = { version = "4", default-features = false, features = ["reqwest", "rustls-tls"] }
+base64 = "0.22"
