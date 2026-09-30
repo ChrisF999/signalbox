@@ -10,6 +10,7 @@ members = [
     "crates/ipc",
     "crates/server",
     "crates/client-core",
+    "crates/client-ui",
 ]
 
 [workspace.package]
@@ -33,3 +34,5 @@ tokio-tungstenite = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 openidconnect = { version = "4", default-features = false, features = ["reqwest", "rustls-tls"] }
 base64 = "0.22"
+# The browser client (D1). egui for the screens; eframe (web runner, wgpu) only in client-web.
+egui = "0.36.2"

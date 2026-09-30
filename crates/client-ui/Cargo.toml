@@ -1,0 +1,19 @@
+[package]
+name = "signalbox-client-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "client_ui"
+path = "src/lib.rs"
+
+[dependencies]
+signalbox-client-core = { path = "../client-core" }
+signalbox-protocol = { path = "../protocol" }
+egui.workspace = true
+
+[dev-dependencies]
+signalbox-core = { path = "../core" }
+signalbox-game = { path = "../game" }
+serde_json.workspace = true
