@@ -38,19 +38,26 @@ impl eframe::App for WebApp {
 #[wasm_bindgen(start)]
 pub fn start() {
     wasm_bindgen_futures::spawn_local(async {
-        if let Err(why) = run().await {
-            fallback(&why);
+        let canvas = match canvas() {
+            Ok(canvas) => canvas,
+            Err(why) => return fallback(why, false),
+        };
+        if let Err(why) = run(canvas).await {
+            fallback(&why, true);
         }
     });
 }
 
-async fn run() -> Result<(), String> {
+fn canvas() -> Result<web_sys::HtmlCanvasElement, &'static str> {
     let doc = web_sys::window().and_then(|w| w.document()).ok_or("no document")?;
-    let canvas = doc
-        .get_element_by_id("signalbox_canvas")
+    doc.get_element_by_id("signalbox_canvas")
         .ok_or("no #signalbox_canvas")?
         .dyn_into::<web_sys::HtmlCanvasElement>()
-        .map_err(|_| "#signalbox_canvas is not a canvas")?;
+        .map_err(|_| "#signalbox_canvas is not a canvas")
+}
+
+/// eframe on the canvas; an error here is the renderer's (no WebGPU or WebGL2).
+async fn run(canvas: web_sys::HtmlCanvasElement) -> Result<(), String> {
     let mut options = eframe::WebOptions::default();
     // egui-wgpu's own default on the web, stated here: WebGPU where the
     // browser has it (secure contexts only), else WebGL2.
@@ -78,15 +85,20 @@ async fn run() -> Result<(), String> {
         .map_err(|e| e.as_string().unwrap_or_else(|| format!("{e:?}")))
 }
 
-/// Neither WebGPU nor WebGL2 (or something else stopped eframe): say so
-/// in plain HTML instead of a blank page.
-fn fallback(why: &str) {
+/// Say in plain HTML why there is no signal box instead of a blank page;
+/// `renderer` adds the WebGPU/WebGL2 explanation.
+fn fallback(why: &str, renderer: bool) {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
     if let Some(c) = doc.get_element_by_id("signalbox_canvas") {
         c.remove();
     }
     if let Some(r) = doc.get_element_by_id("fallback_reason") {
         r.set_text_content(Some(&format!("The signal box could not start: {why}")));
+    }
+    if renderer {
+        if let Some(g) = doc.get_element_by_id("fallback_gpu") {
+            let _ = g.remove_attribute("hidden");
+        }
     }
     if let Some(f) = doc.get_element_by_id("fallback") {
         let _ = f.remove_attribute("hidden");
