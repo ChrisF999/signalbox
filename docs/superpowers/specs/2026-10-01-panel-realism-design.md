@@ -9,7 +9,7 @@ Builds on: `2026-09-30-browser-client-design.md` (D1). Replaces its §3.1 drawin
 
 Make the signaller's screen look and behave as close as practical to a real UK IECC / Westcad
 workstation, with two deliberate, switchable concessions for playability. Research and sources:
-`.superpowers/research-uk-vdu-conventions.md` (RAIB report photos of the Thames Valley IECC and an
+`docs/superpowers/research/2026-10-01-uk-vdu-conventions.md` (RAIB report photos of the Thames Valley IECC and an
 Invensys workstation; SimSig's documented IECC style; NR/RSSB standards are paywalled, so fonts and
 exact sizes stay approximate). The comparison the owner chose from:
 https://claude.ai/artifact/Kt6TDwNEWY8ecY68dnrKF9
