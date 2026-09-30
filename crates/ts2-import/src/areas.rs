@@ -1,10 +1,13 @@
 //! Signalling areas for converted worlds, from a hand-made per-layout file
 //! (spec §5). Each area floods the section graph from its seeds; the flood
 //! never crosses a node where a boundary signal stands. Names are opaque.
+//! The file also names the box (`prefix`) and each area's workstation letter
+//! (realism spec §2.1); both go into the world's client-only `layout`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Deserialize;
+use serde_json::{Map, Value};
 use signalbox_core::world::file::{AreaFile, WorldFile};
 use signalbox_core::world::{LoadError, World};
 
@@ -14,6 +17,10 @@ pub const AREAS_SCHEMA: u32 = 1;
 #[serde(deny_unknown_fields)]
 pub struct AreasFile {
     pub schema: u32,
+    /// The box's signal prefix, 1 to 3 capital letters; defaults to the
+    /// first letter of the world's title.
+    #[serde(default)]
+    pub prefix: Option<String>,
     #[serde(default)]
     pub boundaries: Vec<String>,
     pub areas: Vec<AreaSpec>,
@@ -24,6 +31,29 @@ pub struct AreasFile {
 pub struct AreaSpec {
     pub name: String,
     pub seeds: Vec<String>,
+    /// This area's workstation letter; defaults to A, B, C… in file order.
+    #[serde(default)]
+    pub workstation: Option<String>,
+}
+
+/// A box prefix: 1 to 3 ASCII capital letters.
+pub fn valid_prefix(p: &str) -> bool {
+    (1..=3).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_uppercase())
+}
+
+/// A workstation letter: one ASCII capital.
+pub fn valid_workstation(w: &str) -> bool {
+    w.len() == 1 && w.bytes().all(|b| b.is_ascii_uppercase())
+}
+
+/// The first ASCII letter of `title`, as a capital; empty if it has none.
+pub fn default_prefix(title: &str) -> String {
+    title.chars().find(char::is_ascii_alphabetic).map(|c| c.to_ascii_uppercase().to_string()).unwrap_or_default()
+}
+
+/// A, B, C… for areas 0, 1, 2…; nothing past Z.
+pub fn default_workstation(i: usize) -> String {
+    u8::try_from(i).ok().filter(|&i| i < 26).map(|i| char::from(b'A' + i).to_string()).unwrap_or_default()
 }
 
 /// What one area ended up with.
@@ -61,6 +91,12 @@ pub enum AreasError {
     DoublyReached(Vec<String>),
     #[error("sections reached by no area: {}", list(.0))]
     Unreached(Vec<String>),
+    #[error("prefix `{0}` is not 1 to 3 capital letters")]
+    BadPrefix(String),
+    #[error("areas whose workstation is not one capital letter: {}", list(.0))]
+    BadWorkstations(Vec<String>),
+    #[error("workstation letters on more than one area: {}", list(.0))]
+    DuplicateWorkstations(Vec<String>),
     #[error("the world with areas does not load: {0}")]
     Invalid(LoadError),
 }
@@ -76,6 +112,7 @@ pub fn parse(json: &str) -> Result<AreasFile, AreasError> {
 /// Rewrite the world's areas, each section's area and each signal's area
 /// (the area of the section its segment belongs to). All or nothing.
 pub fn apply(world: &mut WorldFile, spec: &AreasFile) -> Result<Vec<AreaCount>, AreasError> {
+    let (prefix, letters) = prefixes(world, spec)?;
     let owner = assign(world, spec)?;
     let mut out = world.clone();
     out.areas = spec.areas.iter().map(|a| AreaFile { name: a.name.clone() }).collect();
@@ -97,8 +134,42 @@ pub fn apply(world: &mut WorldFile, spec: &AreasFile) -> Result<Vec<AreaCount>, 
         counts[i].signals += 1;
     }
     World::from_file(out.clone()).map_err(AreasError::Invalid)?;
+    // Display data for clients, beside the drawing (a world without a
+    // drawing has no `layout` object and gets the game's defaults).
+    if let Some(layout) = out.layout.as_object_mut() {
+        let ws: Map<String, Value> =
+            spec.areas.iter().zip(letters).map(|(a, l)| (a.name.clone(), Value::String(l))).collect();
+        layout.insert("box_prefix".into(), Value::String(prefix));
+        layout.insert("workstations".into(), Value::Object(ws));
+    }
     *world = out;
     Ok(counts)
+}
+
+/// The box prefix and each area's workstation letter, defaults filled in.
+fn prefixes(world: &WorldFile, spec: &AreasFile) -> Result<(String, Vec<String>), AreasError> {
+    let prefix = match &spec.prefix {
+        Some(p) if !valid_prefix(p) => return Err(AreasError::BadPrefix(p.clone())),
+        Some(p) => p.clone(),
+        None => default_prefix(&world.title),
+    };
+    let letters: Vec<String> = spec
+        .areas
+        .iter()
+        .enumerate()
+        .map(|(i, a)| a.workstation.clone().unwrap_or_else(|| default_workstation(i)))
+        .collect();
+    let bad: Vec<String> =
+        spec.areas.iter().zip(&letters).filter(|(_, l)| !valid_workstation(l)).map(|(a, _)| a.name.clone()).collect();
+    if !bad.is_empty() {
+        return Err(AreasError::BadWorkstations(bad));
+    }
+    let mut seen = BTreeSet::new();
+    let twice: BTreeSet<String> = letters.iter().filter(|l| !seen.insert(l.as_str())).cloned().collect();
+    if !twice.is_empty() {
+        return Err(AreasError::DuplicateWorkstations(twice.into_iter().collect()));
+    }
+    Ok((prefix, letters))
 }
 
 /// Section name → index of the area that owns it.

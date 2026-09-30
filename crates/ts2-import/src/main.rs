@@ -2,13 +2,13 @@
 
 use std::process::ExitCode;
 
-use ts2_import::{areas, convert, report};
+use ts2_import::{areas, convert, lines, report};
 
-const USAGE: &str = "usage: ts2-import <input.json> -o <world.json> [--strict] [--areas <areas.json>]";
+const USAGE: &str = "usage: ts2-import <input.json> -o <world.json> [--strict] [--areas <areas.json>] [--lines <lines.json>]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (mut input, mut output, mut strict, mut areas_path) = (None, None, false, None);
+    let (mut input, mut output, mut strict, mut areas_path, mut lines_path) = (None, None, false, None, None);
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -26,6 +26,13 @@ fn main() -> ExitCode {
                     None => return usage(),
                 }
             }
+            "--lines" => {
+                i += 1;
+                match args.get(i) {
+                    Some(l) => lines_path = Some(l.clone()),
+                    None => return usage(),
+                }
+            }
             "--strict" => strict = true,
             a if input.is_none() && !a.starts_with('-') => input = Some(a.to_string()),
             _ => return usage(),
@@ -36,6 +43,16 @@ fn main() -> ExitCode {
     let spec = match &areas_path {
         Some(p) => match std::fs::read_to_string(p).map_err(|e| e.to_string()).and_then(|t| areas::parse(&t).map_err(|e| e.to_string())) {
             Ok(s) => Some((p.clone(), s)),
+            Err(e) => {
+                eprintln!("{p}: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => None,
+    };
+    let line_specs = match &lines_path {
+        Some(p) => match std::fs::read_to_string(p).map_err(|e| e.to_string()).and_then(|t| lines::parse(&t).map_err(|e| e.to_string())) {
+            Ok(l) => Some((p.clone(), l)),
             Err(e) => {
                 eprintln!("{p}: {e}");
                 return ExitCode::FAILURE;
@@ -60,6 +77,12 @@ fn main() -> ExitCode {
                         eprintln!("{p}: {e}");
                         return ExitCode::FAILURE;
                     }
+                }
+            }
+            if let Some((p, l)) = &line_specs {
+                if let Err(e) = lines::apply(&mut c.world, l) {
+                    eprintln!("{p}: {e}");
+                    return ExitCode::FAILURE;
                 }
             }
             let json = serde_json::to_string_pretty(&c.world).expect("world serialises");

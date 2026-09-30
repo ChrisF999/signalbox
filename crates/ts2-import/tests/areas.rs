@@ -1,5 +1,6 @@
 //! Area files: flood fill from seeds, boundary signals, hard errors, and the shipped layouts.
 
+use serde_json::json;
 use signalbox_core::world::World;
 use signalbox_core::world::file::WorldFile;
 use ts2_import::areas::{self, AreaCount, AreaSpec, AreasError, AreasFile};
@@ -13,10 +14,15 @@ fn plain_line() -> WorldFile {
 fn spec(boundaries: &[&str], areas: &[(&str, Vec<&str>)]) -> AreasFile {
     AreasFile {
         schema: 1,
+        prefix: None,
         boundaries: boundaries.iter().map(|s| s.to_string()).collect(),
         areas: areas
             .iter()
-            .map(|(n, seeds)| AreaSpec { name: n.to_string(), seeds: seeds.iter().map(|s| s.to_string()).collect() })
+            .map(|(n, seeds)| AreaSpec {
+                name: n.to_string(),
+                seeds: seeds.iter().map(|s| s.to_string()).collect(),
+                workstation: None,
+            })
             .collect(),
     }
 }
@@ -139,6 +145,68 @@ fn parse_checks_schema_and_fields() {
     assert!(matches!(areas::parse("not json"), Err(AreasError::Parse(_))));
     let ok = areas::parse(r#"{"schema": 1, "boundaries": ["S2"], "areas": [{"name": "West", "seeds": ["TA"]}]}"#).unwrap();
     assert_eq!(ok, spec(&["S2"], &[("West", vec!["TA"])]));
+    let full = areas::parse(r#"{"schema": 1, "prefix": "L", "areas": [{"name": "West", "seeds": ["TA"], "workstation": "B"}]}"#)
+        .unwrap();
+    assert_eq!((full.prefix.as_deref(), full.areas[0].workstation.as_deref()), (Some("L"), Some("B")));
+}
+
+/// plain_line split West | East, with an (empty) drawing to carry the prefixes.
+fn drawn_split(prefix: Option<&str>, east: Option<&str>) -> Result<WorldFile, AreasError> {
+    let mut w = plain_line();
+    w.layout = json!({"lines": []});
+    let mut sp = spec(&["S2"], &[("West", vec!["TA"]), ("East", vec!["TC"])]);
+    sp.prefix = prefix.map(str::to_string);
+    sp.areas[1].workstation = east.map(str::to_string);
+    areas::apply(&mut w, &sp).map(|_| w)
+}
+
+#[test]
+fn prefixes_default_to_the_title_and_the_area_order() {
+    let w = drawn_split(None, None).unwrap();
+    assert_eq!(w.title, "Plain line");
+    assert_eq!(w.layout["box_prefix"], "P");
+    assert_eq!(w.layout["workstations"], json!({"West": "A", "East": "B"}));
+    assert_eq!(w.layout["lines"], json!([]), "the drawing is kept");
+    World::from_file(w).unwrap();
+}
+
+#[test]
+fn prefixes_from_the_file_win() {
+    let w = drawn_split(Some("XYZ"), Some("Q")).unwrap();
+    assert_eq!(w.layout["box_prefix"], "XYZ");
+    assert_eq!(w.layout["workstations"], json!({"West": "A", "East": "Q"}));
+}
+
+#[test]
+fn a_world_without_a_drawing_gets_no_prefixes() {
+    let mut w = plain_line();
+    areas::apply(&mut w, &spec(&["S2"], &[("West", vec!["TA"]), ("East", vec!["TC"])])).unwrap();
+    assert!(w.layout.is_null(), "the game's defaults apply: {}", w.layout);
+}
+
+#[test]
+fn bad_prefixes_and_letters_are_hard_errors() {
+    for bad in ["", "ab", "ABCD", "L1", "É"] {
+        assert_eq!(drawn_split(Some(bad), None).unwrap_err(), AreasError::BadPrefix(bad.to_string()), "{bad:?}");
+    }
+    for bad in ["", "b", "BB", "7"] {
+        assert_eq!(drawn_split(None, Some(bad)).unwrap_err(), AreasError::BadWorkstations(names(&["East"])), "{bad:?}");
+    }
+    let e = drawn_split(None, Some("A")).unwrap_err();
+    assert_eq!(e, AreasError::DuplicateWorkstations(names(&["A"])), "West has A by default");
+    assert!(e.to_string().contains("`A`"), "{e}");
+}
+
+#[test]
+fn prefix_defaults() {
+    assert_eq!(areas::default_prefix("London Liverpool Street Station"), "L");
+    assert_eq!(areas::default_prefix("2 boxes, été"), "B");
+    assert_eq!(areas::default_prefix("42 — ½"), "");
+    assert_eq!(areas::default_workstation(0), "A");
+    assert_eq!(areas::default_workstation(25), "Z");
+    assert_eq!(areas::default_workstation(26), "");
+    assert!(areas::valid_prefix("LST") && !areas::valid_prefix("LSTX"));
+    assert!(areas::valid_workstation("C") && !areas::valid_workstation("c"));
 }
 
 fn check_shipped(name: &str, want: &[(&str, usize, usize)]) -> WorldFile {
@@ -169,6 +237,8 @@ fn liverpool_street_has_three_boxes() {
     for s in ["90", "92", "94"] {
         assert_eq!(signal_area(&w, s), "Hackney & Bow", "{s}");
     }
+    assert_eq!(w.layout["box_prefix"], "L");
+    assert_eq!(w.layout["workstations"], json!({"Liverpool Street": "A", "Bethnal Green": "B", "Hackney & Bow": "C"}));
 }
 
 #[test]
@@ -177,12 +247,16 @@ fn drain_has_two_boxes() {
     for s in ["72", "73", "82", "83"] {
         assert_eq!(signal_area(&w, s), "Bank", "{s}");
     }
+    assert_eq!(w.layout["box_prefix"], "W", "the Waterloo & City, not the title's L");
+    assert_eq!(w.layout["workstations"], json!({"Bank": "A", "Waterloo": "B"}));
 }
 
 #[test]
 fn gretz_has_three_boxes() {
-    check_shipped(
+    let w = check_shipped(
         "gretz-armainvilliers",
         &[("Gretz", 123, 47), ("Tournan & Marles", 68, 26), ("Mortcerf & Coulommiers", 36, 22)],
     );
+    assert_eq!(w.layout["box_prefix"], "G");
+    assert_eq!(w.layout["workstations"], json!({"Gretz": "A", "Tournan & Marles": "B", "Mortcerf & Coulommiers": "C"}));
 }

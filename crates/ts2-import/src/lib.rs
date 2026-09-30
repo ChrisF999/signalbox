@@ -3,6 +3,7 @@
 pub mod areas;
 pub mod graph;
 pub mod layout;
+pub mod lines;
 pub mod report;
 pub mod routes;
 pub mod timetable;

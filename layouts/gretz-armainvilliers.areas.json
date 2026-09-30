@@ -1,9 +1,10 @@
 {
   "schema": 1,
+  "prefix": "G",
   "boundaries": ["39,1V1", "39,1V2", "52,1"],
   "areas": [
-    {"name": "Gretz", "seeds": ["3618"]},
-    {"name": "Tournan & Marles", "seeds": ["504"]},
-    {"name": "Mortcerf & Coulommiers", "seeds": ["725"]}
+    {"name": "Gretz", "seeds": ["3618"], "workstation": "A"},
+    {"name": "Tournan & Marles", "seeds": ["504"], "workstation": "B"},
+    {"name": "Mortcerf & Coulommiers", "seeds": ["725"], "workstation": "C"}
   ]
 }

@@ -1,0 +1,4 @@
+[
+  {"name": "WESTBOUND", "direction": "up", "through": ["73", "74", "75"]},
+  {"name": "EASTBOUND", "direction": "down", "through": ["83", "84", "85", "86"]}
+]

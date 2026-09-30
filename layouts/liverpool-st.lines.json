@@ -1,0 +1,10 @@
+[
+  {"name": "DOWN SUBURBAN", "direction": "up", "through": ["T226", "T256", "T278", "91"]},
+  {"name": "UP SUBURBAN", "direction": "down", "through": ["T191", "T223", "T263", "T279", "54", "351", "90", "120"]},
+  {"name": "DOWN MAIN", "direction": "up", "through": ["T230", "T254", "T297", "93"]},
+  {"name": "UP MAIN", "direction": "down", "through": ["T207", "T224", "T265", "T300", "72", "220"]},
+  {"name": "DOWN ELECTRIC", "direction": "up", "through": ["T219", "T264", "T307", "75", "95"]},
+  {"name": "UP ELECTRIC", "direction": "down", "through": ["T225", "T262", "T308", "74", "222"]},
+  {"name": "DOWN FAST", "direction": "up", "through": ["T284"]},
+  {"name": "UP FAST", "direction": "down", "through": ["T285", "122"]}
+]

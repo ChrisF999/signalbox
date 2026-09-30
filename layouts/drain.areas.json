@@ -1,8 +1,9 @@
 {
   "schema": 1,
+  "prefix": "W",
   "boundaries": ["73", "84"],
   "areas": [
-    {"name": "Bank", "seeds": ["72"]},
-    {"name": "Waterloo", "seeds": ["75"]}
+    {"name": "Bank", "seeds": ["72"], "workstation": "A"},
+    {"name": "Waterloo", "seeds": ["75"], "workstation": "B"}
   ]
 }
