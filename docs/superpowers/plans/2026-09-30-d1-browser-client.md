@@ -5091,7 +5091,7 @@ git commit -m "feat(client-ui): lobby, top bar, diagram, train list, alarms and 
 
 **Interfaces:**
 - Consumes: `client_core::{App, ConnState, Transport}` (Task 3), `client_ui::UiApp` (Task 6); eframe 0.36.2 on wasm32 (`eframe::App::ui(&mut self, &mut egui::Ui, &mut eframe::Frame)`, `eframe::WebRunner::new().start(canvas, WebOptions, AppCreator).await`, `WebOptions::wgpu_options.wgpu_setup` = `egui_wgpu::WgpuSetup::CreateNew(WgpuSetupCreateNew { instance_descriptor, .. })`, `eframe::wgpu::Backends`); web-sys `WebSocket`, `MessageEvent`, `CloseEvent`, `Window::fetch_with_str`, `Response::status`.
-- Produces: `crates/client-web` (package `signalbox-client-web`, lib `signalbox_web`, `crate-type = ["cdylib"]`, empty natively) with a `#[wasm_bindgen(start)]` entry; `WebSocketTransport` (private); `index.html` with `#signalbox_canvas`, `#fallback`, `#fallback_reason`; `scripts/build-web.sh [OUT] [cargo args…]` → `OUT/index.html`, `OUT/app/signalbox_web.js`, `OUT/app/signalbox_web_bg.wasm` (default OUT `target/web`); `scripts/wasm-build [build-web.sh args…]` (tools image `local/signalbox-wasm-tools:<wasm-bindgen version>`, override `SIGNALBOX_WASM_IMAGE`); Dockerfile stage `wasm-tools` (`ARG WASM_BINDGEN_VERSION=0.2.129`). Task 10 uses all three.
+- Produces: `crates/client-web` (package `signalbox-client-web`, lib `signalbox_web`, `crate-type = ["cdylib"]`, empty natively) with a `#[wasm_bindgen(start)]` entry; `WebSocketTransport` (private); `index.html` with `#signalbox_canvas`, `#fallback`, `#fallback_reason`; `scripts/build-web.sh [OUT] [cargo args…]` → `OUT/index.html`, `OUT/app/signalbox_web.js`, `OUT/app/signalbox_web_bg.wasm` (default OUT `target/web-dist`); `scripts/wasm-build [build-web.sh args…]` (tools image `local/signalbox-wasm-tools:<wasm-bindgen version>`, override `SIGNALBOX_WASM_IMAGE`); Dockerfile stage `wasm-tools` (`ARG WASM_BINDGEN_VERSION=0.2.129`). Task 10 uses all three.
 
 What the shell does: eframe's `WebRunner` on the canvas with wgpu (WebGPU in secure contexts, else WebGL2 — egui-wgpu's own fallback, stated explicitly in `run`), a `UiApp` over an `App` whose transport is a browser WebSocket to `ws(s)://<page host>/ws` (the session cookie goes with it). Every socket event checks a generation counter so a replaced socket's late events are ignored; every event asks egui for a repaint. A socket that closes without having opened is followed by `GET /ws`: 401 → `ConnState::Unauthorized` (decision 9). When the app `wants_login()`, the shell sets `location.href = "/auth/login"` once. The theme is always dark (a VDU), whatever the browser prefers, and the console gets one line, `signalbox: drawing with BrowserWebGpu` or `… Gl`, for bug reports and the browser check. If eframe cannot start (no WebGPU and no WebGL2), `#fallback` explains it in plain HTML.
 
@@ -5099,7 +5099,7 @@ This crate has no native tests: everything in it is the browser's API. What it r
 
 - [ ] **Step 1: Write the failing check**
 
-Run: `test -s target/web/app/signalbox_web_bg.wasm && echo built`
+Run: `test -s target/web-dist/app/signalbox_web_bg.wasm && echo built`
 Expected: nothing printed (no web build yet).
 
 - [ ] **Step 2: Workspace entries**
@@ -5447,14 +5447,14 @@ Create `scripts/build-web.sh`:
 ```bash
 #!/usr/bin/env bash
 # Build the browser client (crates/client-web) into OUT (default
-# target/web): index.html, app/signalbox_web.js, app/signalbox_web_bg.wasm.
+# target/web-dist): index.html, app/signalbox_web.js, app/signalbox_web_bg.wasm.
 # Needs the wasm32-unknown-unknown target and wasm-bindgen-cli at the
 # version Cargo.lock pins: the wasm-tools stage of deploy/Dockerfile has
 # both (locally, run this through scripts/wasm-build). Arguments after OUT
 # go to cargo (CI passes --offline).
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-out="$(realpath -m "${1:-$root/target/web}")"
+out="$(realpath -m "${1:-$root/target/web-dist}")"
 shift || true
 cd "$root"
 want="$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;q}' Cargo.lock)"
@@ -5477,7 +5477,7 @@ ls -l "$out" "$out/app"
 Create `scripts/wasm-build`:
 ```bash
 #!/usr/bin/env bash
-# Build the browser client (scripts/build-web.sh; output target/web/) in a
+# Build the browser client (scripts/build-web.sh; output target/web-dist/) in a
 # local tools image: the Rust image plus the wasm32 target and
 # wasm-bindgen-cli, from the wasm-tools stage of deploy/Dockerfile. The
 # image is built on first use and tagged by the wasm-bindgen version in
@@ -5527,12 +5527,12 @@ git add --chmod=+x scripts/build-web.sh scripts/wasm-build
 Run: `scripts/cargo build --workspace --all-targets`
 Expected: no errors and no warnings; `signalbox-client-web` compiles as an empty crate natively (its dependencies are wasm32-only).
 Run: `scripts/wasm-build 2>&1 | tee target/wasm-build.log`
-Expected: the first run builds `local/signalbox-wasm-tools:0.2.129` (about a minute), then `Finished \`web\` profile [optimized]` (about 2.5 minutes cold on ra) and a listing of `target/web/index.html`, `target/web/app/signalbox_web.js` (≈ 150 KB) and `target/web/app/signalbox_web_bg.wasm` (≈ 8 MB; ≈ 2.9 MB gzipped).
+Expected: the first run builds `local/signalbox-wasm-tools:0.2.129` (about a minute), then `Finished \`web\` profile [optimized]` (about 2.5 minutes cold on ra) and a listing of `target/web-dist/index.html`, `target/web-dist/app/signalbox_web.js` (≈ 150 KB) and `target/web-dist/app/signalbox_web_bg.wasm` (≈ 8 MB; ≈ 2.9 MB gzipped).
 Run: `grep -E '^(warning|error)' target/wasm-build.log`
 Expected: no output (CI builds this with `-D warnings`).
-Run: `test -s target/web/app/signalbox_web_bg.wasm && echo built`
+Run: `test -s target/web-dist/app/signalbox_web_bg.wasm && echo built`
 Expected: `built`.
-Run: `grep -c 'signalbox_web_bg.wasm' target/web/app/signalbox_web.js`
+Run: `grep -c 'signalbox_web_bg.wasm' target/web-dist/app/signalbox_web.js`
 Expected: at least 1 (the JS glue loads the wasm relative to itself, i.e. from `/app/`).
 
 - [ ] **Step 6: Commit**
@@ -6298,7 +6298,7 @@ In `scripts/ci/test.sh`, append after the dev-auth test line:
 # wasm-bindgen-cli. The controller's runner image sets SIGNALBOX_REQUIRE_WASM=1
 # once it has them; until then a runner without them skips, loudly.
 if rustup target list --installed 2>/dev/null | grep -qx wasm32-unknown-unknown && command -v wasm-bindgen >/dev/null; then
-  scripts/build-web.sh target/web --offline
+  scripts/build-web.sh target/web-dist --offline
 elif [ "${SIGNALBOX_REQUIRE_WASM:-0}" = 1 ]; then
   echo "ci: SIGNALBOX_REQUIRE_WASM=1 but the wasm32 target or wasm-bindgen-cli is missing" >&2
   exit 1
@@ -6341,7 +6341,7 @@ docker exec signalbox-test ls /opt/signalbox/layouts /opt/signalbox/web /opt/sig
 scripts/cargo test -p signalbox-client-core                   # client logic: connection, lobby, clicks (in-process game)
 scripts/cargo test -p signalbox-client-ui                     # diagram and screens, headless egui (no GPU)
 scripts/cargo test -p signalbox-server --features dev-auth --test client   # client-core over the real front
-scripts/wasm-build                                            # the browser client into target/web/ (tools image on first use)
+scripts/wasm-build                                            # the browser client into target/web-dist/ (tools image on first use)
 ```
 - after the paragraph that begins `Paths passed through`, add:
 ```markdown
@@ -6467,14 +6467,14 @@ The release image has no dev login, so this runs a throwaway dev-auth front from
 
 ```bash
 cd /home/skye-fi/projects/signalbox
-scripts/wasm-build                                           # target/web
+scripts/wasm-build                                           # target/web-dist
 scripts/cargo build -p signalbox-server --features dev-auth --bins
 mkdir -p target/d1-check/layouts
 scripts/cargo run -q -p ts2-import -- crates/ts2-import/tests/data/liverpool-st.json \
   -o /w/target/d1-check/layouts/liverpool-st.json --areas /w/layouts/liverpool-st.areas.json
 docker run --rm -d --name sbx-d1-check --network host -u "$(id -u):$(id -g)" -v "$PWD:/w" -w /w \
   -e SIGNALBOX_ADDR=127.0.0.1:19161 -e SIGNALBOX_DATA=/w/target/d1-check/data \
-  -e SIGNALBOX_LAYOUTS=/w/target/d1-check/layouts -e SIGNALBOX_WEB=/w/target/web \
+  -e SIGNALBOX_LAYOUTS=/w/target/d1-check/layouts -e SIGNALBOX_WEB=/w/target/web-dist \
   -e SIGNALBOX_SESSION_KEY="$(openssl rand -hex 64)" \
   rust:1.98-slim-bookworm target/debug/signalbox-server
 ```
