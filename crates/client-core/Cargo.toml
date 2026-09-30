@@ -11,3 +11,7 @@ path = "src/lib.rs"
 [dependencies]
 signalbox-protocol = { path = "../protocol" }
 signalbox-bot = { path = "../bot", default-features = false }
+
+[dev-dependencies]
+signalbox-core = { path = "../core" }
+signalbox-game = { path = "../game" }

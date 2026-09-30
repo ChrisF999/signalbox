@@ -349,6 +349,11 @@ impl App {
         }
         let reply = g.bot.receive(m);
         g.bot.take_notices();
+        if let (Some(sel), Some(l)) = (g.selected.as_deref(), g.bot.layout()) {
+            if !crate::select::can_enter(l, sel) {
+                g.selected = None;
+            }
+        }
         if let Some(r) = reply {
             self.send_game(r);
         }

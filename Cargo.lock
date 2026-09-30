@@ -1967,6 +1967,8 @@ name = "signalbox-client-core"
 version = "0.1.0"
 dependencies = [
  "signalbox-bot",
+ "signalbox-core",
+ "signalbox-game",
  "signalbox-protocol",
 ]
 
