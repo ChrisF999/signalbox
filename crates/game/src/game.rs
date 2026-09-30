@@ -226,6 +226,12 @@ impl Game {
         Some(build_layout(self.sim.world(), &self.map, &p.vis, player))
     }
 
+    /// A player (re)connects and gets the layout and a full view.
+    ///
+    /// Players are identified by name only (C2 contract): when a new socket
+    /// replaces an old one for the same name, the front forwards the new
+    /// `connect` and must NOT forward a `disconnect` for the old socket, or
+    /// the replacing connection would be marked gone.
     pub fn connect(&mut self, player: &str) -> Vec<Out> {
         if player == ROBOT {
             return vec![error(player, codes::RESERVED_NAME, "`robot` is a reserved name")];
@@ -243,9 +249,18 @@ impl Game {
         self.resync(player)
     }
 
-    /// A spectator is forgotten; a holder keeps their area for `GRACE_S`.
+    /// A spectator is forgotten; a holder keeps their area for `GRACE_S`
+    /// real seconds from their first disconnect (a repeat is ignored, so it
+    /// cannot restart the grace period).
+    ///
+    /// Players are identified by name only (C2 contract): the front forwards
+    /// a disconnect only when the player's current connection closes, never
+    /// for a socket another connection has replaced.
     pub fn disconnect(&mut self, player: &str) {
         let Some(p) = self.players.get_mut(player) else { return };
+        if !p.connected {
+            return;
+        }
         if p.area.is_none() {
             self.players.remove(player);
             return;

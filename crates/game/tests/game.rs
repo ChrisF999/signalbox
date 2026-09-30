@@ -282,6 +282,19 @@ fn grace_keeps_the_area_then_releases_it() {
     assert_eq!(g.holder("West"), Some("bob"));
 }
 
+/// A front that repeats `disconnect` must not keep the area held forever.
+#[test]
+fn a_repeated_disconnect_does_not_restart_the_grace_period() {
+    let mut g = game();
+    join(&mut g, "alice", Some("West"));
+    g.disconnect("alice");
+    g.advance(100.0);
+    g.disconnect("alice");
+    g.advance(30.0);
+    assert_eq!(g.holder("West"), None, "the grace period ran from the first disconnect");
+    assert_eq!(g.area_of("alice"), None);
+}
+
 #[test]
 fn a_spectator_who_leaves_is_forgotten() {
     let mut g = game();
