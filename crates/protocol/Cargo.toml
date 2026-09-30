@@ -12,6 +12,4 @@ path = "src/lib.rs"
 signalbox-core = { path = "../core" }
 serde.workspace = true
 thiserror.workspace = true
-
-[dev-dependencies]
 serde_json.workspace = true
