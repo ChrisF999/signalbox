@@ -143,3 +143,6 @@ tokio; geometry also carries points leg ends, signal facing and exit-node positi
 buffer/boundary exits need them to be clickable); an expired session is detected by probing `GET /ws` for 401; on-screen
 text avoids glyphs missing from egui's default fonts ("W1 to A", pinned by a test); the front serves the web client from
 `SIGNALBOX_WEB`, keeping the placeholder page when it is absent; bundle-size work (wasm-opt, precompression) is deferred.
+- Fringe elements are never operable, with one exception: a fringe signal or exit marker that is the exit of one
+  of the player's own routes is clickable as that route's exit (routes across an area boundary end at the
+  neighbour's first signal). (Task 5 review, 2026-09-30.)
