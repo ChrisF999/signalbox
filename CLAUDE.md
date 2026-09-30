@@ -20,6 +20,9 @@ scripts/cargo test -p signalbox-core --test release cancel_keeps_section_under_t
 scripts/cargo test --release -p ts2-import --test soak -- --ignored   # slow Liverpool St soak
 scripts/cargo test -p signalbox-game                          # game library (twobox fixture, saves in a temp dir)
 scripts/cargo test --release -p signalbox-bot --test soak -- --ignored   # 3 h Liverpool St: two bots + robot
+scripts/cargo test -p signalbox-server                        # game process, supervisor, OIDC, release build (no /auth/dev)
+scripts/cargo test -p signalbox-server --features dev-auth    # + the front over WebSockets, 4-min Liverpool St end to end, crash
+scripts/cargo test --release -p signalbox-server --features dev-auth --test e2e -- --ignored --nocapture   # 1 sim hour; prints SQLite write cost
 scripts/ci/test.sh                                            # the CI gate (native cargo, offline, -D warnings)
 
 scripts/cargo run -p sim-cli -- run crates/core/tests/fixtures/junction.json --robot --hours 1 --record /w/target/log.json
@@ -44,8 +47,12 @@ Workspace crates: `crates/core` (library `signalbox-core`), `crates/sim-cli`
 (headless run/replay), `crates/ts2-import` (TS2 → signalbox converter, lib + CLI),
 `crates/protocol` (`signalbox-protocol`: wire messages, views, deltas),
 `crates/game` (`signalbox-game`: the multiplayer game library + SQLite saves),
-`crates/bot` (`signalbox-bot`: headless client). The multiplayer design is
-`docs/superpowers/specs/2026-09-30-server-and-protocol-design.md`.
+`crates/bot` (`signalbox-bot`: headless client, its network client and the `Greedy` strategy),
+`crates/ipc` (`signalbox-ipc`: front ⇄ game frames over a Unix socket),
+`crates/server` (`signalbox-server`: lib `server`; bins `signalbox-server`, the front,
+and `signalbox-game`, one process per game). The multiplayer design is
+`docs/superpowers/specs/2026-09-30-server-and-protocol-design.md`; deployment is in `deploy/`
+(see `deploy/README.md`).
 
 ### World vs state
 - `world::World` is static: loaded from a JSON `WorldFile` (`world/file.rs`, names
@@ -127,6 +134,36 @@ output is byte-identical for the same input.
 - Resume (`game::save::resume_sim`) restores the newest snapshot and replays the
   log rows after its `last_seq` up to the last logged tick, leaving
   that tick's commands queued (and the robot marked as run if it logged there).
+
+### Server (`ipc`, `server`)
+- `signalbox-game` (`server::process`) wraps one `Game`: `Shell` is the sync
+  logic (tested without sockets), `serve` the tokio loop (advance every 0.1 s,
+  flush every 0.2 s, `Status` every 1 s). It accepts exactly one front
+  connection on its socket, and exits 0 after `Shutdown`, SIGTERM, the front
+  going away or 10 minutes empty (always saving first), 1 if the save will not
+  open (its last stderr line is the crash reason the lobby shows).
+- `ipc` frames are a u32 BE length plus JSON, at most 4 MiB; `read_frame` is not
+  cancel-safe, so every socket is read by a task of its own.
+- The front's `Supervisor` holds the lobby, the children and the routing behind
+  one `std::sync::Mutex` never held across an `.await`. Each client socket has an
+  `Outbox` (64 frames; on overflow it is cleared, the game is asked for a resync
+  and deltas are dropped until the next full view). A second login of a name
+  replaces the old socket without a `Disconnect` (C1's contract on
+  `Game::connect`). A child that ends other than by exiting 0 is `crashed`.
+- Login is `server::oidc` (openidconnect: code flow, PKCE, nonce, one-shot state
+  plus a signed login cookie); `admit` requires `groups` ∋ `signalbox-users`.
+  Sessions are server-side and in memory. The `dev-auth` feature adds
+  `/auth/dev?user=` for tests and bots; the release image is built without it.
+- Front tests: `crates/server/tests/common/mod.rs` starts a front in process
+  (`server::start`, dev login, free port, real `signalbox-game` children, temp
+  data dir); `tests/supervisor.rs` drives `Supervisor` without HTTP;
+  `tests/oidc.rs` runs a small OpenID provider in the test.
+- The front stops accepting connections before it shuts the games down; game
+  children run in their own process group, so a terminal's Ctrl-C reaches only
+  the front. Names are refused when they are `robot`. `/` redirects (303) to
+  `/auth/login`, `/ws` is 401 without a session, `/auth/dev` is 404 in the
+  release build, `/auth/login` is 303 to the provider or 503 if it is unreachable.
+  `deploy/smoke.sh` checks exactly these against a running front.
 
 ### Tests
 - Core fixtures: `crates/core/tests/fixtures/{plain_line,terminus,junction}.json`.

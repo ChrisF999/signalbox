@@ -1,0 +1,7 @@
+# Build context for deploy/Dockerfile (BuildKit reads <Dockerfile>.dockerignore).
+target
+.cargo-home
+.git
+.superpowers
+docs
+deploy

@@ -1,0 +1,18 @@
+# signalbox's access group and binding, as snippets for the stack's blueprints in
+# /opt/stack/apps/authentik/blueprints/ (see that directory's README). Members are
+# the owner's decision; skye is listed because superuser status does NOT bypass
+# application bindings.
+
+# ---- append under `entries:` in 10-access-groups.yaml ----
+  - model: authentik_core.group
+    identifiers: {name: signalbox-users}
+    attrs:
+      users:
+        - !Find [authentik_core.user, [username, skye]]
+
+# ---- append under `entries:` in 40-access-bindings.yaml ----
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !Find [authentik_core.application, [slug, signalbox]]
+      group: !Find [authentik_core.group, [name, "signalbox-users"]]
+    attrs: {order: 0, enabled: true, negate: false}

@@ -1,0 +1,35 @@
+# signalbox — multiplayer UK railway signalling (repo: ~/projects/signalbox, deploy/).
+#
+# Reach: tailnet only, https://ra.tail3e0c1e.ts.net:50160 via `tailscale serve` ->
+# 127.0.0.1:9160 below. No caddy label: never on the public edge.
+# Login: Authentik OIDC (provider/app `signalbox`, group `signalbox-users`; the provider
+# blueprint with its client secret is in /srv/vault/creds/signalbox/). The front checks
+# the `groups` claim itself as well.
+# Secrets: /srv/vault/creds/signalbox/oidc.env (OIDC_CLIENT_ID, OIDC_CLIENT_SECRET,
+# SIGNALBOX_SESSION_KEY). Compose reads it at `up` time, so the vault must be mounted
+# then; the values live in the container config afterwards, and nothing is bind-mounted
+# from the vault, so dockerd's autostart at boot does not need it.
+# Data: the named volume below holds saves/ (one SQLite file per game) and sockets/.
+services:
+  signalbox:
+    image: local/signalbox:current
+    container_name: signalbox
+    restart: unless-stopped
+    # tini as PID 1: forwards SIGTERM to the front, which saves every game (<= 10 s).
+    init: true
+    stop_grace_period: 20s
+    env_file: /srv/vault/creds/signalbox/oidc.env
+    environment:
+      SIGNALBOX_PUBLIC_URL: https://ra.tail3e0c1e.ts.net:50160
+      OIDC_ISSUER: https://auth.skyes.lgbt/application/o/signalbox/
+    ports:
+      - "127.0.0.1:9160:9160"
+    volumes:
+      - signalbox-data:/data
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 2g
+    pids_limit: 256
+volumes:
+  signalbox-data:
