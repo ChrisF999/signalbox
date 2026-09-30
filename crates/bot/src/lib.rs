@@ -3,6 +3,7 @@
 //! In C1 it talks to an in-process `Game`; `net` puts a WebSocket in between.
 
 pub mod net;
+pub mod strategy;
 
 use protocol::{ClientMsg, Layout, Notice, ServerMsg, View};
 
