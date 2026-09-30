@@ -1,20 +1,23 @@
 //! The game: players, claims, area checks, the robot for unclaimed areas,
-//! the clock, notices and per-player views (spec §6.1). No I/O.
+//! the clock, notices and per-player views (spec §6.1). Its only I/O is
+//! the optional save (`crate::save`).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 use protocol::{ClientMsg, Layout, Notice, PlayerCommand, Proposal, Rejection, ServerMsg, View, codes};
 use signalbox_core::events::{Command, Event};
 use signalbox_core::ids::AreaId;
 use signalbox_core::robot;
 use signalbox_core::sim::Sim;
-use signalbox_core::world::World;
+use signalbox_core::world::{LoadError, World};
 
 use crate::areas::{AreaMap, Visibility};
 use crate::clock::{GameClock, VoteError};
 use crate::layout::build_layout;
 use crate::names::{resolve, to_player_command, valid_headcode};
 use crate::notices::area_notices;
+use crate::save::{Logged, SaveDb, SaveError, resume_sim};
 use crate::view::{Shared, build_view};
 
 /// The robot's player name, reserved: it holds every unclaimed area.
@@ -23,6 +26,18 @@ pub const ROBOT: &str = "robot";
 pub const GRACE_S: f64 = 120.0;
 /// A stalled caller never makes one `advance` run away.
 pub const MAX_TICKS_PER_ADVANCE: u64 = 800;
+/// Real seconds of running between autosave snapshots.
+pub const SNAPSHOT_EVERY_S: f64 = 60.0;
+
+#[derive(Debug, thiserror::Error)]
+pub enum GameError {
+    #[error("world: {0}")]
+    World(#[from] LoadError),
+    #[error("save: {0}")]
+    Save(#[from] SaveError),
+    #[error("resume: {0}")]
+    Resume(String),
+}
 
 /// A message for one player.
 pub type Out = (String, ServerMsg);
@@ -73,6 +88,9 @@ pub struct Game {
     /// The robot already ran at this tick (a resumed log ended with its commands).
     robot_ran_at: Option<u64>,
     stats: GameStats,
+    save: Option<SaveDb>,
+    /// Real seconds of running since the last snapshot.
+    since_snapshot_s: f64,
 }
 
 fn error(player: &str, code: &str, message: &str) -> Out {
@@ -88,6 +106,61 @@ impl Game {
     pub fn new(world: World, meta: GameMeta) -> Game {
         let sim = Sim::new(world, meta.seed);
         Game::from_sim(sim, meta, false)
+    }
+
+    /// A new game saved at `path`, which must not exist: world and meta are
+    /// written, then a first snapshot at tick 0. Runs at 1x.
+    pub fn create(path: &Path, world_json: &str, meta: GameMeta) -> Result<Game, GameError> {
+        let world = World::from_json(world_json)?;
+        let db = SaveDb::create(path, &meta, world_json)?;
+        let mut g = Game::new(world, meta);
+        db.write_snapshot(&g.sim.snapshot())?;
+        g.save = Some(db);
+        Ok(g)
+    }
+
+    /// Resume the game saved at `path`: paused at 1x, every area unclaimed.
+    pub fn resume(path: &Path) -> Result<Game, GameError> {
+        let db = SaveDb::open(path)?;
+        let saved = db.load()?;
+        let world = World::from_json(&saved.world_json)?;
+        let (sim, robot_ran) = resume_sim(world, saved.snapshot, &saved.commands_after).map_err(GameError::Resume)?;
+        let mut g = Game::from_sim(sim, saved.meta, true);
+        if robot_ran {
+            g.robot_ran_at = Some(g.sim.tick());
+        }
+        // The sim's queue holds the commands logged at its tick; name their
+        // senders so a sim rejection still goes back to them. A log that
+        // disagrees with the queue (a failed append) leaves them unattributed.
+        let queue = g.sim.snapshot().queue;
+        let logged: Vec<&Logged> = saved.commands_after.iter().filter(|c| c.tick == g.sim.tick()).collect();
+        let senders: Vec<String> = if logged.iter().map(|l| &l.command).eq(queue.iter()) {
+            logged.iter().map(|l| l.player.clone()).collect()
+        } else {
+            vec![ROBOT.to_string(); queue.len()]
+        };
+        g.queued = senders.into_iter().zip(queue).collect();
+        g.save = Some(db);
+        Ok(g)
+    }
+
+    /// Snapshot now and restart the autosave timer. A failure goes to every
+    /// connected player as `save_failed`; the game carries on.
+    pub fn save_now(&mut self) -> Vec<Out> {
+        self.since_snapshot_s = 0.0;
+        let Some(db) = &self.save else { return vec![] };
+        match db.write_snapshot(&self.sim.snapshot()) {
+            Ok(()) => vec![],
+            Err(e) => self.save_failed(&e.to_string()),
+        }
+    }
+
+    fn save_failed(&self, why: &str) -> Vec<Out> {
+        self.players
+            .iter()
+            .filter(|(_, p)| p.connected)
+            .map(|(name, _)| error(name, codes::SAVE_FAILED, why))
+            .collect()
     }
 
     fn from_sim(sim: Sim, meta: GameMeta, paused: bool) -> Game {
@@ -108,6 +181,8 @@ impl Game {
             queued: Vec::new(),
             robot_ran_at: None,
             stats: GameStats::default(),
+            save: None,
+            since_snapshot_s: 0.0,
         }
     }
 
@@ -216,6 +291,12 @@ impl Game {
         let n = self.clock.ticks_for(dt).min(MAX_TICKS_PER_ADVANCE);
         for _ in 0..n {
             out.extend(self.tick());
+        }
+        if self.save.is_some() && !self.clock.paused {
+            self.since_snapshot_s += dt;
+            if self.since_snapshot_s >= SNAPSHOT_EVERY_S {
+                out.extend(self.save_now());
+            }
         }
         out
     }
@@ -327,11 +408,19 @@ impl Game {
         }
     }
 
-    /// Queue a command for the next tick; `player` is `ROBOT` for the robot.
+    /// Queue a command for the next tick, logging it to the save first;
+    /// `player` is `ROBOT` for the robot.
     fn submit(&mut self, player: &str, cmd: Command) -> Vec<Out> {
+        let mut out = Vec::new();
+        if let Some(db) = &self.save {
+            let area = self.map.subject(&cmd).map(|a| self.area_name(a)).unwrap_or_default();
+            if let Err(e) = db.append_command(self.sim.tick(), player, &area, &cmd) {
+                out = self.save_failed(&e.to_string());
+            }
+        }
         self.queued.push((player.to_string(), cmd.clone()));
         self.sim.submit(cmd);
-        Vec::new()
+        out
     }
 
     fn expire_grace(&mut self, dt: f64) {

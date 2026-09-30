@@ -11,7 +11,9 @@ path = "src/lib.rs"
 [dependencies]
 signalbox-core = { path = "../core" }
 signalbox-protocol = { path = "../protocol" }
+rusqlite.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 ts2-import = { path = "../ts2-import" }
