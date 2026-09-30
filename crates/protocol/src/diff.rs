@@ -61,7 +61,7 @@ impl View {
     /// Apply the delta that follows this view. A delta out of sequence is
     /// refused and the view is left as it was.
     pub fn apply(&mut self, d: &Delta) -> Result<(), SeqGap> {
-        if d.seq != self.seq + 1 {
+        if self.seq.checked_add(1) != Some(d.seq) {
             return Err(SeqGap { have: self.seq, got: d.seq });
         }
         self.seq = d.seq;

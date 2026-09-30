@@ -494,3 +494,39 @@ fn the_watchdog_sleeps_in_the_lobby_and_without_a_connection() {
     app.tick(50.1);
     assert_eq!(h.take_sent(), [lobby(LobbyMsg::Join { game: s("g-one") })]);
 }
+
+// ---- fix round 2 ----
+
+/// The watchdog's join is a rejoin: if the game is gone (or there is no
+/// room to resume it) the answer ends the game instead of an alarm every 20 s.
+#[test]
+fn a_failed_watchdog_join_goes_back_to_the_lobby() {
+    let (mut app, h) = in_game();
+    app.tick(21.0);
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::Join { game: s("g-one") })]);
+    h.push(ServerFrame::error(codes::UNKNOWN_GAME, "no game `g-one`"));
+    app.tick(21.5);
+    assert!(app.game().is_none());
+    assert_eq!(app.lobby_note(), Some("Could not rejoin the game: no game `g-one`"));
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::ListGames)]);
+}
+
+#[test]
+fn a_view_at_the_largest_seq_then_a_delta_never_panics() {
+    let (mut app, h) = in_game();
+    h.push(view(u64::MAX));
+    h.push(delta(0));
+    h.push_text("{\"type\": \"delta\", \"seq\": 18446744073709551615}");
+    app.tick(2.0);
+    assert_eq!(app.game().unwrap().view().unwrap().seq, u64::MAX);
+    assert_eq!(h.take_sent(), [ClientFrame::Game(ClientMsg::Resync)], "a gap: one resync");
+}
+
+#[test]
+fn an_unreadable_frame_in_the_lobby_refreshes_the_lobby() {
+    let (mut app, h) = open_app();
+    h.push_text("not json at all");
+    app.tick(1.0);
+    assert!(app.lobby_note().unwrap().starts_with("Unreadable message from the server"));
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::ListGames)]);
+}

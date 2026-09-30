@@ -139,3 +139,18 @@ fn trains_travel_like_berths_changed_added_and_removed() {
     same.trains.insert(s("1E01"), row(TrainState::InArea, 0));
     assert_eq!(diff(&base(), &same), None, "an unchanged row is not sent");
 }
+
+/// A hostile server can send a view at the largest seq; the next delta is a
+/// gap, never an overflow.
+#[test]
+fn a_view_at_the_largest_seq_takes_no_delta() {
+    let mut v = base();
+    v.seq = u64::MAX;
+    let before = v.clone();
+    let mut d = diff(&base(), &changed()).unwrap();
+    for seq in [0, 1, u64::MAX] {
+        d.seq = seq;
+        assert_eq!(v.apply(&d), Err(SeqGap { have: u64::MAX, got: seq }));
+    }
+    assert_eq!(v, before);
+}

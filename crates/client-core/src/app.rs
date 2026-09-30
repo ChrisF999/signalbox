@@ -180,6 +180,8 @@ impl App {
         if self.link == Link::Open && now - self.last_frame >= WATCHDOG_S {
             if let Some(game) = self.game.as_ref().map(|g| g.id.clone()) {
                 self.last_frame = now;
+                // A rejoin: if the game is gone, its error ends the game.
+                self.joining = Some(Joining { game: Some(game.clone()), rejoin: true });
                 self.send(ClientFrame::Lobby(LobbyMsg::Join { game }));
             }
         }
@@ -278,7 +280,10 @@ impl App {
                         self.send_game(m);
                     }
                 }
-                None => self.lobby_note = Some(format!("Unreadable message from the server ({e})")),
+                None => {
+                    self.lobby_note = Some(format!("Unreadable message from the server ({e})"));
+                    self.send(ClientFrame::Lobby(LobbyMsg::ListGames));
+                }
             },
         }
     }
