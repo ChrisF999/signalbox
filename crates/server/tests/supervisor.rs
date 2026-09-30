@@ -352,13 +352,13 @@ async fn a_second_login_replaces_the_first_and_keeps_the_game() {
     let old = until(&first, |f| *f == notice(Notice::Replaced)).await;
     assert_eq!(old.last(), Some(&notice(Notice::Replaced)));
     assert_eq!(next(&first).await, None, "the old socket is closed");
-    let got = until(&second, is_view).await;
+    // The claim's View may still have been in flight when `attach` swapped
+    // the sockets, so it can reach `second` before the reconnect's Layout:
+    // wait for the Layout itself, not the first View.
+    let got = until(&second, |f| matches!(f, ServerFrame::Game(ServerMsg::Layout(_)))).await;
     assert_eq!(got[0], ServerFrame::Lobby(LobbyReply::Joined { game: id.clone(), you: s("ann") }));
-    let layout = got.iter().find_map(|f| match f {
-        ServerFrame::Game(ServerMsg::Layout(l)) => Some(l.clone()),
-        _ => None,
-    });
-    assert_eq!(layout.unwrap().area.as_deref(), Some("West"), "still holding her area");
+    let Some(ServerFrame::Game(ServerMsg::Layout(layout))) = got.last() else { unreachable!() };
+    assert_eq!(layout.area.as_deref(), Some("West"), "still holding her area");
 
     rig.sup.detach("ann", first.me.conn);
     rig.game_msg(&first, ClientMsg::Release);
