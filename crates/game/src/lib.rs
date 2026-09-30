@@ -3,6 +3,7 @@
 //! only I/O is the SQLite save in `save`.
 
 pub mod areas;
+pub mod clock;
 pub mod layout;
 pub mod names;
 pub mod notices;
