@@ -68,18 +68,23 @@ fn active_from<'a>(l: &'a Layout, v: &'a View, entrance: &'a str) -> impl Iterat
     l.routes.iter().filter(move |r| r.entrance == entrance && v.routes.contains_key(&r.name))
 }
 
+/// Active routes from `entrance` that can still be cancelled or auto-worked.
+fn live_from<'a>(l: &'a Layout, v: &'a View, entrance: &'a str) -> impl Iterator<Item = &'a RouteInfo> + 'a {
+    active_from(l, v, entrance).filter(|r| v.routes[&r.name].state != RouteState::Cancelling)
+}
+
 pub fn signal_menu(l: &Layout, v: &View, signal: &str) -> Vec<MenuItem> {
     if !l.signals.iter().any(|s| s.name == signal && s.operable) {
         return vec![];
     }
     let mut items = Vec::new();
-    if let Some(r) = active_from(l, v, signal).next() {
+    if let Some(r) = live_from(l, v, signal).next() {
         items.push(MenuItem {
             label: format!("Cancel route {signal} to {}", exit_text(&r.exit)),
             cmd: PlayerCommand::CancelRoute { entrance: signal.to_string() },
         });
     }
-    if let Some(r) = active_from(l, v, signal).find(|r| r.automatic) {
+    if let Some(r) = live_from(l, v, signal).find(|r| r.automatic) {
         let on = v.routes.get(&r.name).is_some_and(|rv| rv.auto_working);
         items.push(MenuItem {
             label: format!("Auto-working {}", if on { "off" } else { "on" }),
@@ -93,8 +98,8 @@ pub fn points_menu(l: &Layout, v: &View, points: &str) -> Vec<MenuItem> {
     if !l.points.iter().any(|p| p.name == points && p.operable) {
         return vec![];
     }
-    let now = v.points.get(points).map_or(PointsPos::Normal, |p| p.position);
-    let to = match now {
+    let Some(pv) = v.points.get(points).filter(|p| !p.locked && !p.moving) else { return vec![] };
+    let to = match pv.position {
         PointsPos::Normal => PointsPos::Reverse,
         PointsPos::Reverse => PointsPos::Normal,
     };
@@ -120,7 +125,8 @@ pub fn operable_berth(l: &Layout, berth: &str) -> bool {
 /// `Interpose` for a typed headcode (trimmed; the game checks its form).
 pub fn interpose(berth: &str, typed: &str) -> Option<PlayerCommand> {
     let h = typed.trim();
-    (!h.is_empty()).then(|| PlayerCommand::Interpose { berth: berth.to_string(), headcode: h.to_string() })
+    // The game's rule: 1 to 10 ASCII letters or digits, case kept.
+    ((1..=10).contains(&h.len()) && h.bytes().all(|b| b.is_ascii_alphanumeric())).then(|| PlayerCommand::Interpose { berth: berth.to_string(), headcode: h.to_string() })
 }
 
 fn aspect_text(a: Aspect) -> &'static str {

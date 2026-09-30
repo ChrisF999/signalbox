@@ -73,6 +73,9 @@ impl App {
 
     /// Interpose a typed headcode; blank input sends nothing.
     pub fn interpose(&mut self, berth: &str, typed: &str) {
+        if !self.can_interpose(berth) {
+            return;
+        }
         if let Some(cmd) = select::interpose(berth, typed) {
             self.command(cmd);
         }

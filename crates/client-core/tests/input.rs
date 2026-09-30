@@ -29,7 +29,8 @@ fn entrance_then_exit_sets_the_route() {
     t.app.click(&sig("A"));
     assert_eq!(t.app.game().unwrap().selected(), None);
     assert_eq!(t.h.take_sent(), [ClientFrame::Game(ClientMsg::Command { cmd: set_route("W1", ExitName::Signal(s("A"))) })]);
-    t.game.handle("ann", ClientMsg::Command { cmd: set_route("W1", ExitName::Signal(s("A"))) });
+    let out = t.game.handle("ann", ClientMsg::Command { cmd: set_route("W1", ExitName::Signal(s("A"))) });
+    t.deliver(out);
     t.run(1.0);
     assert!(t.view().routes.contains_key("W1-A"), "{:?}", t.view().routes);
 }
@@ -77,6 +78,10 @@ fn fringe_and_spectators_get_hover_only() {
     assert_eq!(spec.app.game().unwrap().selected(), None);
     assert!(spec.app.menu(&sig("W1")).is_empty());
     assert!(!spec.app.can_interpose("BA"));
+    spec.app.interpose("BA", "2Z99");
+    assert!(spec.h.take_sent().is_empty(), "a spectator's interpose sends nothing");
+    t.app.interpose("BC", "2Z99");
+    assert!(t.h.take_sent().is_empty(), "nor does one on the fringe");
     assert_eq!(spec.app.describe(&sig("W1")), "Signal W1 (West): red");
 }
 
@@ -243,4 +248,37 @@ fn a_new_layout_drops_an_entrance_you_can_no_longer_work() {
     assert_eq!(t.app.game().unwrap().area(), None);
     assert_eq!(t.app.game().unwrap().selected(), None);
     assert!(t.app.valid_exits().is_empty());
+}
+
+#[test]
+fn interpose_validates_like_the_server() {
+    for bad in ["2Z-99", "12345678901", "é", "", "  "] {
+        assert_eq!(select::interpose("BA", bad), None, "{bad:?}");
+    }
+    for ok in ["2z99", "1A01", " 1A01 ", "1234567890"] {
+        let h = ok.trim();
+        assert_eq!(
+            select::interpose("BA", ok),
+            Some(PlayerCommand::Interpose { berth: s("BA"), headcode: s(h) }),
+            "{ok:?}"
+        );
+    }
+}
+
+#[test]
+fn cancelling_routes_and_busy_points_offer_no_menu() {
+    let l = auto_layout();
+    let mut v = empty_view();
+    v.routes.insert(s("S1-S2"), RouteView { state: RouteState::Cancelling, auto_working: true });
+    assert!(select::signal_menu(&l, &v, "S1").is_empty());
+
+    let mut l = l;
+    l.points.push(PointsInfo { name: s("P"), section: s("x"), area: s("A"), operable: true });
+    assert!(select::points_menu(&l, &v, "P").is_empty(), "no entry in the view");
+    for (moving, locked) in [(true, false), (false, true)] {
+        v.points.insert(s("P"), PointsView { position: PointsPos::Normal, moving, locked });
+        assert!(select::points_menu(&l, &v, "P").is_empty(), "moving {moving} locked {locked}");
+    }
+    v.points.insert(s("P"), PointsView { position: PointsPos::Normal, moving: false, locked: false });
+    assert_eq!(select::points_menu(&l, &v, "P").len(), 1);
 }
