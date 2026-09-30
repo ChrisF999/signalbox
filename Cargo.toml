@@ -15,3 +15,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 rand = "0.9"
 rand_chacha = "0.9"
 tokio = "1.53"
+axum = { version = "0.8.9", features = ["ws"] }
+axum-extra = { version = "0.12", features = ["cookie-signed"] }
+tokio-tungstenite = "0.29"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }

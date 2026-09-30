@@ -1,6 +1,8 @@
 //! A headless signalbox client (spec §2.1): keeps the layout and view a game
 //! sends, applies deltas, and asks for one resync when a delta goes missing.
-//! In C1 it talks to an in-process `Game`; C2 puts a WebSocket in between.
+//! In C1 it talks to an in-process `Game`; `net` puts a WebSocket in between.
+
+pub mod net;
 
 use protocol::{ClientMsg, Layout, Notice, ServerMsg, View};
 

@@ -12,14 +12,30 @@ path = "src/lib.rs"
 name = "signalbox-game"
 path = "src/bin/signalbox-game.rs"
 
+[[bin]]
+name = "signalbox-server"
+path = "src/bin/signalbox-server.rs"
+
+[[test]]
+name = "front"
+required-features = ["dev-auth"]
+
+[features]
+# Adds /auth/dev?user=<name> (tests and bots only; never in the release image).
+dev-auth = []
+
 [dependencies]
 signalbox-core = { path = "../core" }
 signalbox-game = { path = "../game" }
 signalbox-ipc = { path = "../ipc" }
 signalbox-protocol = { path = "../protocol" }
+axum.workspace = true
+axum-extra.workspace = true
 rand.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "net", "time", "sync", "signal", "io-util", "process"] }
 
 [dev-dependencies]
+signalbox-bot = { path = "../bot" }
 rusqlite.workspace = true
