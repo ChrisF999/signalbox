@@ -5,7 +5,7 @@ mod common;
 
 use std::time::Duration;
 
-use bot::net::{Conn, NetError, dev_login, http_get};
+use bot::net::{Conn, NetError, dev_login, http_get, http_get_with};
 use common::*;
 use protocol::*;
 
@@ -164,4 +164,84 @@ async fn a_socket_opened_while_the_front_stops_is_not_attached() {
     assert_eq!(sup.game_of("ann"), None, "nobody was attached to the game");
     stopping.await.unwrap();
     assert_eq!(sup.live_count(), 0);
+}
+
+const INDEX: &[u8] = b"<!doctype html><canvas id=\"signalbox_canvas\"></canvas>";
+const WASM: &[u8] = b"\0asm-not-really";
+
+async fn web_front(name: &str) -> Front {
+    front_with_web(
+        name,
+        &[("index.html", INDEX), ("app/signalbox_web.js", b"export default 1;"), ("app/signalbox_web_bg.wasm", WASM)],
+    )
+    .await
+}
+
+#[tokio::test]
+async fn the_web_client_is_served_to_a_session() {
+    let f = web_front("web").await;
+    let r = http_get(&f.base, "/", None).await.unwrap();
+    assert_eq!((r.status, r.header("location")), (303, Some("/auth/login")), "no session: log in first, as before");
+    let cookie = dev_login(&f.base, "ann").await.unwrap();
+    let r = http_get(&f.base, "/", Some(&cookie)).await.unwrap();
+    assert_eq!((r.status, r.header("content-type")), (200, Some("text/html; charset=utf-8")));
+    assert_eq!(r.body.as_bytes(), INDEX);
+    assert_eq!(r.header("cache-control"), Some("no-cache"));
+    let r = http_get(&f.base, "/app/signalbox_web_bg.wasm", Some(&cookie)).await.unwrap();
+    assert_eq!((r.status, r.header("content-type")), (200, Some("application/wasm")));
+    assert_eq!(r.body.as_bytes(), WASM);
+    assert_eq!(r.header("x-content-type-options"), Some("nosniff"));
+    let tag = r.header("etag").unwrap().to_string();
+    let r = http_get_with(&f.base, "/app/signalbox_web_bg.wasm", &[("Cookie", &cookie), ("If-None-Match", &tag)]).await.unwrap();
+    assert_eq!((r.status, r.body.as_str()), (304, ""));
+    let r = http_get_with(&f.base, "/app/signalbox_web_bg.wasm", &[("Cookie", &cookie), ("If-None-Match", "\"old\"")]).await.unwrap();
+    assert_eq!(r.status, 200);
+    let r = http_get(&f.base, "/app/signalbox_web.js", None).await.unwrap();
+    assert_eq!(r.status, 401, "assets need a session too");
+    f.running.stop().await;
+}
+
+#[tokio::test]
+async fn assets_are_only_the_listed_names() {
+    let f = web_front("web-names").await;
+    let cookie = dev_login(&f.base, "ann").await.unwrap();
+    for path in [
+        "/app/../Cargo.toml",
+        "/app/%2e%2e%2fCargo.toml",
+        "/app/..%2findex.html",
+        "/app/",
+        "/app/sub/dir.js",
+        "/app/.hidden",
+        "/app/nope.js",
+        "/app/index.html",
+        "/index.html",
+    ] {
+        let r = http_get(&f.base, path, Some(&cookie)).await.unwrap();
+        assert!(r.status == 404 || r.status == 400, "{path}: {}", r.status);
+        assert!(!r.body.contains("canvas"), "{path}");
+    }
+    f.running.stop().await;
+}
+
+#[tokio::test]
+async fn without_a_web_dir_the_placeholder_stays() {
+    let f = front("no-web").await;
+    let cookie = dev_login(&f.base, "ann").await.unwrap();
+    let r = http_get(&f.base, "/", Some(&cookie)).await.unwrap();
+    assert!(r.body.contains("Signed in as ann"), "{}", r.body);
+    assert_eq!(http_get(&f.base, "/app/signalbox_web.js", Some(&cookie)).await.unwrap().status, 404);
+    f.running.stop().await;
+}
+
+/// The browser cannot see why an upgrade was refused, so the web client
+/// asks `GET /ws` (D1 decision 9): 401 must mean "no session" and nothing else.
+#[tokio::test]
+async fn ws_without_an_upgrade_is_401_only_without_a_session() {
+    let f = front("ws-probe").await;
+    assert_eq!(http_get(&f.base, "/ws", None).await.unwrap().status, 401);
+    assert_eq!(http_get(&f.base, "/ws", Some("signalbox_session=forged")).await.unwrap().status, 401);
+    let cookie = dev_login(&f.base, "ann").await.unwrap();
+    let r = http_get(&f.base, "/ws", Some(&cookie)).await.unwrap();
+    assert!((400..500).contains(&r.status) && r.status != 401, "{}", r.status);
+    f.running.stop().await;
 }

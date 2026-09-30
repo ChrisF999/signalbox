@@ -1,11 +1,12 @@
-//! The front's pure parts: configuration, sessions, the rate limit and the
-//! placeholder page.
+//! The front's pure parts: configuration, sessions, the rate limit, the
+//! placeholder page and the web client's files.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use protocol::{AreaHolder, GameInfo, GameState, LayoutInfo};
+use server::assets::{WebAssets, content_type, etag, valid_asset_name};
 use server::config::Config;
 use server::limit::{MAX_MSGS_PER_S, RateLimit};
 use server::session::{SESSION_TTL, Sessions};
@@ -43,13 +44,16 @@ fn config_defaults_and_overrides() {
     let o = c.oidc.unwrap();
     assert_eq!((o.issuer.as_str(), o.client_id.as_str(), o.client_secret.as_str()), (OIDC[0].1, "sbx", "s3cret"));
     assert!(c.game_bin.ends_with("signalbox-game"), "next to the running binary: {}", c.game_bin.display());
+    assert_eq!(c.web_dir, PathBuf::from("/opt/signalbox/web"));
     let c = cfg(&with(&[
         ("SIGNALBOX_ADDR", "127.0.0.1:1"),
         ("SIGNALBOX_DATA", "/d"),
         ("SIGNALBOX_LAYOUTS", "/l"),
         ("SIGNALBOX_GAME_BIN", "/bin/g"),
+        ("SIGNALBOX_WEB", "/w"),
     ]))
     .unwrap();
+    assert_eq!(c.web_dir, PathBuf::from("/w"));
     assert_eq!((c.addr.to_string(), c.data_dir, c.layouts_dir, c.game_bin), (
         "127.0.0.1:1".to_string(),
         PathBuf::from("/d"),
@@ -146,4 +150,44 @@ fn the_placeholder_page_escapes_every_name() {
     let page = index_page("a<b", &games, &[LayoutInfo { name: "drain".into(), areas: vec![] }]);
     assert!(!page.contains("<script>") && !page.contains("<b>bad"), "{page}");
     assert!(page.contains("Hackney &amp; Bow: robot") && page.contains("Signed in as a&lt;b"), "{page}");
+}
+
+#[test]
+fn asset_names_are_plain_file_names() {
+    for ok in ["index.html", "signalbox_web.js", "signalbox_web_bg.wasm", "a-b.c_d"] {
+        assert!(valid_asset_name(ok), "{ok}");
+    }
+    let long = "a".repeat(101);
+    for bad in ["", ".", "..", ".hidden", "../x", "a/b", "a\\b", "%2e%2e", "a b", "é.js", long.as_str()] {
+        assert!(!valid_asset_name(bad), "{bad}");
+    }
+    assert_eq!(content_type("x.wasm"), "application/wasm");
+    assert_eq!(content_type("x.js"), "text/javascript; charset=utf-8");
+    assert_eq!(content_type("index.html"), "text/html; charset=utf-8");
+    assert_eq!(content_type("README"), "application/octet-stream");
+    assert_eq!(etag(b"abc"), etag(b"abc"));
+    assert_ne!(etag(b"abc"), etag(b"abd"));
+    assert!(etag(b"").starts_with('"') && etag(b"").ends_with('"'));
+}
+
+#[test]
+fn web_assets_load_index_and_plain_app_files_only() {
+    let dir = std::env::temp_dir().join(format!("sbx-web-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(WebAssets::load(&dir), Ok(None), "no directory: the placeholder stays");
+    std::fs::create_dir_all(dir.join("app/sub")).unwrap();
+    let err = WebAssets::load(&dir).unwrap_err();
+    assert!(err.contains("index.html"), "{err}");
+    std::fs::write(dir.join("index.html"), "<canvas>").unwrap();
+    std::fs::write(dir.join("app/signalbox_web.js"), "import x").unwrap();
+    std::fs::write(dir.join("app/signalbox_web_bg.wasm"), b"\0asm").unwrap();
+    std::fs::write(dir.join("app/.hidden"), "no").unwrap();
+    std::fs::write(dir.join("app/sub/deep.js"), "no").unwrap();
+    std::fs::write(dir.join("elsewhere.js"), "no").unwrap();
+    let w = WebAssets::load(&dir).unwrap().unwrap();
+    assert_eq!(&w.index.body[..], b"<canvas>");
+    assert_eq!(w.app.keys().collect::<Vec<_>>(), ["signalbox_web.js", "signalbox_web_bg.wasm"]);
+    assert_eq!(w.app["signalbox_web_bg.wasm"].content_type, "application/wasm");
+    assert_eq!(w.app["signalbox_web.js"].etag, etag(b"import x"));
+    let _ = std::fs::remove_dir_all(&dir);
 }

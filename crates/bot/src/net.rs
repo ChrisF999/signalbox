@@ -58,13 +58,20 @@ fn host_port(base: &str) -> Result<&str, NetError> {
 }
 
 /// A bare HTTP/1.0 GET (no redirects followed), enough for the dev login
-/// and for tests. `base` is `http://host:port`; `path` starts with `/`.
+/// and for tests. `base` is `http://host:port`; `path` starts with `/` and
+/// is sent as it is.
 pub async fn http_get(base: &str, path: &str, cookie: Option<&str>) -> Result<HttpResponse, NetError> {
+    let headers: Vec<(&str, &str)> = cookie.map(|c| ("Cookie", c)).into_iter().collect();
+    http_get_with(base, path, &headers).await
+}
+
+/// `http_get` with any request headers.
+pub async fn http_get_with(base: &str, path: &str, headers: &[(&str, &str)]) -> Result<HttpResponse, NetError> {
     let host = host_port(base)?;
     let mut stream = TcpStream::connect(host).await?;
     let mut req = format!("GET {path} HTTP/1.0\r\nHost: {host}\r\n");
-    if let Some(c) = cookie {
-        req.push_str(&format!("Cookie: {c}\r\n"));
+    for (k, v) in headers {
+        req.push_str(&format!("{k}: {v}\r\n"));
     }
     req.push_str("\r\n");
     stream.write_all(req.as_bytes()).await?;

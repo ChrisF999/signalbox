@@ -3,6 +3,7 @@
 //! sessions, login, layouts, the supervisor of game processes, and the web
 //! routes.
 
+pub mod assets;
 pub mod config;
 pub mod layouts;
 pub mod limit;
@@ -22,6 +23,7 @@ use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
+use crate::assets::WebAssets;
 use crate::config::Config;
 use crate::layouts::Layouts;
 use crate::oidc::Oidc;
@@ -57,8 +59,12 @@ pub async fn start(cfg: Config) -> Result<Running, String> {
         Some(o) => Some(Arc::new(Oidc::new(o, &cfg.public_url)?)),
         None => None,
     };
+    let web = WebAssets::load(&cfg.web_dir)?.map(Arc::new);
+    if web.is_none() {
+        eprintln!("signalbox-server: no web client at {}; serving the placeholder page", cfg.web_dir.display());
+    }
     let sessions = Arc::new(Sessions::new());
-    let state = AppState { sup: sup.clone(), sessions: sessions.clone(), key: Key::from(&cfg.session_key), oidc };
+    let state = AppState { sup: sup.clone(), sessions: sessions.clone(), key: Key::from(&cfg.session_key), oidc, web };
     let listener = tokio::net::TcpListener::bind(cfg.addr).await.map_err(|e| format!("{}: {e}", cfg.addr))?;
     let addr = listener.local_addr().map_err(|e| e.to_string())?;
     let stop = Arc::new(Notify::new());

@@ -1,5 +1,6 @@
-//! HTTP routes (spec §8): the placeholder page, the WebSocket, and the
-//! auth routes. Nothing but the login flow answers without a session.
+//! HTTP routes (spec §8): the browser client (or C2's placeholder page
+//! when it is not installed), the WebSocket, and the auth routes. Nothing
+//! but the login flow answers without a session.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -7,14 +8,16 @@ use std::time::{Duration, Instant};
 use axum::Router;
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{FromRef, Query, State};
-use axum::http::StatusCode;
+use axum::extract::{FromRef, Path, Query, State};
+use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, ETAG, IF_NONE_MATCH, X_CONTENT_TYPE_OPTIONS};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum_extra::extract::cookie::{Cookie, Key, SignedCookieJar};
 use protocol::{GameInfo, LayoutInfo, codes};
 use serde::Deserialize;
 
+use crate::assets::{Asset, WebAssets};
 use crate::limit::RateLimit;
 use crate::oidc::{Denied, LOGIN_COOKIE, LoginError, Oidc, PENDING_TTL};
 use crate::session::{SESSION_COOKIE, SESSION_TTL, Sessions, cookie};
@@ -34,6 +37,8 @@ pub struct AppState {
     pub key: Key,
     /// `None` only in a `dev-auth` build started without OIDC settings.
     pub oidc: Option<Arc<Oidc>>,
+    /// The browser client; `None` serves the placeholder page.
+    pub web: Option<Arc<WebAssets>>,
 }
 
 impl FromRef<AppState> for Key {
@@ -45,6 +50,7 @@ impl FromRef<AppState> for Key {
 pub fn router(state: AppState) -> Router {
     let r = Router::new()
         .route("/", get(index))
+        .route("/app/{file}", get(app_file))
         .route("/ws", get(ws))
         .route("/auth/login", get(login))
         .route("/auth/callback", get(callback))
@@ -73,7 +79,7 @@ pub fn escape_html(s: &str) -> String {
         .collect()
 }
 
-/// The placeholder page until the browser client (sub-project D).
+/// The page served when the browser client is not installed.
 pub fn index_page(user: &str, games: &[GameInfo], layouts: &[LayoutInfo]) -> String {
     let e = escape_html;
     let mut rows = String::new();
@@ -93,7 +99,7 @@ pub fn index_page(user: &str, games: &[GameInfo], layouts: &[LayoutInfo]) -> Str
     format!(
         "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>signalbox</title></head><body>\n\
          <h1>signalbox</h1>\n<p>Signed in as {}. <a href=\"/auth/logout\">Sign out</a></p>\n\
-         <p>The browser client is not built yet; bots play over <code>/ws</code>.</p>\n\
+         <p>The browser client is not installed on this server (<code>SIGNALBOX_WEB</code>); bots play over <code>/ws</code>.</p>\n\
          <h2>Games</h2>\n<table><tr><th>Game</th><th>Layout</th><th>State</th><th>Areas</th><th>Error</th></tr>\n{}</table>\n\
          <h2>Layouts</h2>\n<p>{}</p>\n</body></html>\n",
         e(user),
@@ -102,9 +108,39 @@ pub fn index_page(user: &str, games: &[GameInfo], layouts: &[LayoutInfo]) -> Str
     )
 }
 
-async fn index(State(state): State<AppState>, jar: SignedCookieJar) -> Response {
+async fn index(State(state): State<AppState>, jar: SignedCookieJar, headers: HeaderMap) -> Response {
     let Some(user) = user_of(&state, &jar) else { return Redirect::to("/auth/login").into_response() };
-    Html(index_page(&user, &state.sup.list_games(), &state.sup.layouts().infos())).into_response()
+    match &state.web {
+        Some(w) => serve(&w.index, &headers),
+        None => Html(index_page(&user, &state.sup.list_games(), &state.sup.layouts().infos())).into_response(),
+    }
+}
+
+/// `/app/{file}`: only names loaded at start; 401 without a session.
+async fn app_file(State(state): State<AppState>, jar: SignedCookieJar, Path(file): Path<String>, headers: HeaderMap) -> Response {
+    if user_of(&state, &jar).is_none() {
+        return (StatusCode::UNAUTHORIZED, "sign in first").into_response();
+    }
+    match state.web.as_ref().and_then(|w| w.app.get(&file)) {
+        Some(a) => serve(a, &headers),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// An asset from memory; 304 when the browser already has this version.
+/// `no-cache`: browsers revalidate every load, so a new build is picked up
+/// at once while an unchanged one costs a 304.
+fn serve(a: &Asset, headers: &HeaderMap) -> Response {
+    let fresh = headers
+        .get(IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.split(',').any(|t| t.trim() == a.etag));
+    let common = [(ETAG, a.etag.clone()), (CACHE_CONTROL, "no-cache".to_string())];
+    if fresh {
+        return (StatusCode::NOT_MODIFIED, common).into_response();
+    }
+    let typed = [(CONTENT_TYPE, a.content_type.to_string()), (X_CONTENT_TYPE_OPTIONS, "nosniff".to_string())];
+    (common, typed, a.body.clone()).into_response()
 }
 
 async fn login(State(state): State<AppState>, jar: SignedCookieJar) -> Response {

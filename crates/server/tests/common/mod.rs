@@ -36,6 +36,7 @@ pub fn dev_config(root: &Path, layouts_dir: PathBuf) -> Config {
         oidc: None,
         session_key: vec![7; 64],
         game_bin: PathBuf::from(GAME_BIN),
+        web_dir: root.join("web"),
     }
 }
 
@@ -47,7 +48,21 @@ pub struct Front {
 
 /// A front whose layouts directory holds each `(name, world JSON)`.
 pub async fn front_with(name: &str, layouts: &[(&str, String)]) -> Front {
+    front_in(temp_dir(name), layouts).await
+}
+
+/// A twobox front whose web directory holds `files` (paths relative to it).
+pub async fn front_with_web(name: &str, files: &[(&str, &[u8])]) -> Front {
     let root = temp_dir(name);
+    for (path, bytes) in files {
+        let p = root.join("web").join(path);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, bytes).unwrap();
+    }
+    front_in(root, &[("twobox", std::fs::read_to_string(TWOBOX).unwrap())]).await
+}
+
+async fn front_in(root: PathBuf, layouts: &[(&str, String)]) -> Front {
     let dir = root.join("layouts");
     std::fs::create_dir_all(&dir).unwrap();
     for (layout, json) in layouts {

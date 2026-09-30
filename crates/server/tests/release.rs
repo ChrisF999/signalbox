@@ -21,6 +21,7 @@ async fn the_release_build_has_no_dev_login() {
         oidc: Some(OidcConfig { issuer: "http://127.0.0.1:9/".into(), client_id: "sbx".into(), client_secret: "x".into() }),
         session_key: vec![7; 64],
         game_bin: PathBuf::from(env!("CARGO_BIN_EXE_signalbox-game")),
+        web_dir: root.join("web"),
     };
     let running = server::start(cfg).await.unwrap();
     let base = running.base();

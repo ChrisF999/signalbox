@@ -272,6 +272,7 @@ fn config(name: &str, issuer: &str) -> Config {
         oidc: Some(OidcConfig { issuer: s(issuer), client_id: s(CLIENT_ID), client_secret: s(CLIENT_SECRET) }),
         session_key: vec![9; 64],
         game_bin: PathBuf::from(env!("CARGO_BIN_EXE_signalbox-game")),
+        web_dir: root.join("web"),
     }
 }
 

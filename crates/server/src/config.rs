@@ -27,11 +27,15 @@ pub struct Config {
     /// Cookie signing key, at least 64 bytes.
     pub session_key: Vec<u8>,
     pub game_bin: PathBuf,
+    /// The built browser client (`index.html`, `app/`); when missing, `/`
+    /// keeps the placeholder page.
+    pub web_dir: PathBuf,
 }
 
 pub const DEFAULT_ADDR: &str = "0.0.0.0:9160";
 pub const DEFAULT_DATA: &str = "/data";
 pub const DEFAULT_LAYOUTS: &str = "/opt/signalbox/layouts";
+pub const DEFAULT_WEB: &str = "/opt/signalbox/web";
 pub const MIN_KEY_BYTES: usize = 64;
 
 pub fn decode_hex(s: &str) -> Option<Vec<u8>> {
@@ -53,6 +57,7 @@ impl Config {
         let addr: SocketAddr = addr.parse().map_err(|_| format!("SIGNALBOX_ADDR `{addr}` is not host:port"))?;
         let data_dir = PathBuf::from(get("SIGNALBOX_DATA").unwrap_or_else(|| DEFAULT_DATA.into()));
         let layouts_dir = PathBuf::from(get("SIGNALBOX_LAYOUTS").unwrap_or_else(|| DEFAULT_LAYOUTS.into()));
+        let web_dir = PathBuf::from(get("SIGNALBOX_WEB").unwrap_or_else(|| DEFAULT_WEB.into()));
         let key_hex = get("SIGNALBOX_SESSION_KEY").ok_or("SIGNALBOX_SESSION_KEY is required (hex, at least 64 bytes)")?;
         let session_key = decode_hex(&key_hex).ok_or("SIGNALBOX_SESSION_KEY is not hex")?;
         if session_key.len() < MIN_KEY_BYTES {
@@ -76,6 +81,6 @@ impl Config {
                 .and_then(|e| e.parent().map(|d| d.join("signalbox-game")))
                 .ok_or("cannot find signalbox-game; set SIGNALBOX_GAME_BIN")?,
         };
-        Ok(Config { addr, data_dir, layouts_dir, public_url, oidc, session_key, game_bin })
+        Ok(Config { addr, data_dir, layouts_dir, public_url, oidc, session_key, game_bin, web_dir })
     }
 }
