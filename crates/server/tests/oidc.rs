@@ -33,6 +33,8 @@ use server::oidc::*;
 /// TEST-ONLY RSA key: the in-test provider signs its ID tokens with it. It
 /// is public in the repository and trusted by nothing outside this file.
 const KEY_PEM: &str = include_str!("fixtures/oidc-test-key.pem");
+/// TEST-ONLY too: a second key, never published in the provider's JWKS.
+const OTHER_KEY_PEM: &str = include_str!("fixtures/oidc-test-key-2.pem");
 const CLIENT_ID: &str = "signalbox";
 const CLIENT_SECRET: &str = "test-secret";
 
@@ -115,10 +117,24 @@ struct Login {
     audience: String,
     /// `None` = the nonce the front asked for.
     nonce: Option<String>,
+    /// `None` = the provider's own issuer.
+    issuer: Option<String>,
+    /// Sign with the second key under the first key's kid.
+    forged: bool,
+    /// Seconds from now until the token expires (negative: already expired).
+    expires_in: i64,
 }
 
 fn member(name: &str) -> Login {
-    Login { username: Some(s(name)), groups: Some(vec![s("signalbox-users")]), audience: s(CLIENT_ID), nonce: None }
+    Login {
+        username: Some(s(name)),
+        groups: Some(vec![s("signalbox-users")]),
+        audience: s(CLIENT_ID),
+        nonce: None,
+        issuer: None,
+        forged: false,
+        expires_in: 300,
+    }
 }
 
 struct Issued {
@@ -131,6 +147,7 @@ struct Issued {
 struct ProviderState {
     issuer: String,
     key: CoreRsaPrivateSigningKey,
+    other_key: CoreRsaPrivateSigningKey,
     codes: Mutex<BTreeMap<String, Issued>>,
     next_code: Mutex<u32>,
 }
@@ -178,11 +195,11 @@ async fn token(State(p): State<Arc<ProviderState>>, headers: HeaderMap, Form(f):
     }
     let l = &issued.login;
     let mut claims = json!({
-        "iss": p.issuer,
+        "iss": l.issuer.clone().unwrap_or_else(|| p.issuer.clone()),
         "aud": [l.audience],
         "sub": "user-1",
-        "iat": now_s(),
-        "exp": now_s() + 300,
+        "iat": if l.expires_in < 0 { now_s() - 600 } else { now_s() },
+        "exp": now_s().saturating_add_signed(l.expires_in),
         "nonce": l.nonce.clone().unwrap_or(issued.nonce),
     });
     if let Some(u) = &l.username {
@@ -192,7 +209,8 @@ async fn token(State(p): State<Arc<ProviderState>>, headers: HeaderMap, Form(f):
         claims["groups"] = json!(g);
     }
     let claims: IdTokenClaims<Groups, CoreGenderClaim> = serde_json::from_value(claims).unwrap();
-    let id_token = TestIdToken::new(claims, &p.key, CoreJwsSigningAlgorithm::RsaSsaPkcs1V15Sha256, None, None).unwrap();
+    let key = if l.forged { &p.other_key } else { &p.key };
+    let id_token = TestIdToken::new(claims, key, CoreJwsSigningAlgorithm::RsaSsaPkcs1V15Sha256, None, None).unwrap();
     Json(json!({"access_token": "at", "token_type": "bearer", "expires_in": 300, "id_token": id_token.to_string()})).into_response()
 }
 
@@ -201,7 +219,8 @@ impl Provider {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let issuer = format!("http://{}/", listener.local_addr().unwrap());
         let key = CoreRsaPrivateSigningKey::from_pem(KEY_PEM, Some(JsonWebKeyId::new(s("test-1")))).unwrap();
-        let state = Arc::new(ProviderState { issuer, key, codes: Mutex::new(BTreeMap::new()), next_code: Mutex::new(0) });
+        let other_key = CoreRsaPrivateSigningKey::from_pem(OTHER_KEY_PEM, Some(JsonWebKeyId::new(s("test-1")))).unwrap();
+        let state = Arc::new(ProviderState { issuer, key, other_key, codes: Mutex::new(BTreeMap::new()), next_code: Mutex::new(0) });
         let app = Router::new()
             .route("/.well-known/openid-configuration", get(discovery))
             .route("/jwks", get(jwks))
@@ -339,12 +358,20 @@ async fn callback_rejects_bad_state_replay_and_foreign_audience() {
         (Login { groups: None, ..member("ann") }, 403),
         (Login { username: None, ..member("ann") }, 403),
         (Login { nonce: Some(s("not-the-nonce")), ..member("ann") }, 403),
+        // Signed with another key under the provider's kid, from another
+        // issuer, or already expired: the ID token fails verification.
+        (Login { forged: true, ..member("ann") }, 403),
+        (Login { issuer: Some(s("https://auth.example.test/application/o/signalbox/")), ..member("ann") }, 403),
+        (Login { expires_in: -120, ..member("ann") }, 403),
     ];
     for (login, status) in refuse {
         let (to, login_cookie) = start_login(&base).await;
         let (code, state) = p.sign_in(&to, login.clone());
         let r = callback(&base, &state, &code, Some(&login_cookie)).await;
         assert!(r.status == status && no_session(&r), "{login:?}: {} {}", r.status, r.body);
+        if login.forged || login.issuer.is_some() || login.expires_in < 0 {
+            assert!(r.body.contains("could not be verified"), "{login:?}: {}", r.body);
+        }
     }
     assert_eq!(running.sessions.len(), 1, "only the one good login");
     running.stop().await;

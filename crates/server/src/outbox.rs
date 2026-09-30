@@ -63,6 +63,12 @@ impl Outbox {
         Pushed::Queued
     }
 
+    /// Drop deltas until the next full view: this socket has no base to
+    /// apply them to yet (it took over a game another socket was playing).
+    pub fn await_view(&self) {
+        self.inner.lock().expect("outbox lock").awaiting_view = true;
+    }
+
     /// No more frames are accepted; `pop` drains what is queued, then ends.
     pub fn close(&self) {
         self.inner.lock().expect("outbox lock").closed = true;

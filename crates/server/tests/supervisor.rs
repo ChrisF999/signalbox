@@ -385,6 +385,7 @@ async fn a_game_that_fails_to_resume_shows_as_crashed_with_its_error() {
     assert_eq!(g.state, GameState::Crashed);
     let why = g.error.unwrap();
     assert!(why.starts_with("signalbox-game: ") && why.contains("not a database"), "the child's own words: {why}");
+    assert!(why.ends_with(" (exit status 1)"), "and how it ended: {why}");
     assert_eq!(rig.info(&other).state, GameState::Running, "the other game carries on");
     rig.game_msg(&bob, ClientMsg::Resync);
     until(&bob, is_view).await;
@@ -423,7 +424,8 @@ async fn a_killed_game_is_crashed_and_join_resumes_it() {
     kill(pid, "KILL");
     until(&ann, |f| *f == notice(Notice::GameCrashed)).await;
     let crashed = rig.wait_for(&id, |g| g.state == GameState::Crashed).await;
-    assert!(crashed.error.is_some());
+    let why = crashed.error.unwrap();
+    assert!(why.ends_with(" (killed by signal 9)"), "the crash reason says how it ended: {why}");
     assert_eq!(rig.info(&other).state, GameState::Running);
     assert_eq!(rig.sup.live_count(), 1);
 
@@ -596,5 +598,78 @@ async fn game_children_run_in_their_own_process_group() {
     let pid = rig.sup.pid(&id).expect("running games have a pid");
     assert_eq!(pgrp(&pid.to_string()), pid, "a terminal's Ctrl-C does not reach the game");
     assert_ne!(pgrp("self"), pid);
+    rig.sup.shutdown_all(Duration::from_secs(10)).await;
+}
+
+/// Frames that arrive within `d`.
+async fn drain_for(sock: &Sock, d: Duration) -> Vec<ServerFrame> {
+    let mut got = Vec::new();
+    let end = tokio::time::Instant::now() + d;
+    while let Ok(Some(f)) = tokio::time::timeout_at(end, sock.me.outbox.pop()).await {
+        got.push(f);
+    }
+    got
+}
+
+fn is_delta(f: &ServerFrame) -> bool {
+    matches!(f, ServerFrame::Game(ServerMsg::Delta(_)))
+}
+
+#[tokio::test]
+async fn a_lobby_reply_that_overflows_the_queue_asks_the_game_for_a_resync() {
+    let rig = rig("lobby-overflow", 600);
+    let ann = rig.attach("ann");
+    create(&rig, &ann).await;
+    // No await in between: the game's frames cannot interleave, so the
+    // overflow happens on a lobby reply, not on a game frame.
+    while ann.me.outbox.len() < OUTBOX_CAP {
+        rig.lobby(&ann, LobbyMsg::ListGames);
+    }
+    rig.lobby(&ann, LobbyMsg::ListGames);
+    assert!(ann.me.outbox.is_empty(), "the full queue was cleared");
+    assert_eq!(ann.me.outbox.push(delta(1)), Pushed::Dropped, "waiting for a fresh view");
+    let got = until(&ann, is_view).await;
+    assert!(!got.iter().any(is_delta), "no delta before the new base: {got:?}");
+    let more = drain_for(&ann, Duration::from_secs(1)).await;
+    assert_eq!(more.iter().filter(|f| is_view(f)).count(), 0, "one view, not a stream of them: {more:?}");
+    assert!(more.iter().any(is_delta), "deltas flow again");
+    rig.sup.shutdown_all(Duration::from_secs(10)).await;
+}
+
+#[tokio::test]
+async fn a_socket_that_takes_over_a_game_waits_for_its_base_view() {
+    let rig = rig("takeover-base", 600);
+    let first = rig.attach("ann");
+    let id = create(&rig, &first).await;
+    let second = rig.attach("ann");
+    assert_eq!(second.me.outbox.push(delta(1)), Pushed::Dropped, "no delta before the base view");
+    let got = until(&second, is_view).await;
+    assert_eq!(got[0], ServerFrame::Lobby(LobbyReply::Joined { game: id, you: s("ann") }));
+    assert!(!got.iter().any(is_delta), "{got:?}");
+    rig.sup.shutdown_all(Duration::from_secs(10)).await;
+}
+
+#[tokio::test]
+async fn a_fresh_socket_outside_a_game_takes_frames_at_once() {
+    let rig = rig("fresh-outbox", 600);
+    let ann = rig.attach("ann");
+    assert_eq!(ann.me.outbox.push(delta(1)), Pushed::Queued);
+}
+
+#[tokio::test]
+async fn joining_the_game_you_are_in_resyncs_without_pausing_it() {
+    let rig = rig("rejoin", 600);
+    let ann = rig.attach("ann");
+    let id = create(&rig, &ann).await;
+    rig.wait_for(&id, |g| g.sim_time > 25201.0).await;
+    rig.lobby(&ann, LobbyMsg::Join { game: id.clone() });
+    let got = until(&ann, is_view).await;
+    assert!(got.contains(&ServerFrame::Lobby(LobbyReply::Joined { game: id.clone(), you: s("ann") })), "{got:?}");
+    let Some(ServerFrame::Game(ServerMsg::View(v))) = got.last() else { unreachable!() };
+    assert!(!v.paused, "a solo player's re-join did not pause the game");
+    assert_eq!(rig.sup.game_of("ann").as_deref(), Some(id.as_str()));
+    sleep(Duration::from_millis(1500)).await;
+    let status = rig.sup.status(&id).expect("running");
+    assert!(!status.paused, "still running a status later: {status:?}");
     rig.sup.shutdown_all(Duration::from_secs(10)).await;
 }

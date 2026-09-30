@@ -9,8 +9,9 @@
 
 use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -120,6 +121,26 @@ fn send_to(st: &State, game: &str, msg: ToGame) -> bool {
     st.games.get(game).and_then(|e| e.tx.as_ref()).is_some_and(|tx| tx.send(msg).is_ok())
 }
 
+/// Every frame for a client goes through here. A push that overflowed the
+/// queue cleared it and left it waiting for a full view, so the client's
+/// game (if any) is asked for one.
+fn push(st: &State, user: &str, c: &Client, f: ServerFrame) {
+    if c.outbox.push(f) == Pushed::Overflowed {
+        if let Some(g) = &c.game {
+            send_to(st, g, ToGame::Client { player: user.to_string(), msg: ClientMsg::Resync });
+        }
+    }
+}
+
+/// How a child process ended, for the crash reason.
+fn exit_description(status: ExitStatus) -> String {
+    match (status.code(), status.signal()) {
+        (Some(code), _) => format!("exit status {code}"),
+        (None, Some(sig)) => format!("killed by signal {sig}"),
+        (None, None) => status.to_string(),
+    }
+}
+
 /// Games that have a save file in `dir`, with its summary or why it could
 /// not be read.
 fn scan_saves(dir: &Path) -> BTreeMap<String, Result<game::save::SaveSummary, String>> {
@@ -197,6 +218,9 @@ impl Supervisor {
             old.game
         });
         if let Some(g) = game.clone() {
+            // Deltas already on their way to the old socket must not reach
+            // this one before the view the `Connect` below asks for.
+            outbox.await_view();
             if send_to(&st, &g, ToGame::Connect { player: user.to_string() }) {
                 outbox.push(frame(LobbyReply::Joined { game: g, you: user.to_string() }));
             } else {
@@ -224,8 +248,9 @@ impl Supervisor {
 
     /// Send `f` to `user`'s socket `conn`, if it is still their current one.
     pub fn reply(&self, user: &str, conn: u64, f: ServerFrame) {
-        if let Some(c) = Self::current(&self.lock(), user, conn) {
-            c.outbox.push(f);
+        let st = self.lock();
+        if let Some(c) = Self::current(&st, user, conn) {
+            push(&st, user, c, f);
         }
     }
 
@@ -263,7 +288,7 @@ impl Supervisor {
         let Some(c) = Self::current(&st, user, conn) else { return };
         let sent = c.game.as_deref().is_some_and(|g| send_to(&st, g, ToGame::Client { player: user.to_string(), msg }));
         if !sent {
-            c.outbox.push(ServerFrame::error(codes::NOT_IN_GAME, "join a game first"));
+            push(&st, user, c, ServerFrame::error(codes::NOT_IN_GAME, "join a game first"));
         }
     }
 
@@ -276,7 +301,8 @@ impl Supervisor {
     fn enter(st: &mut State, user: &str, game: &str) {
         let Some(c) = st.clients.get_mut(user) else { return };
         c.game = Some(game.to_string());
-        c.outbox.push(frame(LobbyReply::Joined { game: game.to_string(), you: user.to_string() }));
+        let c = &st.clients[user];
+        push(st, user, c, frame(LobbyReply::Joined { game: game.to_string(), you: user.to_string() }));
         send_to(st, game, ToGame::Connect { player: user.to_string() });
     }
 
@@ -315,7 +341,7 @@ impl Supervisor {
         let mut st = self.lock();
         let Some(c) = Self::current(&st, user, conn) else { return };
         if let Err(f) = Self::room_for_one_more(&st) {
-            c.outbox.push(f);
+            push(&st, user, c, f);
             return;
         }
         let id = loop {
@@ -341,7 +367,13 @@ impl Supervisor {
         }
         {
             let mut st = self.lock();
-            if Self::current(&st, user, conn).is_none() {
+            let Some(c) = Self::current(&st, user, conn) else { return };
+            if c.game.as_deref() == Some(game.as_str()) {
+                // Already in it: leaving and entering again would look like
+                // an empty game to the game (pause, save). A fresh view is
+                // all a second `join` can want.
+                push(&st, user, c, frame(LobbyReply::Joined { game: game.clone(), you: user.to_string() }));
+                send_to(&st, &game, ToGame::Client { player: user.to_string(), msg: ClientMsg::Resync });
                 return;
             }
             if matches!(st.games.get(&game).map(|e| &e.phase), Some(Phase::Starting | Phase::Running)) {
@@ -364,7 +396,7 @@ impl Supervisor {
             return;
         }
         if let Err(f) = Self::room_for_one_more(&st) {
-            c.outbox.push(f);
+            push(&st, user, c, f);
             return;
         }
         Self::leave(&mut st, user);
@@ -542,10 +574,11 @@ impl Supervisor {
         let why = match (line.is_empty(), trouble) {
             (false, _) => line,
             (true, Some(t)) => t,
-            (true, None) => match status {
-                Some(s) => format!("the game process ended: {s}"),
-                None => "the game process ended".into(),
-            },
+            (true, None) => "the game process ended".into(),
+        };
+        let why = match status {
+            Some(s) => format!("{why} ({})", exit_description(s)),
+            None => why,
         };
         self.crashed(&id, why);
     }
@@ -567,9 +600,7 @@ impl Supervisor {
             FromGame::ToPlayer { player, msg } => {
                 let st = self.lock();
                 let Some(c) = st.clients.get(&player).filter(|c| c.game.as_deref() == Some(id)) else { return };
-                if c.outbox.push(ServerFrame::Game(msg)) == Pushed::Overflowed {
-                    send_to(&st, id, ToGame::Client { player, msg: ClientMsg::Resync });
-                }
+                push(&st, &player, c, ServerFrame::Game(msg));
             }
             FromGame::Status(s) => {
                 if let Some(e) = self.lock().games.get_mut(id) {
@@ -591,11 +622,16 @@ impl Supervisor {
 
     /// Everyone in `id` goes back to the lobby with `f`.
     fn evict(st: &mut State, id: &str, f: &ServerFrame) {
-        for c in st.clients.values_mut() {
-            if c.game.as_deref() == Some(id) {
+        let users: Vec<String> =
+            st.clients.iter().filter(|(_, c)| c.game.as_deref() == Some(id)).map(|(u, _)| u.clone()).collect();
+        for u in &users {
+            if let Some(c) = st.clients.get_mut(u) {
                 c.game = None;
-                c.outbox.push(f.clone());
             }
+        }
+        // Out of the game now, so an overflow asks no game for a view.
+        for u in &users {
+            push(st, u, &st.clients[u], f.clone());
         }
     }
 
