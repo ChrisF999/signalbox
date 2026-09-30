@@ -188,6 +188,13 @@ impl Sim {
         st
     }
 
+    /// FNV-1a hash of the full serialised state (`snapshot()` as JSON), for
+    /// comparing runs: equal hashes mean the same state.
+    pub fn state_hash(&self) -> u64 {
+        let state = serde_json::to_string(&self.snapshot()).expect("state serialises");
+        state.bytes().fold(0xcbf29ce484222325, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100000001b3))
+    }
+
     /// Rebuild a simulation from a world and a snapshot taken on that world.
     /// Fails if the snapshot's tables do not match the world's size.
     pub fn restore(world: World, st: SimState) -> Result<Sim, String> {

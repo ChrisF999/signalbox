@@ -68,7 +68,7 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
     };
     println!("{} after {} ({} ticks of {TICK_S} s)", sim.world().title, fmt_hms(sim.now_s()), sim.tick());
     println!("{}", serde_json::to_string_pretty(&report).expect("report serialises"));
-    println!("state fnv1a {:016x}", state_hash(&sim));
+    println!("state fnv1a {:016x}", sim.state_hash());
     if let Some(out) = record {
         let log = serde_json::json!({"seed": seed, "ticks": sim.tick(), "log": sim.log()});
         std::fs::write(out, serde_json::to_string_pretty(&log).expect("log serialises"))
@@ -89,18 +89,6 @@ fn replay(args: &[String]) -> Result<ExitCode, String> {
     let ticks = v["ticks"].as_u64().ok_or("log: missing ticks")?;
     let log: Vec<(u64, Command)> = serde_json::from_value(v["log"].clone()).map_err(|e| format!("log: {e}"))?;
     let sim = Sim::replay(world, seed, &log, ticks);
-    println!("replayed {ticks} ticks; state fnv1a {:016x}", state_hash(&sim));
+    println!("replayed {ticks} ticks; state fnv1a {:016x}", sim.state_hash());
     Ok(ExitCode::SUCCESS)
-}
-
-/// Hash of the full serialised state, printed by both `run` and `replay` so
-/// the two can be compared.
-fn state_hash(sim: &Sim) -> u64 {
-    let state = serde_json::to_string(&sim.snapshot()).expect("state serialises");
-    fnv1a(state.as_bytes())
-}
-
-/// Stable hash for comparing final states by eye.
-fn fnv1a(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf29ce484222325, |h, &b| (h ^ u64::from(b)).wrapping_mul(0x100000001b3))
 }

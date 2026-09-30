@@ -21,7 +21,7 @@ const MAX_ROUTE_DEPTH: usize = 30;
 /// How long before a dwelling train's departure time the robot sets its road.
 const DEPARTURE_LEAD_S: f64 = 30.0;
 /// The robot looks at the railway once per this many ticks.
-const ROBOT_EVERY_TICKS: u64 = 10;
+pub const ROBOT_EVERY_TICKS: u64 = 10;
 
 enum Goal<'a> {
     Platform { place: &'a str, platform: Option<&'a str> },

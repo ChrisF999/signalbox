@@ -74,3 +74,28 @@ fn replay_accepts_an_unsorted_log() {
     let again = Sim::replay(w, 7, &log, sim.tick());
     assert_eq!(again.snapshot(), sim.snapshot());
 }
+
+#[test]
+fn state_hash_is_fnv1a_of_the_snapshot_json() {
+    let mut sim = busy_terminus(3);
+    sim.run_for(60.0);
+    let json = serde_json::to_string(&sim.snapshot()).unwrap();
+    let want = json.bytes().fold(0xcbf29ce484222325_u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100000001b3));
+    assert_eq!(sim.state_hash(), want);
+}
+
+#[test]
+fn state_hash_follows_the_state() {
+    let mut a = busy_terminus(3);
+    let mut b = busy_terminus(3);
+    a.run_for(100.0);
+    b.run_for(100.0);
+    assert_eq!(a.state_hash(), b.state_hash());
+    b.step();
+    assert_ne!(a.state_hash(), b.state_hash());
+}
+
+#[test]
+fn robot_cadence_is_public() {
+    assert_eq!(signalbox_core::robot::ROBOT_EVERY_TICKS, 10);
+}
