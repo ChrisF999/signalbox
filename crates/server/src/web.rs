@@ -9,7 +9,9 @@ use axum::Router;
 use axum::extract::ws::rejection::WebSocketUpgradeRejection;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{FromRef, Path, Query, State};
-use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, ETAG, IF_NONE_MATCH, X_CONTENT_TYPE_OPTIONS};
+use axum::http::header::{
+    ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_TYPE, ETAG, IF_NONE_MATCH, VARY, X_CONTENT_TYPE_OPTIONS,
+};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::get;
@@ -17,7 +19,7 @@ use axum_extra::extract::cookie::{Cookie, Key, SignedCookieJar};
 use protocol::{GameInfo, LayoutInfo, codes};
 use serde::Deserialize;
 
-use crate::assets::{Asset, WebAssets};
+use crate::assets::{Asset, Coding, WebAssets};
 use crate::limit::RateLimit;
 use crate::oidc::{Denied, LOGIN_COOKIE, LoginError, Oidc, PENDING_TTL};
 use crate::session::{SESSION_COOKIE, SESSION_TTL, Sessions, cookie};
@@ -129,18 +131,35 @@ async fn app_file(State(state): State<AppState>, jar: SignedCookieJar, Path(file
 
 /// An asset from memory; 304 when the browser already has this version.
 /// `private, no-cache`: browsers revalidate every load, so a new build is picked up
-/// at once while an unchanged one costs a 304.
+/// at once while an unchanged one costs a 304. The brotli or gzip copy goes
+/// to a browser that accepts it (`Vary: Accept-Encoding`), each with its
+/// own ETag.
 fn serve(a: &Asset, headers: &HeaderMap) -> Response {
+    let accept = headers.get(ACCEPT_ENCODING).and_then(|v| v.to_str().ok());
+    let (coding, body, etag) = a.negotiate(accept);
     let fresh = headers
         .get(IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.split(',').any(|t| t.trim() == a.etag));
-    let common = [(ETAG, a.etag.clone()), (CACHE_CONTROL, "private, no-cache".to_string())];
+        .is_some_and(|v| v.split(',').any(|t| t.trim() == etag));
+    let common = [
+        (ETAG, etag.to_string()),
+        (CACHE_CONTROL, "private, no-cache".to_string()),
+        (VARY, "accept-encoding".to_string()),
+    ];
     if fresh {
         return (StatusCode::NOT_MODIFIED, common).into_response();
     }
     let typed = [(CONTENT_TYPE, a.content_type.to_string()), (X_CONTENT_TYPE_OPTIONS, "nosniff".to_string())];
-    (common, typed, a.body.clone()).into_response()
+    let mut r = (common, typed, body.clone()).into_response();
+    let encoding = match coding {
+        Coding::Br => Some("br"),
+        Coding::Gzip => Some("gzip"),
+        Coding::Identity => None,
+    };
+    if let Some(e) = encoding {
+        r.headers_mut().insert(CONTENT_ENCODING, axum::http::HeaderValue::from_static(e));
+    }
+    r
 }
 
 async fn login(State(state): State<AppState>, jar: SignedCookieJar) -> Response {

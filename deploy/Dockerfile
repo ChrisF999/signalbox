@@ -8,11 +8,15 @@
 #   docker build -f deploy/Dockerfile -t local/signalbox:$(git rev-parse --short HEAD) .
 
 # The browser client's toolchain: the wasm32 target and wasm-bindgen-cli at
-# the version Cargo.lock pins (scripts/build-web.sh refuses a mismatch).
+# the version Cargo.lock pins (scripts/build-web.sh refuses a mismatch), and
+# brotli for the precompressed copies the front serves.
 # scripts/wasm-build builds this stage alone as local/signalbox-wasm-tools:<version>.
 FROM rust:1.98-slim-bookworm AS wasm-tools
 ARG WASM_BINDGEN_VERSION=0.2.129
-RUN rustup target add wasm32-unknown-unknown \
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends brotli \
+ && rm -rf /var/lib/apt/lists/* \
+ && rustup target add wasm32-unknown-unknown \
  && cargo install wasm-bindgen-cli --version "=${WASM_BINDGEN_VERSION}" --locked \
  && rm -rf /usr/local/cargo/registry
 

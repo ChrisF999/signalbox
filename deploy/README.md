@@ -28,7 +28,7 @@ value stops the front with exit code 2 and one line saying what is wrong.
 | `SIGNALBOX_LAYOUTS` | image | `/opt/signalbox/layouts` |
 | `SIGNALBOX_LESSONS` | image | `/opt/signalbox/lessons` (tutorial lessons, `<id>/lesson.json` + `world.json`; read and checked once at start, a broken one is left out with one log line; missing = no tutorials) |
 | `SIGNALBOX_GAME_BIN` | image | `/opt/signalbox/bin/signalbox-game` |
-| `SIGNALBOX_WEB` | image | `/opt/signalbox/web` (the browser client: `index.html`, `app/`; read once at start) |
+| `SIGNALBOX_WEB` | image | `/opt/signalbox/web` (the browser client: `index.html`, `app/`, each with `.br` and `.gz` copies served by `Accept-Encoding`; read once at start) |
 | `SIGNALBOX_ADMINS` | compose | `skye` (comma-separated usernames that may delete any saved or crashed game; a game's creator may always delete their own; default nobody) |
 | `SIGNALBOX_PUBLIC_URL` | compose | `https://ra.tail3e0c1e.ts.net:50160` (redirect URI = this + `/auth/callback`) |
 | `OIDC_ISSUER` | compose | `https://auth.skyes.lgbt/application/o/signalbox/` |

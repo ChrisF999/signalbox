@@ -208,6 +208,62 @@ fn web_assets_load_index_and_plain_app_files_only() {
 }
 
 #[test]
+fn web_assets_attach_precompressed_copies_to_their_files() {
+    let dir = std::env::temp_dir().join(format!("sbx-web-enc-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("app")).unwrap();
+    std::fs::write(dir.join("index.html"), "<canvas>").unwrap();
+    std::fs::write(dir.join("index.html.br"), "index-br").unwrap();
+    std::fs::write(dir.join("app/a.wasm"), "wasm").unwrap();
+    std::fs::write(dir.join("app/a.wasm.br"), "wasm-br").unwrap();
+    std::fs::write(dir.join("app/a.wasm.gz"), "wasm-gz").unwrap();
+    std::fs::write(dir.join("app/b.js"), "js").unwrap();
+    std::fs::write(dir.join("app/orphan.js.gz"), "no base").unwrap();
+    let outside = std::env::temp_dir().join(format!("sbx-web-enc-outside-{}", std::process::id()));
+    std::fs::write(&outside, "secret").unwrap();
+    std::os::unix::fs::symlink(&outside, dir.join("app/b.js.br")).unwrap();
+    let w = WebAssets::load(&dir).unwrap().unwrap();
+    assert_eq!(w.app.keys().collect::<Vec<_>>(), ["a.wasm", "b.js"], "copies are not files of their own");
+    let a = &w.app["a.wasm"];
+    assert_eq!((&a.body[..], a.etag.as_str()), (&b"wasm"[..], etag(b"wasm").as_str()));
+    let br = a.br.as_ref().unwrap();
+    assert_eq!((&br.body[..], br.etag.clone()), (&b"wasm-br"[..], etag(b"wasm-br")));
+    assert_eq!(&a.gzip.as_ref().unwrap().body[..], b"wasm-gz");
+    assert_eq!((w.app["b.js"].br.as_ref(), w.app["b.js"].gzip.as_ref()), (None, None), "a symlinked copy is not loaded");
+    assert_eq!(&w.index.br.as_ref().unwrap().body[..], b"index-br");
+    assert!(w.index.gzip.is_none());
+    // A symlinked copy of the index is refused like the index itself.
+    std::fs::remove_file(dir.join("index.html.br")).unwrap();
+    std::os::unix::fs::symlink(&outside, dir.join("index.html.br")).unwrap();
+    let err = WebAssets::load(&dir).unwrap_err();
+    assert!(err.contains("index.html.br") && err.contains("symlink"), "{err}");
+    let _ = std::fs::remove_file(&outside);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn accept_encoding_picks_brotli_then_gzip_then_identity() {
+    use server::assets::{Coding, pick_coding};
+    for (ae, has_br, has_gz, want) in [
+        (None, true, true, Coding::Identity),
+        (Some("gzip, deflate, br"), true, true, Coding::Br),
+        (Some("gzip, deflate, br"), false, true, Coding::Gzip),
+        (Some("gzip, deflate, br"), false, false, Coding::Identity),
+        (Some("br;q=0, gzip;q=0.1"), true, true, Coding::Gzip),
+        (Some("Br ; Q=1"), true, true, Coding::Br),
+        (Some("*"), true, true, Coding::Br),
+        (Some("*, br;q=0"), true, true, Coding::Gzip),
+        (Some("*;q=0"), true, true, Coding::Identity),
+        (Some("x-gzip"), true, true, Coding::Gzip),
+        (Some("br;q=bogus"), true, true, Coding::Identity),
+        (Some("gzip;q=0.000"), true, true, Coding::Identity),
+        (Some("brotli, gzipx"), true, true, Coding::Identity),
+    ] {
+        assert_eq!(pick_coding(ae, has_br, has_gz), want, "{ae:?} br={has_br} gz={has_gz}");
+    }
+}
+
+#[test]
 fn web_assets_refuse_a_symlinked_index_and_unreadable_dirs() {
     let dir = std::env::temp_dir().join(format!("sbx-web-link-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

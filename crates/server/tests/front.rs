@@ -223,6 +223,126 @@ async fn assets_are_only_the_listed_names() {
     f.running.stop().await;
 }
 
+const WASM_BR: &[u8] = b"brotli-wasm";
+const WASM_GZ: &[u8] = b"gzip-wasm";
+const INDEX_GZ: &[u8] = b"gzip-index";
+
+/// A bare HTTP/1.0 HEAD: status, lower-cased headers, and the bytes after them.
+async fn http_head(base: &str, path: &str, headers: &[(&str, &str)]) -> (u16, Vec<(String, String)>, Vec<u8>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let host = base.strip_prefix("http://").unwrap();
+    let mut s = tokio::net::TcpStream::connect(host).await.unwrap();
+    let mut req = format!("HEAD {path} HTTP/1.0\r\nHost: {host}\r\n");
+    for (k, v) in headers {
+        req.push_str(&format!("{k}: {v}\r\n"));
+    }
+    req.push_str("\r\n");
+    s.write_all(req.as_bytes()).await.unwrap();
+    let mut raw = Vec::new();
+    s.read_to_end(&mut raw).await.unwrap();
+    let end = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    let head = String::from_utf8(raw[..end].to_vec()).unwrap();
+    let mut lines = head.split("\r\n");
+    let status = lines.next().unwrap().split(' ').nth(1).unwrap().parse().unwrap();
+    let hs = lines.filter_map(|l| l.split_once(':')).map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string())).collect();
+    (status, hs, raw[end + 4..].to_vec())
+}
+
+#[tokio::test]
+async fn precompressed_assets_follow_accept_encoding() {
+    let f = front_with_web(
+        "web-enc",
+        &[
+            ("index.html", INDEX),
+            ("index.html.gz", INDEX_GZ),
+            ("app/signalbox_web.js", b"export default 1;"),
+            ("app/signalbox_web_bg.wasm", WASM),
+            ("app/signalbox_web_bg.wasm.br", WASM_BR),
+            ("app/signalbox_web_bg.wasm.gz", WASM_GZ),
+            ("app/orphan.js.br", b"no base file"),
+        ],
+    )
+    .await;
+    let cookie = dev_login(&f.base, "ann").await.unwrap();
+    let get = |ae: Option<&'static str>, path: &'static str| {
+        let (base, cookie) = (f.base.clone(), cookie.clone());
+        async move {
+            let mut h = vec![("Cookie", cookie.as_str())];
+            if let Some(ae) = ae {
+                h.push(("Accept-Encoding", ae));
+            }
+            http_get_with(&base, path, &h).await.unwrap()
+        }
+    };
+    let wasm = "/app/signalbox_web_bg.wasm";
+    // br > gzip > identity, whatever order the client lists them in.
+    for (ae, enc, body) in [
+        (Some("gzip, deflate, br, zstd"), Some("br"), WASM_BR),
+        (Some("br"), Some("br"), WASM_BR),
+        (Some("*"), Some("br"), WASM_BR),
+        (Some("gzip"), Some("gzip"), WASM_GZ),
+        (Some("GZIP;q=0.5, br;q=0"), Some("gzip"), WASM_GZ),
+        (Some("br;q=0.0, x-gzip"), Some("gzip"), WASM_GZ),
+        (Some("deflate"), None, WASM),
+        (Some("identity"), None, WASM),
+        (Some("*;q=0, identity"), None, WASM),
+        (Some(""), None, WASM),
+        (None, None, WASM),
+    ] {
+        let r = get(ae, wasm).await;
+        assert_eq!(r.status, 200, "{ae:?}");
+        assert_eq!(r.header("content-encoding"), enc, "{ae:?}");
+        assert_eq!(r.body.as_bytes(), body, "{ae:?}");
+        assert_eq!(r.header("content-type"), Some("application/wasm"), "{ae:?}");
+        assert_eq!(r.header("content-length"), Some(body.len().to_string().as_str()), "{ae:?}");
+        assert_eq!(r.header("vary"), Some("accept-encoding"), "{ae:?}");
+        assert_eq!(r.header("cache-control"), Some("private, no-cache"), "{ae:?}");
+    }
+    // One ETag per encoding; If-None-Match is checked against the one chosen.
+    let br_tag = get(Some("br"), wasm).await.header("etag").unwrap().to_string();
+    let gz_tag = get(Some("gzip"), wasm).await.header("etag").unwrap().to_string();
+    let id_tag = get(None, wasm).await.header("etag").unwrap().to_string();
+    assert!(br_tag != gz_tag && gz_tag != id_tag && br_tag != id_tag, "{br_tag} {gz_tag} {id_tag}");
+    let cond = |ae: &'static str, tag: String| {
+        let (base, cookie) = (f.base.clone(), cookie.clone());
+        async move {
+            http_get_with(&base, wasm, &[("Cookie", &cookie), ("Accept-Encoding", ae), ("If-None-Match", &tag)]).await.unwrap()
+        }
+    };
+    let r = cond("gzip, br", br_tag.clone()).await;
+    assert_eq!((r.status, r.body.as_str()), (304, ""));
+    assert_eq!(r.header("etag"), Some(br_tag.as_str()));
+    assert_eq!(r.header("vary"), Some("accept-encoding"), "a 304 varies too");
+    let r = cond("gzip", br_tag.clone()).await;
+    assert_eq!((r.status, r.header("content-encoding")), (200, Some("gzip")), "the brotli tag is not the gzip copy's");
+    let r = cond("gzip", format!("\"x\", {gz_tag}")).await;
+    assert_eq!(r.status, 304);
+    let r = cond("identity", id_tag.clone()).await;
+    assert_eq!(r.status, 304);
+    // HEAD: the same headers, no body.
+    let (status, hs, body) = http_head(&f.base, wasm, &[("Cookie", &cookie), ("Accept-Encoding", "br")]).await;
+    let h = |k: &str| hs.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+    assert_eq!((status, h("content-encoding"), h("vary")), (200, Some("br"), Some("accept-encoding")));
+    assert_eq!(h("etag"), Some(br_tag.as_str()));
+    assert!(body.is_empty(), "{body:?}");
+    let (status, hs, _) = http_head(&f.base, wasm, &[("Cookie", &cookie), ("Accept-Encoding", "br"), ("If-None-Match", &br_tag)]).await;
+    assert_eq!(status, 304, "{hs:?}");
+    // A file with only a gzip copy, and one with none.
+    let r = get(Some("br, gzip"), "/").await;
+    assert_eq!((r.header("content-encoding"), r.body.as_bytes()), (Some("gzip"), INDEX_GZ));
+    let r = get(Some("br, gzip"), "/app/signalbox_web.js").await;
+    assert_eq!((r.header("content-encoding"), r.body.as_str()), (None, "export default 1;"));
+    assert_eq!(r.header("vary"), Some("accept-encoding"));
+    // The copies are never files of their own, and need a session like the rest.
+    for path in ["/app/signalbox_web_bg.wasm.br", "/app/signalbox_web_bg.wasm.gz", "/app/orphan.js.br", "/app/orphan.js", "/index.html.gz"] {
+        let r = get(Some("br, gzip"), path).await;
+        assert_eq!(r.status, 404, "{path}");
+    }
+    let r = http_get_with(&f.base, wasm, &[("Accept-Encoding", "br")]).await.unwrap();
+    assert_eq!(r.status, 401);
+    f.running.stop().await;
+}
+
 #[tokio::test]
 async fn without_a_web_dir_the_placeholder_stays() {
     let f = front("no-web").await;

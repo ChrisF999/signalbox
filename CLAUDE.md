@@ -45,6 +45,9 @@ The stock Rust image has no wasm32 target: `scripts/wasm-build` runs
 built on first use from the `wasm-tools` stage of `deploy/Dockerfile`. The
 `wasm-bindgen` crate is pinned exactly and the CLI must be the same version;
 bumping it means a new tools image and a new CI runner image (maintainer).
+The tools image also has `brotli`: build-web.sh writes a `.br` and a `.gz`
+beside every file it outputs and fails if either tool is missing (an older
+local tools image: remove it and run `scripts/wasm-build` again).
 
 CI (`.forgejo/workflows/ci.yml`) runs on a self-hosted Forgejo runner that builds
 **offline** with warnings as errors; adding a crate dependency means the runner's
@@ -244,7 +247,9 @@ output is byte-identical for the same input.
   exit positions are found by walking up to 4 nodes to a drawn line. The
   train list is `game::view::build_trains`, from sim state only.
 - The front serves `SIGNALBOX_WEB` from memory (`server::assets`) behind the
-  session; without that directory `/` is the placeholder page (no web client
+  session, the `.br` or `.gz` copy when the browser accepts it (brotli first;
+  `Vary: Accept-Encoding`, an ETag per copy; copies are never served by
+  their own names); without that directory `/` is the placeholder page (no web client
   installed).
 - The workspace `rand` has no default features (getrandom does not build for
   wasm32-unknown-unknown); the server turns on `thread_rng`.
