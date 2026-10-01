@@ -563,3 +563,82 @@ fn every_running_line_gets_direction_arrows() {
     let total = r.at(200.0, 0.0).x - r.at(0.0, 0.0).x;
     assert_eq!(tips.len(), 2 * arrow_stops(total, true, false).len(), "one per stop along the {total} px run");
 }
+
+#[test]
+fn absurdly_long_runs_have_a_bounded_number_of_arrows() {
+    let stops = arrow_stops(1.0e12, true, true);
+    assert!(stops.len() <= ARROW_MAX_STOPS + 2, "{} stops", stops.len());
+    assert!(stops.windows(2).all(|w| w[0] < w[1]), "every stop moves on");
+    let r = Rig::new(Some("West"));
+    let mut sc = r.sc.clone();
+    sc.runs = vec![client_ui::scene::Run {
+        points: vec![pos2(-1.0e7, 0.0), pos2(1.0e7, 0.0)],
+        forward: true,
+        backward: false,
+        loose_start: true,
+        loose_end: true,
+    }];
+    sc.tracks.clear();
+    let names = Names::new(&r.layout);
+    let st = PaintState { view: None, selected: None, exits: &[], refused: None, time: 0.0, aspects: AspectMode::RedGreen, numbers: true, names: &names };
+    let cam = Camera { centre: pos2(0.0, 0.0), scale: client_ui::camera::MAX_SCALE };
+    let d = draw(&sc, &cam, screen(), &st);
+    let arrows: Vec<Pos2> = d
+        .shapes
+        .iter()
+        .filter_map(|s| match s {
+            Shape::Path(p) if p.fill == LABEL => Some(p.points[0]),
+            _ => None,
+        })
+        .collect();
+    assert!(arrows.iter().all(|p| screen().expand(ARROW_PX * 2.0).contains(*p)), "only arrows on screen are drawn");
+}
+
+/// A run whose signals all face against it: the arrow points back along
+/// it and sits on the right of that travel (above a line drawn left to right).
+#[test]
+fn a_backward_runs_arrow_is_on_the_right_of_its_travel() {
+    let r = Rig::new(Some("West"));
+    let mut sc = r.sc.clone();
+    sc.runs = vec![client_ui::scene::Run {
+        points: vec![pos2(0.0, 0.0), pos2(200.0, 0.0)],
+        forward: false,
+        backward: true,
+        loose_start: true,
+        loose_end: false,
+    }];
+    let names = Names::new(&r.layout);
+    let st = PaintState { view: None, selected: None, exits: &[], refused: None, time: 0.0, aspects: AspectMode::RedGreen, numbers: true, names: &names };
+    let d = draw(&sc, &r.cam, screen(), &st);
+    let tips: Vec<Pos2> = d
+        .shapes
+        .iter()
+        .filter_map(|s| match s {
+            Shape::Path(p) if p.fill == LABEL => Some(p.points[0]),
+            _ => None,
+        })
+        .collect();
+    let c = r.at(0.0, 0.0) + vec2(ARROW_INSET_PX, -(r.w() / 2.0 + ARROW_OFF_PX));
+    let total = r.at(200.0, 0.0).x - r.at(0.0, 0.0).x;
+    assert_eq!(tips.len(), arrow_stops(total, true, false).len(), "single arrows: {tips:?}");
+    assert!(close(tips[0], c - vec2(ARROW_PX / 2.0, 0.0)), "{tips:?} vs centre {c:?}");
+    assert!(tips.iter().all(|t| (t.y - c.y).abs() < 1e-3), "all above the line: {tips:?}");
+}
+
+/// W2's disc hangs below the line at J0, over W1's berth behind it: the
+/// headcode's knock-out goes down first, so the disc stays whole.
+#[test]
+fn headcodes_are_drawn_under_signals_and_auto_buttons() {
+    let mut l = layout_for(Some("West"));
+    l.routes.iter_mut().filter(|r| r.entrance == "W2").for_each(|r| r.automatic = true);
+    let mut r = Rig::of(l, view_for(Some("West")));
+    r.view.berths.insert(s("BW1"), s("1A01"));
+    let d = r.idle();
+    let knockout = d.shapes.iter().position(|s| matches!(s, Shape::Rect(rs) if rs.fill == BG && rs.rect.width() == client_ui::hit::BERTH_W)).unwrap();
+    let rect = knockouts(&d)[0];
+    let w2 = r.disc("W2");
+    assert!(rect.expand(LAMP_R).contains(w2), "the case: W2's disc {w2:?} touches BW1's box {rect:?}");
+    let disc = d.shapes.iter().position(|s| matches!(s, Shape::Circle(c) if c.center == w2)).unwrap();
+    let auto = d.shapes.iter().position(|s| matches!(s, Shape::Circle(c) if c.radius == AUTO_R && c.stroke.color == AUTO)).unwrap();
+    assert!(knockout < disc && knockout < auto, "knock-out {knockout}, disc {disc}, ○A {auto}");
+}

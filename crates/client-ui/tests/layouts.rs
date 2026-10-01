@@ -60,6 +60,7 @@ fn every_shipped_layout_draws_for_every_box() {
                 let st = PaintState { view: Some(&v), selected: None, exits: &[], refused: None, time, aspects, numbers: true, names: &names };
                 let d = draw(&sc, &cam, screen, &st);
                 assert!(d.shapes.iter().all(finite), "{name} {area:?}");
+                assert!(d.texts.iter().all(|t| t.at.is_finite() && t.size.is_finite()), "{name} {area:?}: texts");
                 assert!(d.shapes.iter().any(|s| matches!(s, Shape::Path(p) if p.fill == LABEL)), "{name} {area:?}: direction arrows");
             }
             if name == "liverpool-st" && area.as_deref() == Some("Liverpool Street") {

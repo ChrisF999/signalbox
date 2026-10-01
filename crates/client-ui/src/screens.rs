@@ -332,7 +332,8 @@ impl UiApp {
             }
         }
         let cam = *cam;
-        let hit_at = |p: Option<egui::Pos2>| p.and_then(|p| hit_test(scene, &cam, rect, p));
+        let view = self.core.game().and_then(|g| g.view());
+        let hit_at = |p: Option<egui::Pos2>| p.and_then(|p| hit_test(scene, view, &cam, rect, p));
         let hover = hit_at(resp.hover_pos());
         // Every click goes on, even one on nothing or on what is not yours:
         // a dead click clears the entrance (`App::click` decides what the

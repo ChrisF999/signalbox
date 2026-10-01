@@ -70,6 +70,8 @@ pub const ARROW_OFF_PX: f32 = 6.0;
 pub const ARROW_INSET_PX: f32 = 24.0;
 pub const ARROW_EVERY_PX: f32 = 400.0;
 pub const ARROW_MIN_RUN_PX: f32 = 60.0;
+/// At most this many arrows along a run between its end ones.
+pub const ARROW_MAX_STOPS: usize = 1024;
 /// Labels: text size in pixels.
 pub const LABEL_PX: f32 = 11.0;
 
@@ -266,7 +268,8 @@ fn along(points: &[Pos2], dist: f32) -> Option<(Pos2, Vec2)> {
 }
 
 /// Where a run's arrows go (distances along it on screen): inset from each
-/// loose end, and every `ARROW_EVERY_PX`, not crowding the end ones.
+/// loose end, and every `ARROW_EVERY_PX`, not crowding the end ones; at most
+/// `ARROW_MAX_STOPS` of those, so nonsense coordinates stay cheap.
 pub fn arrow_stops(total: f32, loose_start: bool, loose_end: bool) -> Vec<f32> {
     if total < ARROW_MIN_RUN_PX || !total.is_finite() {
         return vec![];
@@ -279,18 +282,21 @@ pub fn arrow_stops(total: f32, loose_start: bool, loose_end: bool) -> Vec<f32> {
         ends.push(total - ARROW_INSET_PX);
     }
     let mut stops = ends.clone();
-    let mut d = ARROW_EVERY_PX;
-    while d <= total - ARROW_EVERY_PX / 2.0 {
+    // Counted, not summed: a sum of f32 steps stops moving on huge runs.
+    for k in 1..=ARROW_MAX_STOPS {
+        let d = k as f32 * ARROW_EVERY_PX;
+        if d > total - ARROW_EVERY_PX / 2.0 {
+            break;
+        }
         if ends.iter().all(|e| (e - d).abs() >= ARROW_EVERY_PX / 2.0) {
             stops.push(d);
         }
-        d += ARROW_EVERY_PX;
     }
     stops.sort_by(f32::total_cmp);
     stops
 }
 
-fn run_arrows(out: &mut Vec<Shape>, run: &Run, to: &dyn Fn(Pos2) -> Pos2, w: f32) {
+fn run_arrows(out: &mut Vec<Shape>, run: &Run, to: &dyn Fn(Pos2) -> Pos2, w: f32, screen: Rect) {
     if !run.forward && !run.backward {
         return;
     }
@@ -298,8 +304,14 @@ fn run_arrows(out: &mut Vec<Shape>, run: &Run, to: &dyn Fn(Pos2) -> Pos2, w: f32
     let total: f32 = pts.windows(2).map(|p| p[0].distance(p[1])).sum();
     for stop in arrow_stops(total, run.loose_start, run.loose_end) {
         let Some((p, dir)) = along(&pts, stop) else { continue };
-        // Beside the bar, on the right of the run's forward direction.
-        let c = p + vec2(-dir.y, dir.x) * (w / 2.0 + ARROW_OFF_PX);
+        if !screen.expand(ARROW_PX * 2.0).contains(p) {
+            continue;
+        }
+        // Beside the bar, on the right of travel: of the run's forward
+        // direction for a double arrow or a forward one, of its backward
+        // direction for a backward one.
+        let right = vec2(-dir.y, dir.x) * (w / 2.0 + ARROW_OFF_PX);
+        let c = if run.forward { p + right } else { p - right };
         match (run.forward, run.backward) {
             (true, true) => {
                 out.push(arrow(c + dir * (ARROW_PX / 2.0 + 1.0), dir, LABEL));
@@ -399,7 +411,7 @@ pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawi
         points_shapes(&mut d.shapes, p, &to, st, track_colour(section(&p.section)), w);
     }
     for r in &scene.runs {
-        run_arrows(&mut d.shapes, r, &to, w);
+        run_arrows(&mut d.shapes, r, &to, w, screen);
     }
     for e in &scene.exits {
         let lit = st.exits.contains(&ExitName::Node(e.node.clone()));
@@ -412,6 +424,21 @@ pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawi
             TRACK_FREE
         };
         d.shapes.push(Shape::rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.5, colour), StrokeKind::Middle));
+    }
+    // Headcodes in the track, on a black knock-out; an empty berth is not
+    // drawn. Before the signals, so a disc or ○A beside one stays whole.
+    for b in &scene.berths {
+        let Some(h) = st.view.and_then(|v| v.berths.get(&b.name)) else { continue };
+        let r = berth_rect(cam, screen, b.at, b.offset_px);
+        d.shapes.push(Shape::rect_filled(r, CornerRadius::ZERO, BG));
+        d.texts.push(TextItem {
+            at: r.center(),
+            anchor: Align2::CENTER_CENTER,
+            text: h.clone(),
+            size: HEADCODE_PX,
+            colour: if b.fringe { FRINGE } else { HEADCODE },
+            monospace: true,
+        });
     }
     for s in &scene.signals {
         signal_shapes(&mut d, s, cam, screen, st);
@@ -434,20 +461,6 @@ pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawi
                 monospace: true,
             });
         }
-    }
-    // Headcodes in the track, on a black knock-out; an empty berth is not drawn.
-    for b in &scene.berths {
-        let Some(h) = st.view.and_then(|v| v.berths.get(&b.name)) else { continue };
-        let r = berth_rect(cam, screen, b.at, b.offset_px);
-        d.shapes.push(Shape::rect_filled(r, CornerRadius::ZERO, BG));
-        d.texts.push(TextItem {
-            at: r.center(),
-            anchor: Align2::CENTER_CENTER,
-            text: h.clone(),
-            size: HEADCODE_PX,
-            colour: if b.fringe { FRINGE } else { HEADCODE },
-            monospace: true,
-        });
     }
     for l in &scene.labels {
         let at = to(l.at);
