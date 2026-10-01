@@ -37,14 +37,14 @@
       "wait_for": {"route_set": {"entrance": "5", "exit": {"kind": "signal", "name": "7"}}}
     },
     {
-      "say": "Beside KA5 is a small blue circle marked A: the auto-working button. Click it. It fills in, and the route from KA5 now stays set after each train, so the trains behind get a clear signal without you setting it again. Auto-working suits plain line with no junction.",
+      "say": "Beside KA5 is a small blue circle marked A: the auto-working button. Click it. It fills in, and the route from KA5 now stays set after each train, so the trains behind get a clear signal without you setting it again. Auto-working suits plain line with no junction. (If the route has already gone, set KA5 to KB7 again first, then click the circle.)",
       "highlight": [{"ui": "auto:5"}],
       "wait_for": {"auto_working": {"signal": "5", "on": true}}
     },
     {
-      "say": "Watch 1K01 run on into Lowfield. As it passes KA5 its headcode steps into Lowfield's berth: the train is handed over to the next box, here the robot, which signals it from now on.",
+      "say": "1K01 has run on into Lowfield. As it passed KA5 its headcode stepped into Lowfield's berth: the train was handed over to the next box, here the robot, which signals it from now on. Press Next.",
       "highlight": [{"berth": "B7"}],
-      "wait_for": {"train_left_area": {"headcode": "1K01"}}
+      "wait_for": {"all": [{"train_left_area": {"headcode": "1K01"}}, {"continue": {}}]}
     },
     {
       "say": "The junction is free again. Set KA3 to KA5 for 2K02. You need not set KA5 again: auto-working keeps it set.",

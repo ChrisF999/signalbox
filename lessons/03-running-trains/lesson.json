@@ -40,7 +40,7 @@
       "wait_for": {"train_at": {"headcode": "2H05", "place": "HXC", "platform": "2"}}
     },
     {
-      "say": "2H05 is at platform 2. It leaves when its time comes, but only if its signal is clear. Set the route out: H7 to H9.",
+      "say": "2H05 is at platform 2. It leaves when its time comes, but only if its signal is clear. Set the route out: H7 to H9. It is booked to leave at 08:05, so it may wait a little; 2x or 4x beside the clock speeds time up.",
       "highlight": [{"signal": "7"}, {"exit": {"kind": "signal", "name": "9"}}],
       "wait_for": {"route_set": {"entrance": "7", "exit": {"kind": "signal", "name": "9"}}}
     },
@@ -50,7 +50,7 @@
       "wait_for": {"train_left_area": {"headcode": "2H05"}}
     },
     {
-      "say": "Well done. A train that runs behind its booked time is late: the train list shows +minutes and the simplifier shows how late (OT means on time). In a real game late trains cost penalty points; tutorials keep no score. Next lesson: junctions, auto-working and handing trains to the next box. Press Next to finish.",
+      "say": "Well done. A train that runs behind its booked time is late: the train list shows +minutes and the simplifier shows how late (OT on time, 3L three minutes late). In a real game late trains cost penalty points; tutorials keep no score. Next lesson: junctions, auto-working and handing trains to the next box. Press Next to finish.",
       "wait_for": {"continue": {}}
     }
   ]

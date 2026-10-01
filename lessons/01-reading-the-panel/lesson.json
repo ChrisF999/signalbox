@@ -19,7 +19,7 @@
       "wait_for": {"continue": {}}
     },
     {
-      "say": "The orange block is platform 1 at Saltmarsh station; its number is written on it. You can point at any part of the track to read its name and whether a train is on it.",
+      "say": "The ochre block is platform 1 at Saltmarsh station; its number is written on it. You can point at any part of the track to read its name and whether a train is on it.",
       "highlight": [{"platform": {"place": "SLT", "platform": "1"}}],
       "wait_for": {"continue": {}}
     },
@@ -41,7 +41,7 @@
       "wait_for": {"all": [{"route_set": {"entrance": "1", "exit": {"kind": "signal", "name": "3"}}}, {"continue": {}}]}
     },
     {
-      "say": "On a real panel a signal shows only red (stop) or green (go). Open Settings at the top and choose Real aspects: the signals then show what the driver sees, with yellow meaning 'the next signal is red'. Switch back to Red/green if you like, then press Next.",
+      "say": "On a signal box panel a signal shows only red (stop) or green (go). Open Settings at the top and choose Real aspects to see what the driver sees: with yellow meaning 'the next signal is red'. Switch back to Red/green if you like, then press Next.",
       "highlight": [{"ui": "settings"}],
       "wait_for": {"continue": {}}
     },
