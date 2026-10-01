@@ -20,6 +20,7 @@ fn status() -> StatusMsg {
         holders: BTreeMap::from([(s("East"), None), (s("West"), Some(s("ann")))]),
         players: vec![PlayerStatus { name: s("ann"), connected: true }],
         counters: Counters { player_commands: 3, robot_commands: 9, save_busy_ms: 12, ..Counters::default() },
+        preparing: None,
     }
 }
 
@@ -128,4 +129,17 @@ async fn garbage_and_wrong_shapes_are_json_errors() {
         let r: Result<Option<ToGame>, _> = read_frame(&mut &bytes[..]).await;
         assert!(matches!(r, Err(IpcError::Json(_))), "{:?}: {r:?}", String::from_utf8_lossy(body));
     }
+}
+
+/// While a game is prepared its status says so; older statuses still read.
+#[test]
+fn a_preparing_status() {
+    let st = StatusMsg { preparing: Some(protocol::Preparing { from: 20400.0, to: 27000.0 }), ..status() };
+    let v = serde_json::to_value(FromGame::Status(st.clone())).unwrap();
+    assert_eq!(v["preparing"], json!({"from": 20400.0, "to": 27000.0}));
+    assert_eq!(serde_json::from_value::<FromGame>(v).unwrap(), FromGame::Status(st));
+    let mut old = serde_json::to_value(FromGame::Status(status())).unwrap();
+    assert!(old.get("preparing").is_none());
+    old.as_object_mut().unwrap().remove("preparing");
+    assert_eq!(serde_json::from_value::<FromGame>(old).unwrap(), FromGame::Status(status()));
 }

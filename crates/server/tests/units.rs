@@ -157,6 +157,7 @@ fn the_placeholder_page_escapes_every_name() {
         error: Some("<b>bad</b>".into()),
         creator: None,
         can_delete: false,
+        preparing: None,
     }];
     let page = index_page("a<b", &games, &[LayoutInfo { name: "drain".into(), areas: vec![] }]);
     assert!(!page.contains("<script>") && !page.contains("<b>bad"), "{page}");

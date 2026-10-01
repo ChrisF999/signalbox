@@ -11,6 +11,7 @@ pub mod view;
 pub use diff::{SeqGap, diff};
 pub use lesson::{Highlight, LessonInfo, LessonView};
 pub use lobby::{AreaHolder, ClientFrame, FrameError, GameInfo, GameState, LayoutInfo, LobbyMsg, LobbyReply, ServerFrame};
+pub use lobby::Preparing;
 pub use msg::{ClientMsg, ExitName, Notice, PlayerCommand, Proposal, ServerMsg};
 pub use signalbox_core::aspect::Aspect;
 pub use signalbox_core::events::Rejection;
@@ -43,4 +44,7 @@ pub mod codes {
     pub const UNKNOWN_LESSON: &str = "unknown_lesson";
     /// `claim` or `release` in a tutorial: its player keeps the lesson's area.
     pub const IN_LESSON: &str = "in_lesson";
+    /// A game created with a later start could not be prepared within the
+    /// time allowed (timetables spec P8); it was not created.
+    pub const SEED_TOO_SLOW: &str = "seed_too_slow";
 }

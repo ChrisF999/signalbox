@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use protocol::{ClientMsg, ServerMsg};
+use protocol::{ClientMsg, Preparing, ServerMsg};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -48,6 +48,10 @@ pub struct StatusMsg {
     pub holders: BTreeMap<String, Option<String>>,
     pub players: Vec<PlayerStatus>,
     pub counters: Counters,
+    /// The game is still being prepared (timetables spec §3.4): nobody
+    /// plays until a status without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preparing: Option<Preparing>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

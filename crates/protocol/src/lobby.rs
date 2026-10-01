@@ -81,6 +81,19 @@ pub struct GameInfo {
     /// Whether the user this list was sent to may delete it now.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub can_delete: bool,
+    /// A new game still being prepared (timetables spec §3.4): joining
+    /// waits until it is ready.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preparing: Option<Preparing>,
+}
+
+/// A game created later than its timetable's start is run there by the
+/// robot first: from `from` to `to`, seconds since midnight; meanwhile the
+/// game's `sim_time` is how far it has got.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Preparing {
+    pub from: f64,
+    pub to: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -610,6 +610,7 @@ impl Supervisor {
                     error: None,
                     creator: s.creator.clone(),
                     can_delete: false,
+                    preparing: None,
                 },
                 Err(e) => GameInfo {
                     id: id.clone(),
@@ -621,6 +622,7 @@ impl Supervisor {
                     error: Some(e.clone()),
                     creator: None,
                     can_delete: false,
+                    preparing: None,
                 },
             };
             out.insert(id.clone(), info);
@@ -641,6 +643,7 @@ impl Supervisor {
                 error: None,
                 creator: None,
                 can_delete: false,
+                preparing: None,
             });
             info.layout = e.layout.clone();
             match &e.phase {

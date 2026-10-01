@@ -167,6 +167,7 @@ pub fn status_msg(st: &GameStatus) -> StatusMsg {
             robot_commands: n(st.stats.robot_commands),
             save_busy_ms: st.save_busy.as_millis() as u64,
         },
+        preparing: None,
     }
 }
 

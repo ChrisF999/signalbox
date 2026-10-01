@@ -146,6 +146,7 @@ fn the_lobby_lists_games_and_creates_one() {
         error: Some(s("disk full")),
         creator: Some(s("bob")),
         can_delete: false,
+        preparing: None,
     };
     r.h.push(ServerFrame::Lobby(LobbyReply::Games { games: vec![info] }));
     r.frame();
@@ -173,6 +174,7 @@ fn deleting_a_game_asks_first() {
         error: None,
         creator: Some(s("ann")),
         can_delete,
+        preparing: None,
     };
     r.h.push(ServerFrame::Lobby(LobbyReply::Games { games: vec![game("g-mine", true), game("g-theirs", false)] }));
     r.frame();

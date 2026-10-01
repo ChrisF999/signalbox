@@ -82,6 +82,7 @@ fn the_lobby_lists_games_and_layouts_and_sends_what_you_ask() {
         error: None,
         creator: Some(s("bob")),
         can_delete: false,
+        preparing: None,
     };
     h.push(ServerFrame::Lobby(LobbyReply::Games { games: vec![info.clone()] }));
     h.push(ServerFrame::Lobby(LobbyReply::Layouts { layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West")] }] }));

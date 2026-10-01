@@ -94,6 +94,7 @@ fn lobby_replies() {
                     error: None,
                     creator: None,
                     can_delete: false,
+                    preparing: None,
                 },
                 GameInfo {
                     id: s("g-zzzzzzzzzzzz"),
@@ -105,6 +106,7 @@ fn lobby_replies() {
                     error: Some(s("resume: bad snapshot")),
                     creator: Some(s("sam")),
                     can_delete: true,
+                    preparing: None,
                 },
             ],
         }),
@@ -230,4 +232,34 @@ fn frames_are_objects() {
     }
     let e = ServerFrame::from_json(r#"{"type": "delta", "seq": 1, "seq": 2}"#).unwrap_err();
     assert!(matches!(&e, FrameError::BadMessage(m) if m.contains("duplicate field")), "{e}");
+}
+
+/// A game still being prepared (timetables spec §3.4): `preparing` is
+/// additive, and a list without it still reads.
+#[test]
+fn a_preparing_game() {
+    let info = GameInfo {
+        id: s("g-abcdefgh2345"),
+        layout: s("drain"),
+        state: GameState::Running,
+        sim_time: 21000.0,
+        areas: vec![],
+        players: vec![],
+        error: None,
+        creator: Some(s("ann")),
+        can_delete: false,
+        preparing: Some(Preparing { from: 20400.0, to: 27000.0 }),
+    };
+    check_server(
+        ServerFrame::Lobby(LobbyReply::Games { games: vec![info.clone()] }),
+        json!({"type": "games", "games": [
+            {"id": "g-abcdefgh2345", "layout": "drain", "state": "running", "sim_time": 21000.0,
+             "areas": [], "players": [], "creator": "ann", "preparing": {"from": 20400.0, "to": 27000.0}}
+        ]}),
+    );
+    let old = json!({"id": "g-abcdefgh2345", "layout": "drain", "state": "running", "sim_time": 21000.0,
+                     "areas": [], "players": []});
+    let read: GameInfo = serde_json::from_value(old).unwrap();
+    assert_eq!(read.preparing, None);
+    assert_eq!(codes::SEED_TOO_SLOW, "seed_too_slow");
 }
