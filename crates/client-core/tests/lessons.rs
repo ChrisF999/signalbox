@@ -238,3 +238,16 @@ fn normal_games_keep_their_stopped_and_rejoin_texts() {
     app.tick(2.7);
     assert_eq!(app.lobby_note(), Some("Could not rejoin the game: no game `g-one`"));
 }
+
+/// Polish spec M9: a tutorial ends when you leave, so Leave never releases
+/// the lesson's area first.
+#[test]
+fn leaving_a_tutorial_while_holding_its_area_sends_only_leave() {
+    let mut t = Table::new("ann", Some("West"));
+    t.h.push(lesson(0, false));
+    t.app.tick(0.1);
+    assert_eq!(t.app.game().unwrap().area(), Some("West"));
+    t.h.take_sent();
+    t.app.leave();
+    assert_eq!(t.h.take_sent(), [ClientFrame::Lobby(LobbyMsg::Leave)]);
+}

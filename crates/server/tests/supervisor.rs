@@ -750,11 +750,21 @@ async fn games_list(sock: &Sock) -> Vec<GameInfo> {
     games.clone()
 }
 
+/// The games list as `sock` asks for it now. Lists pushed as games changed
+/// (polish spec M9) may be waiting or still being built: once no push is
+/// pending, everything before a `layouts` marker is dropped, so the list read
+/// is this request's answer or a push built after it.
 async fn listed(rig: &Rig, sock: &Sock) -> Vec<GameInfo> {
-    // Lists the lobby was sent as holders and players changed (polish spec
-    // M9) may be waiting: drop them, so the answer read is this request's.
-    while let Ok(Some(_)) = timeout(Duration::from_millis(100), sock.me.outbox.pop()).await {}
+    for _ in 0..1000 {
+        if rig.sup.games_pushes_settled() {
+            break;
+        }
+        sleep(Duration::from_millis(10)).await;
+    }
+    assert!(rig.sup.games_pushes_settled(), "a games list push never finished");
+    rig.lobby(sock, LobbyMsg::ListLayouts);
     rig.lobby(sock, LobbyMsg::ListGames);
+    until(sock, |f| matches!(f, ServerFrame::Lobby(LobbyReply::Layouts { .. }))).await;
     games_list(sock).await
 }
 
@@ -1456,4 +1466,66 @@ async fn the_lobby_is_not_sent_a_list_every_second() {
     let got = drain_for(&cat, Duration::from_millis(2500)).await;
     assert!(!got.iter().any(is_games), "{got:?}");
     rig.sup.shutdown_all(Duration::from_secs(10)).await;
+}
+
+/// Polish spec M9 (review M1): the games list for the lobby is built off the
+/// game's reader, so a slow save scan never holds up that game's frames.
+#[tokio::test]
+async fn a_slow_lobby_scan_never_holds_up_the_games_frames() {
+    let rig = rig("lobbyslow", 600);
+    rig.sup.slow_games_scans(Duration::from_secs(2));
+    let ann = rig.attach("ann");
+    let id = create(&rig, &ann).await;
+    let cat = rig.attach("cat");
+    rig.game_msg(&ann, ClientMsg::Claim { area: s("West") });
+    let start = tokio::time::Instant::now();
+    let mut slowest = Duration::ZERO;
+    while start.elapsed() < Duration::from_millis(3500) {
+        let asked = tokio::time::Instant::now();
+        rig.game_msg(&ann, ClientMsg::Resync);
+        until(&ann, is_view).await;
+        sleep(Duration::from_millis(100)).await;
+        // The front runs on one thread: a scan on it would stall this loop
+        // too, wherever it waits, so the whole round is timed.
+        slowest = slowest.max(asked.elapsed());
+    }
+    assert!(slowest < Duration::from_millis(1000), "a round took {slowest:?}");
+    let held = |f: &ServerFrame| match f {
+        ServerFrame::Lobby(LobbyReply::Games { games }) => {
+            games.iter().any(|g| g.id == id && g.areas.iter().any(|a| a.holder.as_deref() == Some("ann")))
+        }
+        _ => false,
+    };
+    until(&cat, held).await;
+    rig.sup.shutdown_all(Duration::from_secs(10)).await;
+}
+
+/// Review M1: changes while a list is being built share one more scan, and
+/// only one scan runs at a time.
+#[tokio::test]
+async fn a_burst_of_changes_shares_one_more_scan() {
+    let rig = rig("lobbyburst", 600);
+    let bad: Vec<String> = ["a", "b", "d", "e", "f", "g"].iter().map(|c| format!("g-cccccccccc{c}{c}")).collect();
+    for id in &bad {
+        std::fs::write(rig.saves().join(format!("{id}.sqlite")), "this is not a database").unwrap();
+    }
+    let cat = rig.attach("cat");
+    let root = rig.attach("root");
+    rig.sup.slow_games_scans(Duration::from_secs(1));
+    // The first delete starts a scan; the rest come while it runs.
+    rig.lobby(&root, LobbyMsg::DeleteGame { game: bad[0].clone() });
+    sleep(Duration::from_millis(300)).await;
+    for id in &bad[1..] {
+        rig.lobby(&root, LobbyMsg::DeleteGame { game: id.clone() });
+    }
+    let mut lists = Vec::new();
+    let end = tokio::time::Instant::now() + Duration::from_millis(4000);
+    while let Ok(Some(f)) = tokio::time::timeout_at(end, cat.me.outbox.pop()).await {
+        if let ServerFrame::Lobby(LobbyReply::Games { games }) = f {
+            lists.push((tokio::time::Instant::now(), games));
+        }
+    }
+    assert_eq!(lists.len(), 2, "the first scan and one more: {lists:?}");
+    assert!(lists[1].0 - lists[0].0 >= Duration::from_millis(900), "one scan at a time");
+    assert!(lists[1].1.is_empty(), "the last list is current: {:?}", lists[1].1);
 }

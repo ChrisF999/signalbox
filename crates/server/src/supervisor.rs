@@ -100,6 +100,17 @@ struct State {
     games: BTreeMap<String, Entry>,
     /// Shutting down: no new games.
     closing: bool,
+    /// A games-list push is being built (`push_games`).
+    scanning: bool,
+    /// Who the next games-list push goes to, if one is due.
+    push_due: Option<Audience>,
+}
+
+/// Who a games-list push goes to; one for everyone covers the lobby.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Audience {
+    Lobby,
+    Everyone,
 }
 
 enum Start {
@@ -116,6 +127,8 @@ pub struct Supervisor {
     lessons: Lessons,
     state: Mutex<State>,
     next_conn: AtomicU64,
+    /// Added to every games-list scan for a push (tests: a slow disk).
+    scan_delay_ms: AtomicU64,
 }
 
 fn frame(msg: LobbyReply) -> ServerFrame {
@@ -226,7 +239,8 @@ impl Supervisor {
         private_dir(&cfg.sockets_dir)?;
         sweep_half_built(&cfg.saves_dir);
         let state = Mutex::new(State::default());
-        Ok(Arc::new(Supervisor { cfg, layouts, lessons, state, next_conn: AtomicU64::new(0) }))
+        let (next_conn, scan_delay_ms) = (AtomicU64::new(0), AtomicU64::new(0));
+        Ok(Arc::new(Supervisor { cfg, layouts, lessons, state, next_conn, scan_delay_ms }))
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -546,7 +560,7 @@ impl Supervisor {
 
     /// Delete a saved or crashed game: its save file and the SQLite files
     /// beside it, and a crashed game's entry. Everyone gets the new list.
-    fn delete_game(&self, user: &str, conn: u64, game: String) {
+    fn delete_game(self: &Arc<Self>, user: &str, conn: u64, game: String) {
         if !valid_game_id(&game) {
             return self.reply(user, conn, ServerFrame::error(codes::UNKNOWN_GAME, format!("no game `{game}`")));
         }
@@ -595,25 +609,66 @@ impl Supervisor {
         games
     }
 
-    /// Every client gets the games list, as they may act on it.
-    fn broadcast_games(&self) {
-        let games = self.list_games();
-        let st = self.lock();
-        for (user, c) in &st.clients {
-            push(&st, user, c, frame(LobbyReply::Games { games: self.for_user(games.clone(), user) }));
-        }
+    /// Tests: every games-list scan for a push takes `d` longer (a slow disk).
+    pub fn slow_games_scans(&self, d: Duration) {
+        self.scan_delay_ms.store(d.as_millis() as u64, Ordering::Relaxed);
     }
 
-    /// The games list to every client in the lobby (not in a game). Nobody
-    /// there: nothing is built, so no save is read (ruling D1).
-    fn broadcast_lobby_games(&self) {
-        if !self.lock().clients.values().any(|c| c.game.is_none()) {
-            return;
-        }
-        let games = self.list_games();
+    /// No games-list push is being built or waiting to be.
+    pub fn games_pushes_settled(&self) -> bool {
         let st = self.lock();
-        for (user, c) in st.clients.iter().filter(|(_, c)| c.game.is_none()) {
-            push(&st, user, c, frame(LobbyReply::Games { games: self.for_user(games.clone(), user) }));
+        !st.scanning && st.push_due.is_none()
+    }
+
+    /// Every client gets the games list, as they may act on it.
+    fn broadcast_games(self: &Arc<Self>) {
+        self.push_games(Audience::Everyone);
+    }
+
+    /// The games list to every client in the lobby (not in a game).
+    fn broadcast_lobby_games(self: &Arc<Self>) {
+        self.push_games(Audience::Lobby);
+    }
+
+    /// The games list is built on a blocking thread, never on the caller's
+    /// task: it reads every save, and the front runs on one thread (polish
+    /// spec M9, review M1). One build at a time; whatever asks for a push
+    /// meanwhile shares one more, built after it.
+    fn push_games(self: &Arc<Self>, to: Audience) {
+        {
+            let mut st = self.lock();
+            st.push_due = st.push_due.max(Some(to));
+            if st.scanning {
+                return;
+            }
+            st.scanning = true;
+        }
+        let sup = self.clone();
+        tokio::task::spawn_blocking(move || sup.push_games_while_due());
+    }
+
+    fn push_games_while_due(&self) {
+        let to_whom = |to: Audience, c: &Client| to == Audience::Everyone || c.game.is_none();
+        loop {
+            let to = {
+                let mut st = self.lock();
+                let Some(to) = st.push_due.take() else {
+                    st.scanning = false;
+                    return;
+                };
+                // Nobody to tell: nothing is built, so no save is read
+                // (ruling D1).
+                if !st.clients.values().any(|c| to_whom(to, c)) {
+                    continue;
+                }
+                to
+            };
+            std::thread::sleep(Duration::from_millis(self.scan_delay_ms.load(Ordering::Relaxed)));
+            let games = self.list_games();
+            let st = self.lock();
+            for (user, c) in st.clients.iter().filter(|(_, c)| to_whom(to, c)) {
+                push(&st, user, c, frame(LobbyReply::Games { games: self.for_user(games.clone(), user) }));
+            }
         }
     }
 
@@ -845,7 +900,7 @@ impl Supervisor {
 
     /// Frames from a game until it closes its socket; `Some(why)` if it
     /// sent something unreadable.
-    async fn read_game(&self, id: &str, rd: &mut OwnedReadHalf) -> Option<String> {
+    async fn read_game(self: &Arc<Self>, id: &str, rd: &mut OwnedReadHalf) -> Option<String> {
         loop {
             match read_frame::<_, FromGame>(rd).await {
                 Ok(Some(m)) => self.from_game(id, m),
@@ -855,7 +910,7 @@ impl Supervisor {
         }
     }
 
-    fn from_game(&self, id: &str, m: FromGame) {
+    fn from_game(self: &Arc<Self>, id: &str, m: FromGame) {
         match m {
             FromGame::ToPlayer { player, msg } => {
                 let st = self.lock();
@@ -924,7 +979,7 @@ impl Supervisor {
     /// out of time, P8; `why` is `None` when it was stopped, as the front
     /// stops): it has no save and leaves the live table, and whoever was
     /// waiting in it goes back to the lobby with why.
-    fn not_created(&self, id: &str, too_slow: bool, why: Option<String>) {
+    fn not_created(self: &Arc<Self>, id: &str, too_slow: bool, why: Option<String>) {
         eprintln!("[{id}] not created: {}", why.as_deref().unwrap_or("stopped before it was ready"));
         let detail = |why: &str, prefix: &str| {
             let why = why.strip_prefix("signalbox-game: ").unwrap_or(why);
