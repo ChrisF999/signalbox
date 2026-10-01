@@ -437,3 +437,129 @@ fn a_fringe_signals_post_stays_grey_while_a_route_is_set_from_it() {
     assert!(lines_of(&d, FRINGE, POST_W).contains(&post), "{:?}", lines_of(&d, FRINGE, POST_W));
     assert!(!lines_of(&d, ROUTE, POST_W).contains(&post));
 }
+
+// ---- berths, the auto button, platforms, labels and arrows ----
+
+fn knockouts(d: &Drawing) -> Vec<Rect> {
+    d.shapes
+        .iter()
+        .filter_map(|s| match s {
+            Shape::Rect(rs) if rs.fill == BG && rs.rect.width() == client_ui::hit::BERTH_W => Some(rs.rect),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn headcodes_sit_in_the_track_behind_their_signal_and_empty_berths_are_not_drawn() {
+    let mut r = Rig::new(Some("West"));
+    assert!(knockouts(&r.idle()).is_empty(), "no headcodes, nothing drawn");
+    r.view.berths.insert(s("BA"), s("2Z99"));
+    let d = r.idle();
+    let centre = r.at(200.0, 0.0) - vec2(client_ui::scene::BERTH_BACK_PX, 0.0);
+    assert_eq!(knockouts(&d).len(), 1);
+    assert!(close(knockouts(&d)[0].center(), centre), "on the track, on A's approach side");
+    let t = d.texts.iter().find(|t| t.text == "2Z99").unwrap();
+    assert_eq!((t.colour, t.monospace, t.size, t.at), (HEADCODE, true, HEADCODE_PX, knockouts(&d)[0].center()));
+}
+
+#[test]
+fn a_boundary_berth_sits_inside_its_boundary() {
+    let mut r = Rig::new(Some("West"));
+    r.view.berths.insert(s("BW"), s("1E01"));
+    let d = r.idle();
+    assert!(close(knockouts(&d)[0].center(), r.at(0.0, 0.0) + vec2(client_ui::scene::BERTH_BACK_PX, 0.0)));
+}
+
+#[test]
+fn fringe_headcodes_are_grey() {
+    let mut r = Rig::new(Some("East"));
+    r.view.berths.insert(s("BA"), s("1E01"));
+    r.view.berths.insert(s("BC"), s("2W03"));
+    let d = r.idle();
+    assert_eq!(d.texts.iter().find(|t| t.text == "1E01").unwrap().colour, FRINGE, "BA is West's");
+    assert_eq!(d.texts.iter().find(|t| t.text == "2W03").unwrap().colour, HEADCODE);
+}
+
+#[test]
+fn automatic_signals_carry_a_blue_auto_button_hollow_off_filled_on() {
+    let mut l = layout_for(Some("West"));
+    l.routes[0].automatic = true;
+    let mut r = Rig::of(l, view_for(Some("West")));
+    let c = r.disc("W1") + vec2(client_ui::hit::AUTO_AHEAD_PX, 0.0);
+    let d = r.idle();
+    assert!(circles(&d).contains(&(c, AUTO_R, Color32::TRANSPARENT, AUTO)), "hollow: {:?}", circles(&d));
+    let a = d.texts.iter().find(|t| t.text == "A").unwrap();
+    assert_eq!((a.colour, a.anchor, a.at), (AUTO, Align2::LEFT_CENTER, c + vec2(AUTO_R + 2.0, 0.0)));
+    r.view.routes.insert(s("W1-A"), RouteView { state: RouteState::Locked, auto_working: true });
+    assert!(circles(&r.idle()).contains(&(c, AUTO_R, AUTO, Color32::TRANSPARENT)), "filled while auto-working");
+    assert_eq!(r.idle().texts.iter().filter(|t| t.text == "A").count(), 1, "only W1 is automatic");
+}
+
+#[test]
+fn platforms_are_ochre_blocks_with_their_number() {
+    let r = Rig::new(Some("East"));
+    let d = r.idle();
+    let blocks: Vec<Rect> = d
+        .shapes
+        .iter()
+        .filter_map(|s| match s {
+            Shape::Rect(rs) if rs.fill == PLATFORM => Some(rs.rect),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(blocks.len(), 2);
+    let numbers: Vec<(&str, Color32)> = d.texts.iter().filter(|t| blocks.iter().any(|b| b.center() == t.at)).map(|t| (t.text.as_str(), t.colour)).collect();
+    assert_eq!(numbers, [("1", BG), ("1", BG)], "the number in black inside");
+}
+
+#[test]
+fn labels_are_grey_capitals_and_a_line_name_carries_its_arrow() {
+    let mut l = layout_for(Some("West"));
+    l.geometry.as_mut().unwrap().labels.push(LabelGeom { text: s("Up Main"), x: 150.0, y: -12.0, arrow: Some([-1.0, 0.0]) });
+    let r = Rig::of(l, view_for(Some("West")));
+    let d = r.idle();
+    let west = d.texts.iter().find(|t| t.text == "WEST").unwrap();
+    assert_eq!((west.colour, west.anchor), (LABEL, Align2::LEFT_TOP));
+    let up = d.texts.iter().find(|t| t.text == "UP MAIN").unwrap();
+    let p = r.at(150.0, -12.0);
+    assert_eq!((up.anchor, up.at), (Align2::LEFT_CENTER, p + vec2(3.0, 0.0)), "text right of the arrow, which points left");
+    let tip = |s: &Shape| match s {
+        Shape::Path(path) if path.fill == LABEL => Some(path.points[0]),
+        _ => None,
+    };
+    assert!(d.shapes.iter().filter_map(tip).any(|t| close(t, p - vec2(ARROW_PX, 0.0))), "the arrow starts at the point and points out");
+    assert!(!d.texts.iter().any(|t| t.text.contains(['→', '←', '○', '●'])), "arrows and circles are shapes, never glyphs");
+}
+
+#[test]
+fn arrows_go_at_loose_ends_and_along_long_runs() {
+    assert!(arrow_stops(59.0, true, true).is_empty(), "too short to carry one");
+    assert_eq!(arrow_stops(100.0, true, false), [ARROW_INSET_PX]);
+    assert_eq!(arrow_stops(100.0, false, false), Vec::<f32>::new(), "a short run between points has none");
+    assert_eq!(arrow_stops(1000.0, true, true), [ARROW_INSET_PX, 400.0, 1000.0 - ARROW_INSET_PX]);
+    assert_eq!(arrow_stops(900.0, false, false), [400.0], "800 would crowd the end");
+    assert!(arrow_stops(f32::NAN, true, true).is_empty());
+}
+
+/// West's run: a double arrow 24 px in from W, beside the bar, on the
+/// right of the run's forward direction (below it: +x runs right).
+#[test]
+fn every_running_line_gets_direction_arrows() {
+    let r = Rig::new(Some("West"));
+    let d = r.idle();
+    let tips: Vec<Pos2> = d
+        .shapes
+        .iter()
+        .filter_map(|s| match s {
+            Shape::Path(p) if p.fill == LABEL => Some(p.points[0]),
+            _ => None,
+        })
+        .collect();
+    let c = r.at(0.0, 0.0) + vec2(ARROW_INSET_PX, r.w() / 2.0 + ARROW_OFF_PX);
+    let off = ARROW_PX / 2.0 + 1.0 + ARROW_PX / 2.0;
+    assert!(tips.len() >= 2 && tips.len() % 2 == 0, "double arrows only: {tips:?}");
+    assert!(tips.iter().any(|t| close(*t, c + vec2(off, 0.0))) && tips.iter().any(|t| close(*t, c - vec2(off, 0.0))), "{tips:?}");
+    let total = r.at(200.0, 0.0).x - r.at(0.0, 0.0).x;
+    assert_eq!(tips.len(), 2 * arrow_stops(total, true, false).len(), "one per stop along the {total} px run");
+}

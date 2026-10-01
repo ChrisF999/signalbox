@@ -2,7 +2,7 @@
 
 mod common;
 
-use client_ui::scene::{BOUNDARY_BERTH_OFFSET_PX, Scene};
+use client_ui::scene::{BERTH_BACK_PX, Run, Scene};
 use common::*;
 use egui::{Rect, Vec2, pos2, vec2};
 
@@ -20,15 +20,21 @@ fn an_area_scene_marks_its_fringe_and_what_it_can_work() {
         signals,
         [("W1", vec2(1.0, 0.0), false, true), ("A", vec2(1.0, 0.0), false, true), ("W2", vec2(-1.0, 0.0), false, true)]
     );
-    let berths: Vec<(&str, Vec2)> = sc.berths.iter().map(|b| (b.name.as_str(), b.offset_px)).collect();
+    let berths: Vec<(&str, egui::Pos2, Vec2)> = sc.berths.iter().map(|b| (b.name.as_str(), b.at, b.offset_px)).collect();
+    let back = BERTH_BACK_PX;
     assert_eq!(
         berths,
-        [("BW1", Vec2::ZERO), ("BA", Vec2::ZERO), ("BW2", Vec2::ZERO), ("BW", BOUNDARY_BERTH_OFFSET_PX)],
-        "signal berths at their boxes, the boundary berth above its exit"
+        [
+            ("BW1", pos2(100.0, 0.0), vec2(-back, 0.0)),
+            ("BA", pos2(200.0, 0.0), vec2(-back, 0.0)),
+            ("BW2", pos2(100.0, 0.0), vec2(back, 0.0)),
+            ("BW", pos2(0.0, 0.0), vec2(back, 0.0)),
+        ],
+        "in the track behind each signal; the boundary berth inside W"
     );
     let exits: Vec<(&str, egui::Pos2)> = sc.exits.iter().map(|e| (e.node.as_str(), e.at)).collect();
     assert_eq!(exits, [("E", pos2(400.0, 0.0)), ("N", pos2(400.0, 60.0)), ("W", pos2(0.0, 0.0))]);
-    assert_eq!(sc.labels.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["West"]);
+    assert_eq!(sc.labels.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["WEST"], "labels in capitals");
     assert_eq!(sc.own, Some(Rect::from_min_max(pos2(0.0, -5.0), pos2(200.0, 5.0))), "own track and signals");
     assert_eq!(sc.fit_bounds(), sc.own);
     assert_eq!(sc.all, Some(Rect::from_min_max(pos2(0.0, -5.0), pos2(207.5, 5.0))));
@@ -42,7 +48,7 @@ fn the_neighbours_signals_are_fringe() {
     let c = sc.signals.iter().find(|s| s.name == "C").unwrap();
     assert!(!c.fringe && c.operable);
     assert!(sc.points[0].operable && !sc.points[0].fringe);
-    assert_eq!(sc.platforms.iter().map(|p| p.label.as_str()).collect::<Vec<_>>(), ["EST 1", "NST 1"]);
+    assert_eq!(sc.platforms.iter().map(|p| p.label.as_str()).collect::<Vec<_>>(), ["1", "1"], "the platform number");
 }
 
 #[test]
@@ -128,4 +134,43 @@ fn signals_stand_on_their_line_and_know_their_routes() {
     let sc = Scene::build(&l).unwrap();
     let a = sc.signals.iter().find(|s| s.name == "A").unwrap();
     assert_eq!(a.base, a.at, "no line of its own drawn: the post starts at the signal");
+}
+
+/// West sees w1 and w2 joined at J0 (only those two segments meet there),
+/// ending at the boundary W and at J1 (where the points' leg pa goes on).
+/// W1 and A face along it, W2 against it: a double arrow.
+#[test]
+fn drawn_lines_chain_into_runs_with_the_directions_of_their_signals() {
+    let sc = Scene::build(&layout_for(Some("West"))).unwrap();
+    assert_eq!(
+        sc.runs,
+        [Run {
+            points: vec![pos2(0.0, 0.0), pos2(100.0, 0.0), pos2(200.0, 0.0)],
+            forward: true,
+            backward: true,
+            loose_start: true,
+            loose_end: false,
+        }]
+    );
+    let sc = Scene::build(&layout_for(None)).unwrap();
+    let e = sc.runs.iter().find(|r| r.points[0] == pos2(215.0, 0.0)).expect("e, drawn from J2 to E");
+    assert_eq!((e.forward, e.backward, e.loose_start, e.loose_end), (false, true, false, true), "C faces back towards P; E is an end");
+    let mut l = layout_for(Some("West"));
+    for s in &mut l.geometry.as_mut().unwrap().signals {
+        s.facing = None;
+    }
+    let sc = Scene::build(&l).unwrap();
+    assert!(!sc.runs[0].forward && !sc.runs[0].backward, "no facings, no arrows");
+}
+
+#[test]
+fn a_line_names_arrow_is_kept_as_a_unit_vector() {
+    let mut l = layout_for(Some("West"));
+    let labels = &mut l.geometry.as_mut().unwrap().labels;
+    labels.push(protocol::LabelGeom { text: s("down main"), x: 10.0, y: -12.0, arrow: Some([2.0, 0.0]) });
+    labels.push(protocol::LabelGeom { text: s("bad"), x: 10.0, y: -30.0, arrow: Some([f64::NAN, 0.0]) });
+    let sc = Scene::build(&l).unwrap();
+    let down = sc.labels.iter().find(|l| l.text == "DOWN MAIN").unwrap();
+    assert_eq!(down.arrow, Some(vec2(1.0, 0.0)));
+    assert_eq!(sc.labels.iter().find(|l| l.text == "BAD").unwrap().arrow, None, "a nonsense arrow is dropped");
 }

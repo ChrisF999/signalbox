@@ -1,11 +1,11 @@
-//! What is under the pointer: signals first, then berths, exits, points
+//! What is under the pointer: ○A buttons and signals first, then berths, exits, points
 //! and finally track, each within a fixed distance in pixels.
 
 use client_core::Target;
 use egui::{Pos2, Rect, vec2};
 
 use crate::camera::Camera;
-use crate::paint::{HOOK_PX, LAMP_R, POST_PX, left_of};
+use crate::paint::{AUTO_R, HOOK_PX, LAMP_R, POST_PX, left_of};
 use crate::scene::{Scene, SignalMark, project};
 
 /// How near (pixels) the pointer must be to a signal, exit, points or track.
@@ -31,6 +31,19 @@ pub fn signal_disc(cam: &Camera, screen: Rect, s: &SignalMark) -> Pos2 {
     cam.to_screen(screen, s.base) + left_of(s.facing) * POST_PX + s.facing * (HOOK_PX + LAMP_R)
 }
 
+/// Where the ○A button of an automatic signal is: `AUTO_AHEAD_PX` ahead of
+/// its lamp (past a second yellow); `None` for other signals.
+pub fn auto_button(cam: &Camera, screen: Rect, s: &SignalMark) -> Option<Pos2> {
+    if s.auto_routes.is_empty() {
+        return None;
+    }
+    let ahead = if s.facing == egui::Vec2::ZERO { vec2(1.0, 0.0) } else { s.facing };
+    Some(signal_disc(cam, screen, s) + ahead * AUTO_AHEAD_PX)
+}
+
+/// How far ahead of its lamp an automatic signal's ○A button sits.
+pub const AUTO_AHEAD_PX: f32 = 16.0;
+
 /// The berth box on screen.
 pub fn berth_rect(cam: &Camera, screen: Rect, at: Pos2, offset_px: egui::Vec2) -> Rect {
     Rect::from_center_size(cam.to_screen(screen, at) + offset_px, vec2(BERTH_W, BERTH_H))
@@ -49,6 +62,11 @@ where
 
 pub fn hit_test(scene: &Scene, cam: &Camera, screen: Rect, p: Pos2) -> Option<Hit> {
     let at = |q: Pos2| cam.to_screen(screen, q);
+    // The ○A buttons first: they sit just ahead of their lamps.
+    let button = |s: &SignalMark| auto_button(cam, screen, s).map(|c| c.distance(p)).filter(|d| *d <= AUTO_R + 2.0);
+    if let Some(s) = scene.signals.iter().filter_map(|s| Some((s, button(s)?))).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(s, _)| s) {
+        return Some(Hit { target: Target::Auto(s.name.clone()), clickable: s.operable });
+    }
     // A signal is its disc, the foot of its post, and its own point.
     let signal_dist =
         |s: &SignalMark| signal_disc(cam, screen, s).distance(p).min(at(s.base).distance(p)).min(at(s.at).distance(p));

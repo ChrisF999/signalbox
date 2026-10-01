@@ -239,7 +239,11 @@ fn the_auto_button_is_the_menus_auto_working_command() {
     assert_eq!(select::describe_auto(&l, &v, "S1"), "Auto-working S1: on");
     let mut theirs = l.clone();
     theirs.signals[0].operable = false;
+    theirs.signals[0].area = s("B");
     assert_eq!(select::auto_toggle(&theirs, &v, "S1"), None, "not on the fringe or for a spectator");
+    assert_eq!(select::describe_auto(&theirs, &v, "S1"), "Auto-working S1 (B): on", "whose it is, as a signal's hover says");
+    theirs.area = None;
+    assert_eq!(select::describe_auto(&theirs, &v, "S1"), "Auto-working S1 (B): on", "a spectator's too");
 }
 
 #[test]

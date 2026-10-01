@@ -4,7 +4,7 @@ mod common;
 
 use client_core::Target;
 use client_ui::camera::Camera;
-use client_ui::hit::{BERTH_H, HIT_PX, Hit, berth_rect, hit_test, signal_disc};
+use client_ui::hit::{AUTO_AHEAD_PX, BERTH_H, HIT_PX, Hit, auto_button, berth_rect, hit_test, signal_disc};
 use client_ui::scene::Scene;
 use common::*;
 use egui::{Pos2, Rect, pos2, vec2};
@@ -30,7 +30,9 @@ fn signals_berths_exits_points_and_track() {
     assert_eq!(hit_test(&sc, &cam, screen, at(&cam, screen, 200.0, -5.0)), hit(Target::Signal(s("A")), true));
     let near = at(&cam, screen, 200.0, -5.0) + vec2(HIT_PX - 1.0, 0.0);
     assert_eq!(hit_test(&sc, &cam, screen, near), hit(Target::Signal(s("A")), true), "within the radius");
-    assert_eq!(hit_test(&sc, &cam, screen, at(&cam, screen, 190.0, -15.0)), hit(Target::Berth(s("BA")), true));
+    let ba = sc.berths.iter().find(|b| b.name == "BA").unwrap();
+    let ba = berth_rect(&cam, screen, ba.at, ba.offset_px).center();
+    assert_eq!(hit_test(&sc, &cam, screen, ba), hit(Target::Berth(s("BA")), true), "in the track behind A");
     let bw = berth_rect(&cam, screen, pos2(0.0, 0.0), sc.berths[3].offset_px);
     assert_eq!(hit_test(&sc, &cam, screen, bw.center()), hit(Target::Berth(s("BW")), true));
     assert_eq!(hit_test(&sc, &cam, screen, at(&cam, screen, 0.0, 0.0)), hit(Target::Exit(s("W")), true), "under the berth box");
@@ -74,4 +76,19 @@ fn a_spectator_cannot_click_an_exit_marker() {
     let (sc, cam, screen) = setup(None);
     let w = sc.exits.iter().find(|e| e.node == "W").unwrap().at;
     assert_eq!(hit_test(&sc, &cam, screen, at(&cam, screen, w.x, w.y)), hit(Target::Exit(s("W")), false));
+}
+
+#[test]
+fn the_auto_button_is_its_own_target() {
+    let mut l = layout_for(Some("West"));
+    l.routes[0].automatic = true;
+    let sc = Scene::build(&l).unwrap();
+    let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 600.0));
+    let cam = Camera::fit(sc.all.unwrap(), screen);
+    let w1 = sc.signals.iter().find(|s| s.name == "W1").unwrap();
+    let c = auto_button(&cam, screen, w1).expect("W1 has an automatic route");
+    assert_eq!(c, signal_disc(&cam, screen, w1) + vec2(AUTO_AHEAD_PX, 0.0));
+    assert_eq!(hit_test(&sc, &cam, screen, c), hit(Target::Auto(s("W1")), true));
+    assert_eq!(hit_test(&sc, &cam, screen, signal_disc(&cam, screen, w1)), hit(Target::Signal(s("W1")), true));
+    assert_eq!(auto_button(&cam, screen, sc.signals.iter().find(|s| s.name == "A").unwrap()), None);
 }

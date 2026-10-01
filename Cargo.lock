@@ -3579,6 +3579,7 @@ dependencies = [
  "signalbox-core",
  "signalbox-game",
  "signalbox-protocol",
+ "ts2-import",
 ]
 
 [[package]]

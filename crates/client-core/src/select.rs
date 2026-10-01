@@ -108,9 +108,12 @@ pub fn auto_working(l: &Layout, v: &View, signal: &str) -> bool {
     l.routes.iter().any(|r| r.automatic && r.entrance == signal && v.routes.get(&r.name).is_some_and(|rv| rv.auto_working))
 }
 
+/// The ○A button's hover: its state, and whose signal it is when not yours
+/// (as a signal's hover says), so a dead click on it is explained.
 pub fn describe_auto(l: &Layout, v: &View, signal: &str) -> String {
     let state = if auto_working(l, v, signal) { "on" } else { "off" };
-    format!("Auto-working {}: {state}", Names::new(l).signal(signal))
+    let area = l.signals.iter().find(|s| s.name == signal).map(|s| area_note(l, &s.area)).unwrap_or_default();
+    format!("Auto-working {}{area}: {state}", Names::new(l).signal(signal))
 }
 
 pub fn points_menu(l: &Layout, v: &View, points: &str) -> Vec<MenuItem> {

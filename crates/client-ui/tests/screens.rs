@@ -270,7 +270,8 @@ fn a_click_on_nothing_or_on_what_you_cannot_work_clears_the_entrance() {
 #[test]
 fn right_click_opens_the_menu_for_what_is_under_the_pointer() {
     let mut r = Rig::in_game(drawn_twobox(), Some("West"));
-    let ba = r.at(190.0, -15.0);
+    // BA is in the track 24 px behind A (its signal at x 200, facing right).
+    let ba = r.at(200.0, 0.0) - vec2(client_ui::scene::BERTH_BACK_PX, 0.0);
     r.click(ba, PointerButton::Secondary);
     let out = r.frame();
     assert!(has_text(&out, "Berth BA: empty"), "{:?}", texts(&out));

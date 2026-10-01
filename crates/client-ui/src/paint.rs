@@ -1,17 +1,18 @@
 //! Drawing the diagram as an IECC workstation shows it (realism spec §2):
 //! black background, thick grey track broken at every track-circuit joint,
 //! white routes and overlaps, red occupation, signals as discs on hooked
-//! posts. Colour only ever means state. `draw` is pure (shapes and text in
-//! screen pixels, testable without a GPU or fonts); `paint` hands them to an
-//! egui `Painter`.
+//! posts, cyan headcodes in the track, blue ○A buttons, ochre platforms,
+//! grey capital labels and direction arrows. Colour only ever means state.
+//! `draw` is pure (shapes and text in screen pixels, testable without a GPU
+//! or fonts); `paint` hands them to an egui `Painter`.
 
 use client_core::{AspectMode, Names};
 use egui::{Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, Vec2, vec2};
 use protocol::{Aspect, ExitName, Held, PointsPos, RouteState, SectionView, View};
 
 use crate::camera::Camera;
-use crate::hit::{berth_rect, signal_disc};
-use crate::scene::{PointsMark, Scene, SignalMark, TrackLine};
+use crate::hit::{auto_button, berth_rect, signal_disc};
+use crate::scene::{PointsMark, Run, Scene, SignalMark, TrackLine};
 
 pub const BG: Color32 = Color32::from_rgb(0x00, 0x00, 0x00);
 pub const TRACK_FREE: Color32 = Color32::from_rgb(0x7D, 0x7D, 0x7D);
@@ -58,6 +59,19 @@ pub const NUMBER_MAX_PX: f32 = 11.0;
 pub const NUMBER_MIN_PX: f32 = 7.0;
 /// Where the non-lying leg of points starts, as a fraction of its length.
 pub const GAP: f32 = 0.5;
+/// The ○A button's circle.
+pub const AUTO_R: f32 = 4.0;
+/// Headcodes: text size in pixels.
+pub const HEADCODE_PX: f32 = 11.0;
+/// Direction arrows: a triangle this long, this far off the bar, at loose
+/// ends (inset) and every so often along runs long enough to carry one.
+pub const ARROW_PX: f32 = 7.0;
+pub const ARROW_OFF_PX: f32 = 6.0;
+pub const ARROW_INSET_PX: f32 = 24.0;
+pub const ARROW_EVERY_PX: f32 = 400.0;
+pub const ARROW_MIN_RUN_PX: f32 = 60.0;
+/// Labels: text size in pixels.
+pub const LABEL_PX: f32 = 11.0;
 
 pub fn track_w(scale: f32) -> f32 {
     let w = TRACK_UNITS * scale;
@@ -230,6 +244,73 @@ pub fn left_of(facing: Vec2) -> Vec2 {
     vec2(facing.y, -facing.x)
 }
 
+/// A filled triangle `ARROW_PX` long centred on `c`, pointing along `dir`.
+pub fn arrow(c: Pos2, dir: Vec2, colour: Color32) -> Shape {
+    let half = ARROW_PX / 2.0;
+    let side = vec2(-dir.y, dir.x) * half;
+    Shape::convex_polygon(vec![c + dir * half, c - dir * half + side, c - dir * half - side], colour, Stroke::NONE)
+}
+
+/// The point `dist` pixels along a polyline, and the direction there.
+fn along(points: &[Pos2], dist: f32) -> Option<(Pos2, Vec2)> {
+    let mut left = dist;
+    for w in points.windows(2) {
+        let d = w[1] - w[0];
+        let len = d.length();
+        if len > 0.0 && left <= len {
+            return Some((w[0] + d * (left / len), d / len));
+        }
+        left -= len;
+    }
+    None
+}
+
+/// Where a run's arrows go (distances along it on screen): inset from each
+/// loose end, and every `ARROW_EVERY_PX`, not crowding the end ones.
+pub fn arrow_stops(total: f32, loose_start: bool, loose_end: bool) -> Vec<f32> {
+    if total < ARROW_MIN_RUN_PX || !total.is_finite() {
+        return vec![];
+    }
+    let mut ends = Vec::new();
+    if loose_start {
+        ends.push(ARROW_INSET_PX);
+    }
+    if loose_end {
+        ends.push(total - ARROW_INSET_PX);
+    }
+    let mut stops = ends.clone();
+    let mut d = ARROW_EVERY_PX;
+    while d <= total - ARROW_EVERY_PX / 2.0 {
+        if ends.iter().all(|e| (e - d).abs() >= ARROW_EVERY_PX / 2.0) {
+            stops.push(d);
+        }
+        d += ARROW_EVERY_PX;
+    }
+    stops.sort_by(f32::total_cmp);
+    stops
+}
+
+fn run_arrows(out: &mut Vec<Shape>, run: &Run, to: &dyn Fn(Pos2) -> Pos2, w: f32) {
+    if !run.forward && !run.backward {
+        return;
+    }
+    let pts: Vec<Pos2> = run.points.iter().map(|&p| to(p)).collect();
+    let total: f32 = pts.windows(2).map(|p| p[0].distance(p[1])).sum();
+    for stop in arrow_stops(total, run.loose_start, run.loose_end) {
+        let Some((p, dir)) = along(&pts, stop) else { continue };
+        // Beside the bar, on the right of the run's forward direction.
+        let c = p + vec2(-dir.y, dir.x) * (w / 2.0 + ARROW_OFF_PX);
+        match (run.forward, run.backward) {
+            (true, true) => {
+                out.push(arrow(c + dir * (ARROW_PX / 2.0 + 1.0), dir, LABEL));
+                out.push(arrow(c - dir * (ARROW_PX / 2.0 + 1.0), -dir, LABEL));
+            }
+            (true, false) => out.push(arrow(c, dir, LABEL)),
+            _ => out.push(arrow(c, -dir, LABEL)),
+        }
+    }
+}
+
 /// Which way text beside a disc hangs, from the side it is on.
 fn anchor_towards(v: Vec2) -> Align2 {
     if v.y.abs() >= v.x.abs() {
@@ -309,13 +390,16 @@ pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawi
     for p in &scene.platforms {
         let r = Rect::from_two_pos(to(p.rect.min), to(p.rect.max));
         d.shapes.push(Shape::rect_filled(r, CornerRadius::ZERO, PLATFORM));
-        d.texts.push(TextItem { at: r.center(), anchor: Align2::CENTER_CENTER, text: p.label.clone(), size: 9.0, colour: LABEL, monospace: false });
+        d.texts.push(TextItem { at: r.center(), anchor: Align2::CENTER_CENTER, text: p.label.clone(), size: 9.0, colour: BG, monospace: false });
     }
     for t in &scene.tracks {
         track_shapes(&mut d, t, &to, st, w);
     }
     for p in &scene.points {
         points_shapes(&mut d.shapes, p, &to, st, track_colour(section(&p.section)), w);
+    }
+    for r in &scene.runs {
+        run_arrows(&mut d.shapes, r, &to, w);
     }
     for e in &scene.exits {
         let lit = st.exits.contains(&ExitName::Node(e.node.clone()));
@@ -331,35 +415,51 @@ pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawi
     }
     for s in &scene.signals {
         signal_shapes(&mut d, s, cam, screen, st);
-        if !s.auto_routes.is_empty() {
+        // The ○A button: hollow while nothing auto-works, filled while it does.
+        if let Some(c) = auto_button(cam, screen, s) {
             let on = st.view.is_some_and(|v| s.auto_routes.iter().any(|r| v.routes.get(r).is_some_and(|rv| rv.auto_working)));
+            let colour = if s.fringe { FRINGE } else { AUTO };
+            d.shapes.push(if on {
+                Shape::circle_filled(c, AUTO_R, colour)
+            } else {
+                Shape::circle_stroke(c, AUTO_R, Stroke::new(1.5, colour))
+            });
+            let ahead = if s.facing == Vec2::ZERO { vec2(1.0, 0.0) } else { s.facing };
             d.texts.push(TextItem {
-                at: signal_disc(cam, screen, s) + vec2(LAMP_R + 3.0, -(LAMP_R + 3.0)),
-                anchor: Align2::LEFT_BOTTOM,
+                at: c + vec2(if ahead.x < 0.0 { -(AUTO_R + 2.0) } else { AUTO_R + 2.0 }, 0.0),
+                anchor: if ahead.x < 0.0 { Align2::RIGHT_CENTER } else { Align2::LEFT_CENTER },
                 text: "A".into(),
                 size: 9.0,
-                colour: if s.fringe { FRINGE } else if on { ROUTE } else { AUTO },
+                colour,
                 monospace: true,
             });
         }
     }
+    // Headcodes in the track, on a black knock-out; an empty berth is not drawn.
     for b in &scene.berths {
+        let Some(h) = st.view.and_then(|v| v.berths.get(&b.name)) else { continue };
         let r = berth_rect(cam, screen, b.at, b.offset_px);
-        let outline = if b.fringe { FRINGE } else { TRACK_FREE };
-        d.shapes.push(Shape::rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.0, outline), StrokeKind::Middle));
-        if let Some(h) = st.view.and_then(|v| v.berths.get(&b.name)) {
-            d.texts.push(TextItem {
-                at: r.center(),
-                anchor: Align2::CENTER_CENTER,
-                text: h.clone(),
-                size: 11.0,
-                colour: if b.fringe { FRINGE } else { HEADCODE },
-                monospace: true,
-            });
-        }
+        d.shapes.push(Shape::rect_filled(r, CornerRadius::ZERO, BG));
+        d.texts.push(TextItem {
+            at: r.center(),
+            anchor: Align2::CENTER_CENTER,
+            text: h.clone(),
+            size: HEADCODE_PX,
+            colour: if b.fringe { FRINGE } else { HEADCODE },
+            monospace: true,
+        });
     }
     for l in &scene.labels {
-        d.texts.push(TextItem { at: to(l.at), anchor: Align2::LEFT_TOP, text: l.text.clone(), size: 11.0, colour: LABEL, monospace: false });
+        let at = to(l.at);
+        match l.arrow {
+            None => d.texts.push(TextItem { at, anchor: Align2::LEFT_TOP, text: l.text.clone(), size: LABEL_PX, colour: LABEL, monospace: false }),
+            // A line name: the arrow at the point, pointing out; the text on the other side.
+            Some(dir) => {
+                d.shapes.push(arrow(at + dir * (ARROW_PX / 2.0), dir, LABEL));
+                let (anchor, gap) = if dir.x < 0.0 { (Align2::LEFT_CENTER, 3.0) } else { (Align2::RIGHT_CENTER, -3.0) };
+                d.texts.push(TextItem { at: at + vec2(gap, 0.0), anchor, text: l.text.clone(), size: LABEL_PX, colour: LABEL, monospace: false });
+            }
+        }
     }
     d
 }

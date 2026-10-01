@@ -72,7 +72,8 @@ pub struct SignalMark {
 pub struct BerthMark {
     pub name: String,
     pub at: Pos2,
-    /// Drawn this far from `at` on screen (boundary berths sit above their exit).
+    /// Drawn this far from `at` on screen: behind its signal along the
+    /// track, or inside the track from its boundary.
     pub offset_px: Vec2,
     pub fringe: bool,
     pub operable: bool,
@@ -91,17 +92,37 @@ pub struct ExitMark {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlatformMark {
     pub rect: Rect,
+    /// The platform number, drawn inside the block.
     pub label: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LabelMark {
+    /// In capitals, as IECC labels are.
     pub text: String,
     pub at: Pos2,
+    /// A line name's direction of travel (unit), drawn as an arrow at `at`.
+    pub arrow: Option<Vec2>,
 }
 
-/// Where a boundary berth's box is drawn relative to its exit node.
+/// A stretch of drawn track through plain joints (nodes where exactly two
+/// visible segments meet, both drawn), for the direction arrows.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Run {
+    /// Line ends in running order.
+    pub points: Vec<Pos2>,
+    /// Signals on it face along `points` / against it.
+    pub forward: bool,
+    pub backward: bool,
+    /// Its first / last end is where your visible track stops.
+    pub loose_start: bool,
+    pub loose_end: bool,
+}
+
+/// Where a boundary berth is drawn when no track ends at its node.
 pub const BOUNDARY_BERTH_OFFSET_PX: Vec2 = vec2(0.0, -18.0);
+/// How far (pixels) behind its signal, or inside its boundary, a berth sits.
+pub const BERTH_BACK_PX: f32 = 24.0;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Scene {
@@ -112,6 +133,7 @@ pub struct Scene {
     pub exits: Vec<ExitMark>,
     pub platforms: Vec<PlatformMark>,
     pub labels: Vec<LabelMark>,
+    pub runs: Vec<Run>,
     /// Bounds of your own area's drawing (`None` for a spectator).
     pub own: Option<Rect>,
     /// Bounds of everything drawn.
@@ -216,24 +238,32 @@ impl Scene {
         for s in &g.signals {
             let (Some(at), Some(info)) = (pt(s.x, s.y), l.signals.iter().find(|i| i.name == s.signal)) else { continue };
             let facing = s.facing.map(|[x, y]| vec2(x as f32, y as f32)).filter(|v| v.length() > 0.0 && v.is_finite());
+            let facing = facing.map_or(Vec2::ZERO, Vec2::normalized);
             let base = line_of.get(info.segment.as_str()).map_or(at, |&(a, b)| project(at, a, b));
             sc.signals.push(SignalMark {
                 name: s.signal.clone(),
                 at,
                 base,
                 routes: l.routes.iter().filter(|r| r.entrance == s.signal).map(|r| r.name.clone()).collect(),
-                facing: facing.map_or(Vec2::ZERO, Vec2::normalized),
+                facing,
                 fringe: other_area(&info.area),
                 operable: info.operable,
                 auto_routes: l.routes.iter().filter(|r| r.automatic && r.entrance == s.signal).map(|r| r.name.clone()).collect(),
                 route_exit: exit_of_yours(&ExitName::Signal(s.signal.clone())),
             });
             for b in l.berths.iter().filter(|b| b.signal.as_deref() == Some(s.signal.as_str())) {
-                if let Some(bat) = pt(s.berth_x, s.berth_y) {
+                // In the track on the approach side of its signal; where the
+                // facing is unknown, at TS2's own berth position.
+                let (bat, offset_px) = if facing == Vec2::ZERO {
+                    (pt(s.berth_x, s.berth_y), Vec2::ZERO)
+                } else {
+                    (Some(base), -facing * BERTH_BACK_PX)
+                };
+                if let Some(bat) = bat {
                     sc.berths.push(BerthMark {
                         name: b.name.clone(),
                         at: bat,
-                        offset_px: Vec2::ZERO,
+                        offset_px,
                         fringe: other_area(&b.area),
                         operable: b.operable,
                     });
@@ -265,27 +295,46 @@ impl Scene {
                 });
             }
         }
+        // Into the track that ends at a point, if one does.
+        let inward = |p: Pos2| {
+            sc.tracks.iter().find_map(|t| {
+                let d = if t.a.distance(p) < 0.5 {
+                    t.b - t.a
+                } else if t.b.distance(p) < 0.5 {
+                    t.a - t.b
+                } else {
+                    return None;
+                };
+                (d.length() > 0.0).then(|| d.normalized())
+            })
+        };
+        let mut boundary_berths = Vec::new();
         for b in &l.berths {
             if let Some(&at) = b.boundary.as_deref().and_then(|n| node_at.get(n)) {
-                sc.berths.push(BerthMark {
+                boundary_berths.push(BerthMark {
                     name: b.name.clone(),
                     at,
-                    offset_px: BOUNDARY_BERTH_OFFSET_PX,
+                    offset_px: inward(at).map_or(BOUNDARY_BERTH_OFFSET_PX, |d| d * BERTH_BACK_PX),
                     fringe: other_area(&b.area),
                     operable: b.operable,
                 });
             }
         }
+        sc.berths.extend(boundary_berths);
         for p in &g.platforms {
             if let (Some(a), Some(b)) = (pt(p.x1, p.y1), pt(p.x2, p.y2)) {
-                sc.platforms.push(PlatformMark { rect: Rect::from_two_pos(a, b), label: format!("{} {}", p.place, p.platform) });
+                sc.platforms.push(PlatformMark { rect: Rect::from_two_pos(a, b), label: p.platform.clone() });
             }
         }
         for t in &g.labels {
             if let Some(at) = pt(t.x, t.y) {
-                sc.labels.push(LabelMark { text: t.text.clone(), at });
+                let arrow = t.arrow.map(|[x, y]| vec2(x as f32, y as f32)).filter(|v| v.is_finite() && v.length() > 0.0);
+                sc.labels.push(LabelMark { text: t.text.to_uppercase(), at, arrow: arrow.map(Vec2::normalized) });
             }
         }
+        let signal_segment: BTreeMap<&str, &str> = l.signals.iter().map(|s| (s.name.as_str(), s.segment.as_str())).collect();
+        let ends: Vec<Pos2> = sc.exits.iter().map(|e| e.at).collect();
+        sc.runs = runs(&sc.tracks, &at_node, &seg_of, &sc.signals, &signal_segment, &ends);
         for t in &sc.tracks {
             grow(&mut sc.all, t.a);
             grow(&mut sc.all, t.b);
@@ -310,4 +359,90 @@ impl Scene {
     pub fn fit_bounds(&self) -> Option<Rect> {
         self.own.or(self.all)
     }
+}
+
+/// Chain drawn lines into runs through plain joints, and give each run the
+/// directions its signals face. A run's end is loose where your visible
+/// track stops: no other segment meets it, or it is a route's exit (a
+/// buffer stop or boundary, often behind an undrawn spacer in TS2 data).
+fn runs(
+    tracks: &[TrackLine],
+    at_node: &BTreeMap<&str, Vec<(&str, &str)>>,
+    seg_of: &BTreeMap<&str, (&str, &str, &str)>,
+    signals: &[SignalMark],
+    signal_segment: &BTreeMap<&str, &str>,
+    exits: &[Pos2],
+) -> Vec<Run> {
+    let index: BTreeMap<&str, usize> = tracks.iter().enumerate().map(|(i, t)| (t.segment.as_str(), i)).collect();
+    // (from, to) node of each drawn line's segment (every drawn line has one).
+    let ends: Vec<(&str, &str)> = tracks.iter().map(|t| seg_of.get(t.segment.as_str()).map_or(("", ""), |e| (e.1, e.2))).collect();
+    // The drawn line continuing line `i` through `node`, if the node is a plain joint.
+    let next = |node: &str, i: usize| -> Option<usize> {
+        let segs = at_node.get(node)?;
+        if segs.len() != 2 {
+            return None;
+        }
+        let other = segs.iter().find(|(g, _)| *g != tracks[i].segment)?;
+        index.get(other.0).copied()
+    };
+    let loose = |node: &str| at_node.get(node).is_none_or(|s| s.len() <= 1);
+    let mut seen = vec![false; tracks.len()];
+    let mut out = Vec::new();
+    for start in 0..tracks.len() {
+        if seen[start] {
+            continue;
+        }
+        seen[start] = true;
+        // (line, reversed): a reversed line is walked from its `to` node.
+        let mut chain = std::collections::VecDeque::from([(start, false)]);
+        loop {
+            let &(i, rev) = chain.back().expect("never empty");
+            let exit = if rev { ends[i].0 } else { ends[i].1 };
+            match next(exit, i).filter(|&k| !seen[k]) {
+                Some(k) => {
+                    seen[k] = true;
+                    chain.push_back((k, ends[k].0 != exit));
+                }
+                None => break,
+            }
+        }
+        loop {
+            let &(i, rev) = chain.front().expect("never empty");
+            let entry = if rev { ends[i].1 } else { ends[i].0 };
+            match next(entry, i).filter(|&k| !seen[k]) {
+                Some(k) => {
+                    seen[k] = true;
+                    chain.push_front((k, ends[k].1 != entry));
+                }
+                None => break,
+            }
+        }
+        let walked = |&(i, rev): &(usize, bool)| if rev { (tracks[i].b, tracks[i].a) } else { (tracks[i].a, tracks[i].b) };
+        let mut points = Vec::new();
+        for step in &chain {
+            let (a, b) = walked(step);
+            if points.last() != Some(&a) {
+                points.push(a);
+            }
+            points.push(b);
+        }
+        let (mut forward, mut backward) = (false, false);
+        for s in signals.iter().filter(|s| s.facing != Vec2::ZERO) {
+            let Some(step) = signal_segment.get(s.name.as_str()).and_then(|g| chain.iter().find(|(i, _)| tracks[*i].segment == *g)) else {
+                continue;
+            };
+            let (a, b) = walked(step);
+            let along = s.facing.dot(b - a);
+            forward |= along > 0.0;
+            backward |= along < 0.0;
+        }
+        let (first, last) = (chain.front().expect("never empty"), chain.back().expect("never empty"));
+        let start_node = if first.1 { ends[first.0].1 } else { ends[first.0].0 };
+        let end_node = if last.1 { ends[last.0].0 } else { ends[last.0].1 };
+        let at_exit = |p: Option<&Pos2>| p.is_some_and(|p| exits.iter().any(|e| e.distance(*p) < 1.0));
+        let loose_start = loose(start_node) || at_exit(points.first());
+        let loose_end = loose(end_node) || at_exit(points.last());
+        out.push(Run { points, forward, backward, loose_start, loose_end });
+    }
+    out
 }
