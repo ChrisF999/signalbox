@@ -22,6 +22,19 @@ pub fn first_time(r: &SimplifierRow) -> Option<f64> {
     r.calls.iter().find_map(|c| c.arr.or(c.dep))
 }
 
+/// When the row's last listed call is booked (departure, else arrival).
+pub fn last_time(r: &SimplifierRow) -> Option<f64> {
+    r.calls.iter().rev().find_map(|c| c.dep.or(c.arr))
+}
+
+/// The line the simplifier opens at (polish spec §7): the first line of the
+/// first row not yet finished at `now_s` (its last booked call at or after
+/// now, or no times at all), counting each row's lines as `lines` makes
+/// them. Past the last line when every row has run.
+pub fn now_line(rows: &[&SimplifierRow], now_s: f64) -> usize {
+    rows.iter().take_while(|r| last_time(r).is_some_and(|t| t < now_s)).map(|r| r.calls.len().max(1)).sum()
+}
+
 /// Rows whose headcode or display headcode contains `search` (trimmed,
 /// any case), in running order: by first call (untimed last), then
 /// headcode, else as sent.

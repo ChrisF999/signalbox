@@ -3,7 +3,7 @@
 mod common;
 
 use client_core::Target;
-use client_core::simplifier::{Line, enquiry, fmt_wtt, lateness, lines, resolve, rows};
+use client_core::simplifier::{Line, enquiry, fmt_wtt, lateness, lines, now_line, resolve, rows};
 use common::*;
 use protocol::*;
 
@@ -126,4 +126,21 @@ fn a_typed_display_headcode_finds_its_running_train() {
     assert_eq!(resolve(&l, Some(v), "1N02"), "1N02", "a headcode is itself");
     assert_eq!(resolve(&l, Some(v), "9Z99"), "9Z99");
     assert_eq!(resolve(&l, None, "E1"), "E1");
+}
+
+/// Polish spec §7: the simplifier opens at the first train not yet finished.
+#[test]
+fn the_simplifier_opens_at_the_first_train_not_yet_finished() {
+    let row = |h: &str, times: &[f64]| SimplifierRow {
+        headcode: s(h),
+        origin: None,
+        destination: None,
+        calls: times.iter().map(|&t| call("X", None, Some(t), Some(t), true)).collect(),
+    };
+    let (a, b, c, u) = (row("1A01", &[100.0, 200.0]), row("1A02", &[150.0]), row("1A03", &[300.0, 400.0, 500.0]), row("1A04", &[]));
+    let rows = vec![&a, &b, &c, &u];
+    assert_eq!(now_line(&rows, 0.0), 0);
+    assert_eq!(now_line(&rows, 160.0), 0, "1A01 is still running");
+    assert_eq!(now_line(&rows, 250.0), 3, "after 1A01's two lines and 1A02's one");
+    assert_eq!(now_line(&rows, 600.0), 6, "a row with no times never finishes");
 }

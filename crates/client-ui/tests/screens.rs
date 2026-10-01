@@ -741,3 +741,29 @@ fn the_diagram_never_draws_text_over_text() {
     }
     assert!(overlaps.is_empty(), "{overlaps:?}");
 }
+
+/// Polish spec §7: half an hour into Drain's TS2 timetable the simplifier
+/// opens at the trains still running, not at 06:00's.
+#[test]
+fn the_simplifier_opens_at_now() {
+    let dir = env!("CARGO_MANIFEST_DIR");
+    let w = ts2_import::convert(&std::fs::read_to_string(format!("{dir}/../ts2-import/tests/data/drain.json")).unwrap()).unwrap().world;
+    let mut r = Rig::in_game(signalbox_core::world::World::from_file(w).unwrap(), None);
+    r.game.handle("ann", ClientMsg::Vote { proposal: Proposal::Speed { x: 8 } });
+    for _ in 0..225 {
+        r.game.advance(1.0); // 06:00 to 06:30 at 8x
+    }
+    for (p, m) in r.game.resync("ann") {
+        if p == "ann" {
+            r.h.push(ServerFrame::Game(m));
+        }
+    }
+    r.frame();
+    let out = r.frame();
+    click_text(&mut r, &out, "SIMPLIFIER");
+    r.frame();
+    let out = r.frame();
+    let side = side_texts(&r, &out);
+    assert!(!side.iter().any(|t| t == "BW01"), "BW01 ran at 06:00: {side:?}");
+    assert!(side.iter().any(|t| t == "BW06") && side.iter().any(|t| t == "BW07"), "06:30's trains: {side:?}");
+}

@@ -99,6 +99,8 @@ pub struct UiApp {
     /// Where the diagram's texts go, for (game, layout generation, scale
     /// bits, numbers on): made again only on a zoom or a settings change.
     placement: Option<(PlacementKey, Plan)>,
+    /// The simplifier line to scroll to once, set when its lines are built.
+    simplifier_scroll: Option<usize>,
     /// The lessons completed in this browser.
     ticks: LessonTicks,
     /// Where the ticks are kept between visits (none in most tests).
@@ -128,6 +130,7 @@ impl UiApp {
             shown_game: None,
             simplifier_lines: None,
             placement: None,
+            simplifier_scroll: None,
             ticks: LessonTicks::default(),
             ticks_store: None,
         }
@@ -469,6 +472,10 @@ impl UiApp {
             mark(ui, &trains, lit.contains(&Highlight::Ui("trains".into())), now);
             let simplifier = ui.selectable_value(&mut self.side_tab, SideTab::Simplifier, RichText::new("SIMPLIFIER").strong());
             mark(ui, &simplifier, lit.contains(&Highlight::Ui("simplifier".into())), now);
+            if simplifier.clicked() {
+                // Opened again: build the lines afresh and scroll to now.
+                self.simplifier_lines = None;
+            }
         });
         let half = ui.available_height() * 0.5;
         match self.side_tab {
@@ -575,7 +582,9 @@ impl UiApp {
         let Some(l) = g.layout() else { return };
         let key = (g.layout_gen(), self.search.clone());
         if self.simplifier_lines.as_ref().map(|(k, _)| k) != Some(&key) {
-            let lines = simplifier::rows(l, &self.search)
+            let rows = simplifier::rows(l, &self.search);
+            self.simplifier_scroll = g.view().map(|v| simplifier::now_line(&rows, v.sim_time));
+            let lines = rows
                 .into_iter()
                 .flat_map(|r| simplifier::lines(r).into_iter().enumerate().map(|(i, line)| (line, i == 0)))
                 .collect();
@@ -590,7 +599,11 @@ impl UiApp {
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 4.0;
         let header = ["Train", "Late", "From", "To", "At", "Plat", "Arr", "Dep"];
         simplifier_row(ui, row_h, header.map(|h| RichText::new(h).strong()));
-        egui::ScrollArea::vertical().id_salt("simplifier").max_height(height).show_rows(ui, row_h, lines.len(), |ui, range| {
+        let mut area = egui::ScrollArea::vertical().id_salt("simplifier").max_height(height);
+        if let Some(line) = self.simplifier_scroll.take() {
+            area = area.vertical_scroll_offset(line as f32 * (row_h + ui.spacing().item_spacing.y));
+        }
+        area.show_rows(ui, row_h, lines.len(), |ui, range| {
             for (line, first) in &lines[range] {
                 let late = if *first { simplifier::lateness(v, &line.headcode) } else { None };
                 let late = late.as_deref().unwrap_or("");
