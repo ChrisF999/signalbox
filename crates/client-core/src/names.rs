@@ -31,7 +31,7 @@ impl Names {
 
     /// How a headcode is shown: its display headcode, else as it is.
     pub fn headcode<'a>(&'a self, headcode: &'a str) -> &'a str {
-        self.headcodes.get(headcode).map_or(headcode, String::as_str)
+        shown_headcode(&self.headcodes, headcode)
     }
 
     /// How a signal is shown; a name the layout does not list stays plain.
@@ -52,4 +52,11 @@ impl Names {
     pub fn workstation(&self, area: &str) -> Option<&str> {
         self.workstations.get(area).map(String::as_str).filter(|l| !l.is_empty())
     }
+}
+
+/// How `headcode` is shown given a layout's `display_headcodes`: its
+/// display headcode, else as it is (`Names::headcode` without building
+/// `Names`).
+pub fn shown_headcode<'a>(display: &'a BTreeMap<String, String>, headcode: &'a str) -> &'a str {
+    display.get(headcode).map_or(headcode, String::as_str)
 }

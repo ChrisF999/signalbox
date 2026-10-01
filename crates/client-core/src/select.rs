@@ -6,7 +6,7 @@
 
 use protocol::{Aspect, ExitName, Held, Layout, PlayerCommand, PointsPos, RouteInfo, RouteState, View};
 
-use crate::names::Names;
+use crate::names::{Names, shown_headcode};
 use crate::text::pos_text;
 
 /// What a left click on a signal or an exit node does.
@@ -150,11 +150,6 @@ pub fn points_menu(l: &Layout, v: &View, points: &str) -> Vec<MenuItem> {
     vec![MenuItem { label: format!("Swing {points} {}", pos_text(to)), cmd: PlayerCommand::SwingPoints { points: points.to_string(), to } }]
 }
 
-/// How a headcode is shown (`Names::headcode`, without building `Names`).
-fn shown_headcode<'a>(l: &'a Layout, h: &'a str) -> &'a str {
-    l.display_headcodes.get(h).map_or(h, String::as_str)
-}
-
 /// Cancelling a berth's headcode; interposing needs a headcode typed in,
 /// so the screen offers it separately (`operable_berth`).
 pub fn berth_menu(l: &Layout, v: &View, berth: &str) -> Vec<MenuItem> {
@@ -163,7 +158,7 @@ pub fn berth_menu(l: &Layout, v: &View, berth: &str) -> Vec<MenuItem> {
     }
     match v.berths.get(berth) {
         Some(h) => vec![MenuItem {
-            label: format!("Cancel {}", shown_headcode(l, h)),
+            label: format!("Cancel {}", shown_headcode(&l.display_headcodes, h)),
             cmd: PlayerCommand::CancelBerth { berth: berth.to_string() },
         }],
         None => vec![],
@@ -229,7 +224,7 @@ pub fn describe_points(l: &Layout, v: &View, points: &str) -> String {
 
 pub fn describe_berth(l: &Layout, v: &View, berth: &str) -> String {
     let area = l.berths.iter().find(|b| b.name == berth).map(|b| area_note(l, &b.area)).unwrap_or_default();
-    let held = v.berths.get(berth).map_or("empty", |h| shown_headcode(l, h));
+    let held = v.berths.get(berth).map_or("empty", |h| shown_headcode(&l.display_headcodes, h));
     format!("Berth {berth}{area}: {held}")
 }
 
