@@ -550,23 +550,30 @@ impl App {
     /// selection would complete a `selected` step at once.
     pub fn lesson_restart(&mut self) {
         if self.in_lesson() {
-            self.send_game(ClientMsg::LessonRestart);
-            if let Some(g) = self.game.as_mut() {
-                g.selected = None;
-                g.screen_sent = None;
+            // Only a restart that went out forgets the screen.
+            if self.link == Link::Open {
+                self.send_game(ClientMsg::LessonRestart);
+                if let Some(g) = self.game.as_mut() {
+                    g.selected = None;
+                    g.screen_sent = None;
+                }
+            } else {
+                self.send_game(ClientMsg::LessonRestart);
             }
         }
     }
 
     /// Call every frame with the side panel's tab: in a tutorial, the
-    /// lesson hears whenever the tab or the chosen entrance changes.
+    /// lesson hears whenever the tab or the chosen entrance changes. Silent
+    /// while the link is down or a (re)join is unanswered; the `lesson` that
+    /// follows the join makes the next call report afresh.
     pub fn report_screen(&mut self, tab: &str) {
         let Some(g) = self.game.as_ref() else { return };
         if g.lesson.as_ref().is_none_or(|v| v.done) {
             return;
         }
         let now = (Some(tab.to_string()), g.selected.clone());
-        if g.screen_sent.as_ref() == Some(&now) || self.link != Link::Open {
+        if g.screen_sent.as_ref() == Some(&now) || self.link != Link::Open || self.joining.is_some() {
             return;
         }
         let (tab, selected) = now.clone();
