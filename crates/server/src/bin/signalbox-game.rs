@@ -2,7 +2,7 @@
 
 use std::process::ExitCode;
 
-use server::process::{Args, USAGE};
+use server::process::{Args, USAGE, exit_status};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -18,7 +18,7 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("signalbox-game: {e}");
-            ExitCode::FAILURE
+            ExitCode::from(exit_status(&e))
         }
     }
 }

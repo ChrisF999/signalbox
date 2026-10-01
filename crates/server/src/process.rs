@@ -4,11 +4,16 @@
 //! advance every 0.1 s of real time, flush every 0.2 s, `Status` every 1 s.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use game::lesson::{self, Runner, load_lesson};
+use game::seed::{self, Progress, Seeding};
 use game::{Game, GameMeta, GameStatus, Out};
 use ipc::{Counters, FromGame, LogLevel, PlayerStatus, StatusMsg, ToGame, read_frame, write_frame};
+use protocol::{Preparing, codes};
+use signalbox_core::sim::TICK_S;
 use signalbox_core::time::{fmt_hms, parse_hms};
 use tokio::net::UnixListener;
 use tokio::net::unix::OwnedWriteHalf;
@@ -17,7 +22,8 @@ use tokio::sync::mpsc;
 use tokio::time::{Instant, MissedTickBehavior, interval, timeout};
 
 pub const USAGE: &str = "usage: signalbox-game --save <db> --socket <path> [--empty-exit-s <secs>] \
-[--create --layout <world.json> --layout-name <name> --seed <u64> [--start HH:MM:SS] [--creator <user>]]\n\
+[--create --layout <world.json> --layout-name <name> --seed <u64> [--start HH:MM:SS] [--creator <user>] \
+[--seed-budget-ms <ms>]]\n\
        signalbox-game --lesson <dir> --socket <path> [--empty-exit-s <secs>]";
 /// Real seconds a game with nobody connected waits before it saves and exits.
 pub const EMPTY_EXIT_S: u64 = 600;
@@ -27,6 +33,11 @@ pub const FLUSH_EVERY_ADVANCES: u64 = 2;
 pub const STATUS_EVERY: Duration = Duration::from_secs(1);
 /// How long the game waits for the front to connect.
 pub const ACCEPT_TIMEOUT: Duration = Duration::from_secs(60);
+/// Real time a new game may spend being prepared to a later start
+/// (timetables spec P8); after it the creation fails with `seed_too_slow`.
+pub const SEED_BUDGET: Duration = Duration::from_secs(60);
+/// The exit status of a game process whose preparing took too long.
+pub const EXIT_SEED_TOO_SLOW: u8 = 3;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CreateArgs {
@@ -38,6 +49,9 @@ pub struct CreateArgs {
     pub start: Option<String>,
     /// Recorded in the save as its creator (owner decision 13).
     pub creator: Option<String>,
+    /// How long preparing a later start may take (`SEED_BUDGET`; tests
+    /// pass less with `--seed-budget-ms`).
+    pub seed_budget: Duration,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,6 +71,7 @@ impl Args {
     pub fn parse(args: &[String]) -> Result<Args, String> {
         let (mut save, mut socket, mut empty_exit_s, mut create, mut lesson) = (None, None, EMPTY_EXIT_S, false, None);
         let (mut world, mut layout_name, mut seed, mut start, mut creator) = (None, None, None, None, None);
+        let mut seed_budget = None;
         let mut it = args.iter();
         while let Some(a) = it.next() {
             let mut value = || it.next().cloned().ok_or_else(|| format!("{a} needs a value"));
@@ -75,13 +90,17 @@ impl Args {
                     start = Some(normalise_start(&v).ok_or_else(|| format!("bad --start `{v}`"))?);
                 }
                 "--creator" => creator = Some(value()?),
+                "--seed-budget-ms" => {
+                    let ms = value()?.parse().map_err(|_| "--seed-budget-ms takes whole milliseconds".to_string())?;
+                    seed_budget = Some(Duration::from_millis(ms));
+                }
                 "--lesson" => lesson = Some(PathBuf::from(value()?)),
                 other => return Err(format!("unknown argument `{other}`")),
             }
         }
         if let Some(lesson) = lesson {
             let saved = save.is_some() || create || world.is_some() || layout_name.is_some();
-            if saved || seed.is_some() || start.is_some() || creator.is_some() {
+            if saved || seed.is_some() || start.is_some() || creator.is_some() || seed_budget.is_some() {
                 return Err("--lesson takes only --socket and --empty-exit-s".into());
             }
             let socket = socket.ok_or("--socket is required")?;
@@ -97,10 +116,14 @@ impl Args {
                 seed: seed.ok_or("--create needs --seed")?,
                 start,
                 creator,
+                seed_budget: seed_budget.unwrap_or(SEED_BUDGET),
             })
         } else {
             if world.is_some() || layout_name.is_some() || seed.is_some() || start.is_some() || creator.is_some() {
                 return Err("--layout, --layout-name, --seed, --start and --creator need --create".into());
+            }
+            if seed_budget.is_some() {
+                return Err("--seed-budget-ms needs --create".into());
             }
             None
         };
@@ -130,24 +153,48 @@ pub fn open_lesson(dir: &Path) -> Result<(Game, Runner), String> {
     Ok(lesson::start(lesson))
 }
 
-/// Create or resume the game the arguments name.
-pub fn open_game(args: &Args) -> Result<Game, String> {
+/// What `open_game` opened.
+pub enum Opened {
+    Ready(Game),
+    /// A new game with a start later than its world's: it is prepared
+    /// (timetables spec §3.4) before anyone plays.
+    Seeding(Seeding),
+}
+
+/// Create or resume the game the arguments name. A start later than the
+/// world's is reached by seeding; an earlier one is written into the world
+/// as before (C1 amendment 11).
+pub fn open_game(args: &Args) -> Result<Opened, String> {
     match &args.create {
         Some(c) => {
             let json = std::fs::read_to_string(&c.world).map_err(|e| format!("{}: {e}", c.world.display()))?;
+            let meta = GameMeta { layout: c.layout_name.clone(), seed: c.seed };
+            let start = c.start.as_deref().map(|s| parse_hms(s).ok_or_else(|| format!("bad start `{s}`"))).transpose()?;
+            if let Some(start) = start.filter(|&t| seed::needs_seeding(&json, t).unwrap_or(false)) {
+                let mut s = Seeding::create(&args.save, &json, meta, start).map_err(|e| format!("create: {e}"))?;
+                if let Some(user) = &c.creator {
+                    s.set_creator(user).map_err(|e| format!("create: {e}"))?;
+                }
+                return Ok(Opened::Seeding(s));
+            }
             let json = match &c.start {
                 Some(start) => set_start_time(&json, start)?,
                 None => json,
             };
-            let meta = GameMeta { layout: c.layout_name.clone(), seed: c.seed };
             let mut g = Game::create(&args.save, &json, meta).map_err(|e| format!("create: {e}"))?;
             if let Some(user) = &c.creator {
                 g.set_creator(user).map_err(|e| format!("create: {e}"))?;
             }
-            Ok(g)
+            Ok(Opened::Ready(g))
         }
-        None => Game::resume(&args.save).map_err(|e| e.to_string()),
+        None => Game::resume(&args.save).map(Opened::Ready).map_err(|e| e.to_string()),
     }
+}
+
+/// The process's exit status for the error `run` returned: `seed_too_slow`
+/// has its own, so the front can tell the lobby why the game is not there.
+pub fn exit_status(err: &str) -> u8 {
+    if err.starts_with(codes::SEED_TOO_SLOW) { EXIT_SEED_TOO_SLOW } else { 1 }
 }
 
 pub fn status_msg(st: &GameStatus) -> StatusMsg {
@@ -323,23 +370,122 @@ pub fn release_free_memory() {
     }
 }
 
+/// What `serve` starts from.
+pub enum Begin {
+    Ready(Shell),
+    /// Prepare the game first (`prepare`), then serve it.
+    Seed { seeding: Seeding, empty_exit: Duration, budget: Duration },
+}
+
 /// Open the game, listen on the socket, serve one front until told to stop.
 pub async fn run(args: Args) -> Result<(), String> {
-    let shell = match &args.lesson {
+    let begin = match &args.lesson {
         Some(dir) => {
             let (game, runner) = open_lesson(dir)?;
-            Shell::lesson(game, runner, args.empty_exit)
+            Begin::Ready(Shell::lesson(game, runner, args.empty_exit))
         }
-        None => Shell::new(open_game(&args)?, args.empty_exit),
+        None => match open_game(&args)? {
+            Opened::Ready(game) => Begin::Ready(Shell::new(game, args.empty_exit)),
+            Opened::Seeding(seeding) => {
+                let budget = args.create.as_ref().map_or(SEED_BUDGET, |c| c.seed_budget);
+                Begin::Seed { seeding, empty_exit: args.empty_exit, budget }
+            }
+        },
     };
     release_free_memory();
     let _ = std::fs::remove_file(&args.socket);
     let listener = UnixListener::bind(&args.socket).map_err(|e| format!("{}: {e}", args.socket.display()))?;
-    serve(shell, listener, &args.socket).await
+    serve(begin, listener, &args.socket).await
 }
 
-/// Accept exactly one front connection, then run the game for it.
-pub async fn serve(mut shell: Shell, listener: UnixListener, socket: &Path) -> Result<(), String> {
+/// A game prepared to its start, with the front's frames that came meanwhile.
+type Prepared = (Game, Vec<ToGame>);
+
+/// Run `seeding` to its start time on a blocking thread, telling the front
+/// how far it has got (a `Status` with `preparing`, at once and then every
+/// second); the front's frames wait until the game is ready. The budget is
+/// real time, measured here: past it the half-built save is removed and the
+/// error starts with `seed_too_slow`. `Shutdown`, SIGTERM or the front
+/// going away stop it the same way, as `Ok(None)`: there is nothing to save.
+async fn prepare(
+    seeding: Seeding,
+    budget: Duration,
+    wr: &mut OwnedWriteHalf,
+    rx: &mut mpsc::UnboundedReceiver<Result<ToGame, ipc::IpcError>>,
+    term: &mut tokio::signal::unix::Signal,
+) -> Result<Option<Prepared>, String> {
+    let (from_s, to_s) = (seeding.from_s(), seeding.to_s());
+    let mut base = status_msg(&seeding.game().status());
+    base.preparing = Some(Preparing { from: from_s, to: to_s });
+    let stop = Arc::new(AtomicBool::new(false));
+    let reached = Arc::new(AtomicU64::new(seeding.game().sim().tick()));
+    let started = std::time::Instant::now();
+    let mut job = tokio::task::spawn_blocking({
+        let (stop, reached) = (stop.clone(), reached.clone());
+        move || {
+            let mut seeding = seeding;
+            let r = seeding.run(|g| {
+                reached.store(g.sim().tick(), Ordering::Relaxed);
+                !stop.load(Ordering::Relaxed) && started.elapsed() < budget
+            });
+            (seeding, r)
+        }
+    });
+    let mut held = Vec::new();
+    let mut stopping = false;
+    let mut every = interval(STATUS_EVERY);
+    let joined = loop {
+        tokio::select! {
+            r = &mut job => break r,
+            _ = every.tick(), if !stopping => {
+                let tick = reached.load(Ordering::Relaxed);
+                let st = StatusMsg { tick, sim_time: from_s + tick as f64 * TICK_S, ..base.clone() };
+                if send_all(wr, vec![FromGame::Status(st)]).await.is_err() {
+                    stopping = true;
+                }
+            }
+            m = rx.recv(), if !stopping => match m {
+                Some(Ok(ToGame::Shutdown)) | Some(Err(_)) | None => stopping = true,
+                Some(Ok(m)) => held.push(m),
+            },
+            _ = term.recv() => stopping = true,
+        }
+        if stopping {
+            stop.store(true, Ordering::Relaxed);
+        }
+    };
+    let (seeding, r) = joined.map_err(|e| format!("preparing: {e}"))?;
+    let elapsed = started.elapsed().as_secs_f64();
+    match r {
+        Ok(Progress::Reached) => {
+            eprintln!("signalbox-game: prepared {} → {} in {elapsed:.1} s", fmt_hms(from_s), fmt_hms(to_s));
+            Ok(Some((seeding.finish().map_err(|e| format!("preparing: {e}"))?, held)))
+        }
+        Ok(Progress::Stopped) if stopping => {
+            seeding.abandon();
+            Ok(None)
+        }
+        Ok(Progress::Stopped) => {
+            let got = fmt_hms(seeding.game().sim().now_s());
+            seeding.abandon();
+            Err(format!(
+                "{}: preparing {} → {} took longer than {} s (it reached {got})",
+                codes::SEED_TOO_SLOW,
+                fmt_hms(from_s),
+                fmt_hms(to_s),
+                budget.as_secs_f64()
+            ))
+        }
+        Err(e) => {
+            seeding.abandon();
+            Err(format!("preparing: {e}"))
+        }
+    }
+}
+
+/// Accept exactly one front connection, then run the game for it (after
+/// preparing it, for `Begin::Seed`).
+pub async fn serve(begin: Begin, listener: UnixListener, socket: &Path) -> Result<(), String> {
     let accepted = timeout(ACCEPT_TIMEOUT, listener.accept()).await;
     drop(listener);
     let _ = std::fs::remove_file(socket);
@@ -347,7 +493,10 @@ pub async fn serve(mut shell: Shell, listener: UnixListener, socket: &Path) -> R
         Ok(Ok((stream, _))) => stream,
         Ok(Err(e)) => return Err(format!("accept: {e}")),
         Err(_) => {
-            shell.shutdown().iter().for_each(log);
+            match begin {
+                Begin::Ready(mut shell) => shell.shutdown().iter().for_each(log),
+                Begin::Seed { seeding, .. } => seeding.abandon(),
+            }
             return Err("no front connected within 60 s".into());
         }
     };
@@ -370,6 +519,31 @@ pub async fn serve(mut shell: Shell, listener: UnixListener, socket: &Path) -> R
         }
     });
     let mut term = signal(SignalKind::terminate()).map_err(|e| format!("SIGTERM handler: {e}"))?;
+    let mut shell = match begin {
+        Begin::Ready(shell) => shell,
+        Begin::Seed { seeding, empty_exit, budget } => {
+            let Some((game, held)) = prepare(seeding, budget, &mut wr, &mut rx, &mut term).await? else {
+                return Ok(());
+            };
+            let mut shell = Shell::new(game, empty_exit);
+            // Ready: a status without `preparing`, then what the front sent meanwhile.
+            let mut out = vec![shell.status()];
+            let mut next = Next::Continue;
+            for m in held {
+                let (o, n) = shell.on_frame(m);
+                out.extend(o);
+                if n == Next::Exit {
+                    next = n;
+                    break;
+                }
+            }
+            if send_all(&mut wr, out).await.is_err() || next == Next::Exit {
+                shell.shutdown().iter().for_each(log);
+                return Ok(());
+            }
+            shell
+        }
+    };
     let mut ticker = interval(ADVANCE_EVERY);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut last = Instant::now();

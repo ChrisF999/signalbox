@@ -67,6 +67,7 @@ fn arguments_parse_and_bad_ones_are_explained() {
             seed: 9,
             start: Some(s("06:05:00")),
             creator: None,
+            seed_budget: SEED_BUDGET,
         })
     );
     let err = |v: &[&str]| Args::parse(&args(v)).unwrap_err();
@@ -90,6 +91,17 @@ fn arguments_parse_and_bad_ones_are_explained() {
     assert_eq!(a.create.unwrap().creator.as_deref(), Some("Hackney & Bow's ann"));
     assert_eq!(err(&["--save", "x", "--socket", "y", "--frobnicate"]), "unknown argument `--frobnicate`");
     assert_eq!(err(&["--save", "x", "--socket", "y", "--create", "--start", "24:00"]), "bad --start `24:00`");
+    assert_eq!(err(&["--save", "x", "--socket", "y", "--seed-budget-ms", "5"]), "--seed-budget-ms needs --create");
+    assert_eq!(err(&["--socket", "y", "--lesson", "l", "--seed-budget-ms", "5"]), "--lesson takes only --socket and --empty-exit-s");
+    let a = Args::parse(&args(&[
+        "--save", "g.sqlite", "--socket", "g.sock", "--create", "--layout", "w.json", "--layout-name", "drain", "--seed", "9",
+        "--seed-budget-ms", "250",
+    ]))
+    .unwrap();
+    assert_eq!(a.create.unwrap().seed_budget, Duration::from_millis(250));
+    assert_eq!(SEED_BUDGET, Duration::from_secs(60), "timetables spec P8");
+    assert_eq!(exit_status("seed_too_slow: preparing took too long"), EXIT_SEED_TOO_SLOW);
+    assert_eq!(exit_status("create: bad world"), 1);
 }
 
 #[test]
@@ -463,4 +475,92 @@ async fn a_broken_lesson_exits_non_zero_with_its_reason() {
     assert_eq!(exit_code(&mut child).await, Some(1));
     assert!(err.starts_with("signalbox-game: lesson "), "{err}");
     assert!(err.contains("01-broken"), "{err}");
+}
+
+// ---- preparing a later start (timetables spec §3.4) ----
+
+fn preparing_of(m: &FromGame) -> Option<Option<protocol::Preparing>> {
+    match m {
+        FromGame::Status(st) => Some(st.preparing),
+        _ => None,
+    }
+}
+
+/// twobox starts at 07:00: a game created for 07:30 is prepared first,
+/// reported as `preparing`; a player who connects meanwhile gets the game
+/// at 07:30 once it is ready.
+#[tokio::test]
+async fn a_later_start_is_prepared_before_anyone_plays() {
+    let dir = temp_dir("bin-seed");
+    let mut child = spawn(&create_args(&dir, &["--start", "07:30", "--creator", "ann"]));
+    let mut sock = connect(&dir.join("g.sock")).await;
+    write_frame(&mut sock, &ToGame::Connect { player: s("ann") }).await.unwrap();
+    let got = read_until(&mut sock, |m| matches!(m, FromGame::ToPlayer { msg: ServerMsg::View(_), .. })).await;
+    let first = got.iter().find_map(preparing_of).expect("a status first");
+    assert_eq!(first, Some(protocol::Preparing { from: 25200.0, to: 27000.0 }), "{got:?}");
+    // Ready: a status without `preparing` comes before the player's frames.
+    let ready = got.iter().position(|m| preparing_of(m) == Some(None)).expect("a ready status");
+    let layout = got.iter().position(|m| matches!(m, FromGame::ToPlayer { msg: ServerMsg::Layout(_), .. })).unwrap();
+    assert!(ready < layout, "{got:?}");
+    let Some(FromGame::ToPlayer { msg: ServerMsg::View(v), .. }) = got.last() else { unreachable!() };
+    assert!((27000.0..27001.0).contains(&v.sim_time), "the game opens at 07:30: {}", v.sim_time);
+    write_frame(&mut sock, &ToGame::Shutdown).await.unwrap();
+    assert_eq!(exit_code(&mut child).await, Some(0));
+    assert!(stderr_of(&mut child).await.contains("prepared 07:00:00 → 07:30:00 in "));
+    let sum = game::save::read_summary(&dir.join("g.sqlite")).unwrap();
+    assert_eq!(sum.creator.as_deref(), Some("ann"));
+    assert!(sum.sim_time >= 27000.0);
+    assert!(!game::seed::temp_path(&dir.join("g.sqlite")).exists());
+    // Resuming it does not prepare it again.
+    let mut child = spawn(&args(&[
+        "--save", dir.join("g.sqlite").to_str().unwrap(), "--socket", dir.join("g.sock").to_str().unwrap(),
+    ]));
+    let mut sock = connect(&dir.join("g.sock")).await;
+    write_frame(&mut sock, &ToGame::Connect { player: s("ann") }).await.unwrap();
+    let got = read_until(&mut sock, |m| matches!(m, FromGame::ToPlayer { msg: ServerMsg::View(_), .. })).await;
+    assert!(got.iter().all(|m| preparing_of(m) != Some(Some(protocol::Preparing { from: 25200.0, to: 27000.0 }))));
+    let Some(FromGame::ToPlayer { msg: ServerMsg::View(v), .. }) = got.last() else { unreachable!() };
+    assert!(v.sim_time >= 27000.0, "{}", v.sim_time);
+    write_frame(&mut sock, &ToGame::Shutdown).await.unwrap();
+    assert_eq!(exit_code(&mut child).await, Some(0));
+}
+
+#[tokio::test]
+async fn preparing_past_its_budget_fails_with_seed_too_slow_and_leaves_nothing() {
+    let dir = temp_dir("bin-seed-slow");
+    let mut child = spawn(&create_args(&dir, &["--start", "23:00", "--seed-budget-ms", "1"]));
+    let _sock = connect(&dir.join("g.sock")).await;
+    assert_eq!(exit_code(&mut child).await, Some(i32::from(EXIT_SEED_TOO_SLOW)));
+    let err = stderr_of(&mut child).await;
+    assert!(err.trim_end().lines().last().unwrap().starts_with("signalbox-game: seed_too_slow: preparing 07:00:00 → 23:00:00 took longer than 0.001 s"), "{err}");
+    assert!(!dir.join("g.sqlite").exists());
+    assert!(!game::seed::temp_path(&dir.join("g.sqlite")).exists());
+}
+
+#[tokio::test]
+async fn a_shutdown_while_preparing_stops_and_leaves_nothing() {
+    let dir = temp_dir("bin-seed-stop");
+    let mut child = spawn(&create_args(&dir, &["--start", "23:59"]));
+    let mut sock = connect(&dir.join("g.sock")).await;
+    read_until(&mut sock, |m| preparing_of(m) == Some(Some(protocol::Preparing { from: 25200.0, to: 86340.0 }))).await;
+    write_frame(&mut sock, &ToGame::Shutdown).await.unwrap();
+    assert_eq!(exit_code(&mut child).await, Some(0));
+    assert!(!dir.join("g.sqlite").exists());
+    assert!(!game::seed::temp_path(&dir.join("g.sqlite")).exists());
+}
+
+/// A start before the world's still moves the world's start (unchanged).
+#[tokio::test]
+async fn an_earlier_start_is_not_prepared() {
+    let dir = temp_dir("bin-early");
+    let mut child = spawn(&create_args(&dir, &["--start", "06:00"]));
+    let mut sock = connect(&dir.join("g.sock")).await;
+    write_frame(&mut sock, &ToGame::Connect { player: s("ann") }).await.unwrap();
+    let got = read_until(&mut sock, |m| matches!(m, FromGame::ToPlayer { msg: ServerMsg::View(_), .. })).await;
+    assert!(got.iter().all(|m| preparing_of(m) != Some(Some(protocol::Preparing { from: 25200.0, to: 21600.0 }))));
+    let Some(FromGame::ToPlayer { msg: ServerMsg::View(v), .. }) = got.last() else { unreachable!() };
+    assert!((21600.0..21601.0).contains(&v.sim_time), "{}", v.sim_time);
+    write_frame(&mut sock, &ToGame::Shutdown).await.unwrap();
+    assert_eq!(exit_code(&mut child).await, Some(0));
+    assert_eq!(game::save::read_summary(&dir.join("g.sqlite")).unwrap().tick, 0, "a snapshot at tick 0 only");
 }
