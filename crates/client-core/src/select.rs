@@ -106,10 +106,11 @@ pub fn is_automatic(l: &Layout, signal: &str) -> bool {
 }
 
 /// Whether `signal` has a ○A button beside it (realism spec decision 6): a
-/// controlled signal that starts at least one route. Drawn for any such
-/// signal you can see; only your own are clickable.
+/// controlled signal that starts at least one route, in your own area. A
+/// spectator sees every one (read-only); the fringe has none.
 pub fn has_auto_button(l: &Layout, signal: &str) -> bool {
-    !is_automatic(l, signal) && l.routes.iter().any(|r| r.entrance == signal)
+    let visible = l.signals.iter().any(|s| s.name == signal && l.area.as_ref().is_none_or(|mine| *mine == s.area));
+    visible && !is_automatic(l, signal) && l.routes.iter().any(|r| r.entrance == signal)
 }
 
 /// What the ○A button beside `signal` sends when clicked: exactly the

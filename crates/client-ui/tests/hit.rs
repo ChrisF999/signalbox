@@ -125,15 +125,18 @@ fn an_empty_berth_never_hides_points_or_an_exit() {
     // An empty berth with nothing else near still answers: BA in `signals_berths_exits_points_and_track`.
 }
 
-/// The ○A of a signal that is not yours is hover only.
+/// No ○A on the fringe, so nothing to hit there; a spectator's is hover only.
 #[test]
-fn a_fringe_or_spectators_auto_button_is_not_clickable() {
+fn a_fringe_signal_has_no_auto_button_and_a_spectators_is_not_clickable() {
     let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 600.0));
-    for area in [Some("East"), None] {
-        let sc = Scene::build(&layout_for(area)).unwrap();
-        let cam = Camera::fit(sc.all.unwrap(), screen);
-        let a = sc.signals.iter().find(|s| s.name == "A").unwrap();
-        let c = auto_button(&cam, screen, a).expect("A is a controlled signal with routes");
-        assert_eq!(hit_test(&sc, None, &cam, screen, c), hit(Target::Auto(s("A")), false), "{area:?}");
-    }
+    let sc = Scene::build(&layout_for(None)).unwrap();
+    let cam = Camera::fit(sc.all.unwrap(), screen);
+    let a = sc.signals.iter().find(|s| s.name == "A").unwrap();
+    let c = auto_button(&cam, screen, a).expect("a spectator sees A's ○A");
+    assert_eq!(hit_test(&sc, None, &cam, screen, c), hit(Target::Auto(s("A")), false));
+    let east = Scene::build(&layout_for(Some("East"))).unwrap();
+    let a = east.signals.iter().find(|s| s.name == "A").unwrap();
+    assert_eq!(auto_button(&cam, screen, a), None, "A is on East's fringe");
+    assert!(east.signals.iter().all(|s| auto_button(&cam, screen, s).is_none_or(|b| b.distance(c) > 10.0)));
+    assert_ne!(hit_test(&east, None, &cam, screen, c).map(|h| h.target), Some(Target::Auto(s("A"))));
 }

@@ -238,7 +238,8 @@ fn controlled_routes_offer_auto_working_on_and_off() {
     assert_eq!(select::click(&l, Some("S1"), &ExitName::Node(s("Z"))), Click::Clear);
 }
 
-/// Only a controlled signal that starts a route gets a ○A button.
+/// Only a controlled signal that starts a route gets a ○A button, and only
+/// in your own area (or for a spectator, everywhere).
 #[test]
 fn auto_buttons_go_beside_controlled_signals_with_routes() {
     let l = auto_layout();
@@ -247,7 +248,10 @@ fn auto_buttons_go_beside_controlled_signals_with_routes() {
     assert!(!select::has_auto_button(&l, "S9"), "starts no route");
     let mut theirs = l.clone();
     theirs.signals[0].operable = false;
-    assert!(select::has_auto_button(&theirs, "S1"), "drawn (grey) on the fringe too");
+    theirs.signals[0].area = s("B");
+    assert!(!select::has_auto_button(&theirs, "S1"), "none on the fringe");
+    theirs.area = None;
+    assert!(select::has_auto_button(&theirs, "S1"), "a spectator sees it (grey, read-only)");
 }
 
 /// The ○A button sends exactly what the signal menu's auto-working entry

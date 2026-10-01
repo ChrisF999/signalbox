@@ -66,7 +66,8 @@ pub struct SignalMark {
     /// Automatic routes starting here: a permanently automatic signal, drawn
     /// with a dashed post.
     pub auto_routes: Vec<String>,
-    /// Has a ○A button beside it: a controlled signal that starts a route.
+    /// Has a ○A button beside it: a controlled signal of yours (or, for a
+    /// spectator, any) that starts a route.
     pub auto_button: bool,
     /// Ends a route you can set, so it takes the click that sets it even on the fringe.
     pub route_exit: bool,

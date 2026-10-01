@@ -499,7 +499,8 @@ fn controlled_signals_carry_a_blue_auto_button_hollow_off_filled_on() {
     assert_eq!(colours(&r.idle()), [AUTO, AUTO, AUTO], "W1, A and W2");
     let east = Rig::new(Some("East"));
     let a = east.disc("A") + vec2(client_ui::hit::AUTO_AHEAD_PX, 0.0);
-    assert!(circles(&east.idle()).contains(&(a, AUTO_R, Color32::TRANSPARENT, FRINGE)), "grey on East's fringe");
+    assert!(circles(&east.idle()).iter().all(|k| k.0 != a), "none beside A on East's fringe");
+    assert!(east.idle().texts.iter().filter(|t| t.text == "A").all(|t| t.colour == AUTO), "only East's own, blue");
 }
 
 /// A permanently automatic signal keeps its dashed post and gets no ○A.
@@ -515,12 +516,17 @@ fn automatic_signals_have_no_auto_button() {
     assert_eq!(d.texts.iter().filter(|t| t.text == "A").count(), 2, "only A and W2");
 }
 
-/// A spectator sees every controlled signal's ○A, coloured as the rest of
-/// its view (nothing is fringe to a spectator); `hit` keeps them unclickable.
+/// A spectator sees every controlled signal's ○A in grey (read-only), still
+/// filled while auto-working; `hit` keeps them unclickable.
 #[test]
-fn a_spectator_sees_every_auto_button() {
-    let d = Rig::new(None).idle();
-    assert_eq!(d.texts.iter().filter(|t| t.text == "A").map(|t| t.colour).collect::<Vec<_>>(), [AUTO; 5]);
+fn a_spectator_sees_every_auto_button_in_grey() {
+    let mut r = Rig::new(None);
+    let d = r.idle();
+    assert_eq!(d.texts.iter().filter(|t| t.text == "A").map(|t| t.colour).collect::<Vec<_>>(), [FRINGE; 5]);
+    let c = r.disc("W1") + vec2(client_ui::hit::AUTO_AHEAD_PX, 0.0);
+    assert!(circles(&d).contains(&(c, AUTO_R, Color32::TRANSPARENT, FRINGE)), "hollow");
+    r.view.routes.insert(s("W1-A"), RouteView { state: RouteState::Locked, auto_working: true });
+    assert!(circles(&r.idle()).contains(&(c, AUTO_R, FRINGE, Color32::TRANSPARENT)), "filled while auto-working");
 }
 
 #[test]

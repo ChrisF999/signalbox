@@ -442,13 +442,15 @@ pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawi
     }
     for s in &scene.signals {
         signal_shapes(&mut d, s, cam, screen, st);
-        // The ○A button: filled while the route set from the signal is
-        // auto-working (live, not cancelling), hollow otherwise.
+        // The ○A button (none on the fringe): filled while the route set
+        // from the signal is auto-working (live, not cancelling), hollow
+        // otherwise.
         if let Some(c) = auto_button(cam, screen, s) {
             let on = st.view.is_some_and(|v| {
                 s.routes.iter().filter_map(|r| v.routes.get(r)).any(|rv| rv.auto_working && rv.state != RouteState::Cancelling)
             });
-            let colour = if s.fringe { FRINGE } else { AUTO };
+            // Blue where you can press it; a spectator's are grey, read-only.
+            let colour = if s.operable { AUTO } else { FRINGE };
             d.shapes.push(if on {
                 Shape::circle_filled(c, AUTO_R, colour)
             } else {
