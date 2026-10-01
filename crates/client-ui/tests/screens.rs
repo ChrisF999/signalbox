@@ -1038,3 +1038,21 @@ fn a_narrow_top_bar_wraps_its_buttons_clear_of_the_clock() {
         }
     }
 }
+
+/// Polish spec M6: the train list has headings, the next call's Arr and
+/// Dep, the simplifier's lateness style, and says when it is empty.
+#[test]
+fn the_train_list_is_headed_and_late_as_the_simplifier_says() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    let out = r.frame();
+    let side = side_texts(&r, &out);
+    for want in ["Train", "State", "Next", "Arr", "Dep", "Late", "07:04", "07:05"] {
+        assert!(side.iter().any(|t| t == want), "{want} in {side:?}");
+    }
+    assert!(side.iter().any(|t| t == "OT"), "1E01 is running, on time: {side:?}");
+    let empty = drawn_twobox_with(|w| {
+        w["entries"] = serde_json::json!([]);
+    });
+    let mut r = Rig::in_game(empty, Some("West"));
+    assert!(has_text(&r.frame(), "No trains here or due in the next 30 minutes"));
+}

@@ -108,7 +108,8 @@ pub fn lines(r: &SimplifierRow) -> Vec<Line> {
 }
 
 /// `OT` under a minute late (or early), else whole minutes late: `3L`.
-fn late_text(late_s: i64) -> String {
+/// The one lateness style, in the simplifier and the train list (polish spec M6).
+pub fn late_text(late_s: i64) -> String {
     if late_s >= 60 { format!("{}L", late_s / 60) } else { "OT".to_string() }
 }
 

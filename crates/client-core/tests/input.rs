@@ -382,7 +382,7 @@ fn an_auto_worked_route_stays_set_after_a_train_passes() {
 
 #[test]
 fn the_train_list_puts_platforms_first_then_by_booked_time() {
-    let row = |state, booked: Option<f64>| TrainRow { next_place: None, next_platform: None, booked, late_s: 0, state };
+    let row = |state, booked: Option<f64>| TrainRow { next_place: None, next_platform: None, booked, arr: None, dep: None, late_s: 0, state };
     let mut v = empty_view();
     v.trains.insert(s("1A"), row(TrainState::Due, Some(100.0)));
     v.trains.insert(s("1B"), row(TrainState::InArea, Some(300.0)));

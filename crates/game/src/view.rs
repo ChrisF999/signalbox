@@ -117,6 +117,8 @@ fn row(call: Option<&Call>, now: f64, state: TrainState) -> TrainRow {
         next_place: call.map(|c| c.place.clone()),
         next_platform: call.and_then(|c| c.platform.clone()),
         booked,
+        arr: call.and_then(|c| c.arr_s),
+        dep: call.and_then(|c| c.dep_s),
         late_s: late_s(now, booked),
         state,
     }

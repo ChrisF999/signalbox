@@ -256,6 +256,12 @@ pub struct TrainRow {
     /// Booked time at the next call (arrival, else departure; departure, else
     /// arrival, while the train stands at it), seconds since midnight.
     pub booked: Option<f64>,
+    /// The next call's booked arrival and departure (polish spec M6: the
+    /// train list's Arr and Dep columns).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arr: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dep: Option<f64>,
     /// How late against `booked` right now, in whole minutes, as seconds; never negative.
     pub late_s: i64,
     pub state: TrainState,

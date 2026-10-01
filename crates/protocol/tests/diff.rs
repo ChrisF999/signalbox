@@ -30,7 +30,7 @@ fn base() -> View {
 }
 
 fn row(state: TrainState, late_s: i64) -> TrainRow {
-    TrainRow { next_place: Some(s("EST")), next_platform: Some(s("1")), booked: Some(25500.0), late_s, state }
+    TrainRow { next_place: Some(s("EST")), next_platform: Some(s("1")), booked: Some(25500.0), arr: None, dep: None, late_s, state }
 }
 
 fn changed() -> View {

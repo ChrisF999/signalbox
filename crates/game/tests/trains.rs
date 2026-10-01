@@ -43,6 +43,8 @@ fn before_anything_enters_each_area_sees_what_is_due_at_its_boundaries() {
             next_place: Some("EST".into()),
             next_platform: Some("1".into()),
             booked: Some(25_440.0),
+            arr: Some(25_440.0),
+            dep: Some(25_500.0),
             late_s: 0,
             state: TrainState::Due,
         }

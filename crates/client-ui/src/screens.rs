@@ -15,7 +15,7 @@ use egui::{
     Align, Align2, Color32, CornerRadius, FontId, Frame, Key, Layout, PointerButton, Rect, Response, RichText, Sense, Stroke,
     StrokeKind, Ui, vec2,
 };
-use protocol::{GameState, Highlight, Proposal};
+use protocol::{GameState, Highlight, Proposal, TrainState};
 
 use crate::camera::Camera;
 use crate::hit::hit_test;
@@ -631,14 +631,26 @@ impl UiApp {
         }
     }
 
+    /// The train list (polish spec M6): headed columns, the next call's
+    /// booked arrival and departure, lateness as the simplifier shows it
+    /// (`OT`, `3L`; blank while due), and a line when it is empty.
     fn trains_ui(&mut self, ui: &mut Ui, height: f32) {
         let Some(g) = self.core.game() else { return };
         let enquiry = self.settings.enquiry;
         let mut open = None;
         egui::ScrollArea::vertical().id_salt("trains").max_height(height).show(ui, |ui| {
             let Some(v) = g.view() else { return };
+            let rows = train_list(v);
+            if rows.is_empty() {
+                ui.label(RichText::new("No trains here or due in the next 30 minutes").color(paint::LABEL));
+                return;
+            }
             egui::Grid::new("train_list").striped(true).show(ui, |ui| {
-                for (h, r) in train_list(v) {
+                for h in ["Train", "State", "Next", "Arr", "Dep", "Late"] {
+                    ui.label(RichText::new(h).strong());
+                }
+                ui.end_row();
+                for (h, r) in rows {
                     let code = RichText::new(g.names().headcode(h)).monospace().color(paint::HEADCODE);
                     // With the enquiry on, a headcode opens its window.
                     if enquiry {
@@ -660,8 +672,10 @@ impl UiApp {
                     if let Some(name) = place {
                         cell.on_hover_text(name);
                     }
-                    ui.label(r.booked.map_or(String::new(), |b| fmt_hms(b)[..5].to_string()));
-                    ui.label(if r.late_s > 0 { format!("+{}", r.late_s / 60) } else { String::new() });
+                    ui.label(r.arr.map(simplifier::fmt_wtt).unwrap_or_default());
+                    ui.label(r.dep.map(simplifier::fmt_wtt).unwrap_or_default());
+                    let late = if r.state == TrainState::Due { String::new() } else { simplifier::late_text(r.late_s) };
+                    ui.label(RichText::new(&late).color(if late == "OT" { paint::LABEL } else { ALARM }));
                     ui.end_row();
                 }
             });
