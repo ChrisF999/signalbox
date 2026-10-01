@@ -160,24 +160,48 @@ fn trimmed(t: &TrackLine, a: Pos2, b: Pos2) -> (Pos2, Pos2) {
     (if t.joint_a() { a + step } else { a }, if t.joint_b() { b - step } else { b })
 }
 
+/// The end-of-overlap tick across a bar's `end`, perpendicular to `dir`.
+fn tick(out: &mut Vec<Shape>, end: Pos2, dir: Vec2, w: f32) {
+    let n = if dir.length() > 0.0 { vec2(-dir.y, dir.x).normalized() } else { Vec2::ZERO };
+    let half = n * ((w + TICK_EXTRA_PX) / 2.0);
+    out.push(Shape::line_segment([end - half, end + half], Stroke::new(TICK_W, OVERLAP)));
+}
+
+/// A leg's far end, pulled in by half a joint gap where another section meets it.
+fn leg_end(p: &PointsMark, c: Pos2, end: Pos2, meets: &[String]) -> Pos2 {
+    let d = end - c;
+    if !meets.iter().any(|m| *m != p.section) || d.length() <= JOINT_GAP_PX * 2.0 {
+        return end;
+    }
+    end - d.normalized() * (JOINT_GAP_PX / 2.0)
+}
+
 fn points_shapes(out: &mut Vec<Shape>, p: &PointsMark, to: &dyn Fn(Pos2) -> Pos2, st: &PaintState, colour: Color32, w: f32) {
+    let section = |name: &str| st.view.and_then(|v| v.sections.get(name));
+    let held = |name: &str| section(name).is_some_and(|s| s.held != Held::Free);
+    let overlap = section(&p.section).is_some_and(|s| s.held == Held::Overlap);
     let pv = st.view.and_then(|v| v.points.get(&p.name));
     let lying = pv.map_or(PointsPos::Normal, |v| v.position);
     let moving = pv.is_some_and(|v| v.moving);
     let (lie, other) = match lying {
-        PointsPos::Normal => (p.normal, p.reverse),
-        PointsPos::Reverse => (p.reverse, p.normal),
+        PointsPos::Normal => ((p.normal, &p.normal_meets), (p.reverse, &p.reverse_meets)),
+        PointsPos::Reverse => ((p.reverse, &p.reverse_meets), (p.normal, &p.normal_meets)),
     };
     let c = to(p.at);
-    if let Some(t) = p.toe {
-        bar(out, c, to(t), w, colour, p.fringe);
+    // The toe and the lying leg carry the route; an overlap held here ends
+    // in a tick at the far end of each that nothing held goes on from.
+    for (leg, meets) in [(p.toe, &p.toe_meets), lie] {
+        let Some(l) = leg else { continue };
+        let end = leg_end(p, c, to(l), meets);
+        bar(out, c, end, w, colour, p.fringe);
+        if overlap && !meets.iter().any(|m| held(m)) {
+            tick(out, end, end - c, w);
+        }
     }
-    if let Some(l) = lie {
-        bar(out, c, to(l), w, colour, p.fringe);
-    }
-    if let Some(o) = other {
-        let end = to(o);
-        let gap_end = c + (end - c) * GAP;
+    if let (Some(o), meets) = other {
+        let far = to(o);
+        let end = leg_end(p, c, far, meets);
+        let gap_end = c + (far - c) * GAP;
         bar(out, gap_end, end, w, colour, p.fringe);
         // While moving the gap flashes: closed in the dark half of the blink.
         if moving && !blink_on(st.time) {
@@ -193,11 +217,9 @@ fn track_shapes(d: &mut Drawing, t: &TrackLine, to: &dyn Fn(Pos2) -> Pos2, st: &
     bar(&mut d.shapes, a, b, w, track_colour(section(&t.section)), t.fringe);
     // End of overlap: an end of an overlap section where nothing held goes on.
     if section(&t.section).is_some_and(|s| s.held == Held::Overlap) {
-        let n = if (b - a).length() > 0.0 { vec2(-(b - a).y, (b - a).x).normalized() } else { Vec2::ZERO };
-        let half = n * ((w + TICK_EXTRA_PX) / 2.0);
         for (end, meets) in [(a, &t.a_meets), (b, &t.b_meets)] {
             if !meets.iter().any(|m| held(m)) {
-                d.shapes.push(Shape::line_segment([end - half, end + half], Stroke::new(TICK_W, OVERLAP)));
+                tick(&mut d.shapes, end, b - a, w);
             }
         }
     }
@@ -228,10 +250,11 @@ fn signal_shapes(d: &mut Drawing, s: &SignalMark, cam: &Camera, screen: Rect, st
         let base = cam.to_screen(screen, s.base);
         let top = base + left_of(s.facing) * POST_PX;
         let hook = top + s.facing * HOOK_PX;
-        let colour = if !routes.is_empty() {
-            ROUTE
-        } else if s.fringe {
+        // Fringe signals are grey whatever is set from them.
+        let colour = if s.fringe {
             FRINGE
+        } else if !routes.is_empty() {
+            ROUTE
         } else {
             TRACK_FREE
         };

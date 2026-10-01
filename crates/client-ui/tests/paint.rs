@@ -41,6 +41,16 @@ fn close(a: Pos2, b: Pos2) -> bool {
     a.distance(b) < 1e-3
 }
 
+/// `lines` has a segment from `a` to `b` (to within float error).
+fn has(lines: &[[Pos2; 2]], a: Pos2, b: Pos2) -> bool {
+    lines.iter().any(|l| close(l[0], a) && close(l[1], b))
+}
+
+/// `p` pulled back by half a joint gap towards `from`.
+fn short(p: Pos2, from: Pos2) -> Pos2 {
+    p - (p - from).normalized() * (JOINT_GAP_PX / 2.0)
+}
+
 struct Rig {
     layout: Layout,
     sc: Scene,
@@ -115,6 +125,26 @@ fn the_palette_is_the_specs() {
     assert_eq!(track_colour(Some(&v(false, Held::Overlap))), ROUTE, "overlaps are white like the route");
     assert_eq!(track_colour(Some(&v(true, Held::Overlap))), OCCUPIED, "occupied wins");
     assert!(blink_on(0.0) && !blink_on(0.3) && blink_on(0.5) && blink_on(-0.6) == blink_on(0.4));
+    assert_eq!(
+        [FRINGE, SELECT, REFUSED, RED, YELLOW, GREEN],
+        [
+            Color32::from_rgb(0x6E, 0x6E, 0x6E),
+            Color32::from_rgb(0x00, 0xC8, 0xFF),
+            Color32::from_rgb(0xFF, 0x3C, 0xFF),
+            Color32::from_rgb(0xE6, 0x1E, 0x1E),
+            Color32::from_rgb(0xFA, 0xD2, 0x00),
+            Color32::from_rgb(0x00, 0xDC, 0x50),
+        ]
+    );
+    let all = [Aspect::Red, Aspect::Yellow, Aspect::DoubleYellow, Aspect::Green];
+    assert_eq!(
+        all.map(|a| signal_lamps(a, AspectMode::RedGreen)),
+        [(RED, None), (GREEN, None), (GREEN, None), (GREEN, None)]
+    );
+    assert_eq!(
+        all.map(|a| signal_lamps(a, AspectMode::Real)),
+        [(RED, None), (YELLOW, None), (YELLOW, Some(YELLOW)), (GREEN, None)]
+    );
 }
 
 #[test]
@@ -151,6 +181,14 @@ fn track_circuit_joints_are_gaps() {
     let w1 = &r.sc.tracks[0];
     assert_eq!((w1.a_meets.clone(), w1.b_meets.clone()), (Vec::<String>::new(), vec![s("TW2")]));
     assert!(!w1.joint_a() && w1.joint_b());
+    // The points' side of J1: TP's toe leg stops half a gap short of w2.
+    // (East's lines are not drawn for West: the other legs meet nothing.)
+    let p = &r.sc.points[0];
+    assert_eq!((p.toe_meets.clone(), p.normal_meets.clone(), p.reverse_meets.clone()), (vec![s("TW2")], vec![], vec![]));
+    let edges = lines_of(&d, TRACK_FREE, FRINGE_EDGE_PX);
+    let (c, j1) = (r.at(207.5, 0.0), r.at(200.0, 0.0) + h);
+    let half = vec2(0.0, r.w() / 2.0);
+    assert!(has(&edges, c + half, j1 + half) && has(&edges, c - half, j1 - half), "{edges:?}");
 }
 
 #[test]
@@ -179,8 +217,9 @@ fn fringe_track_is_hollow_not_dimmed() {
     assert_eq!(edges.len(), 6, "P's three legs, two edges each");
     let (c, n) = (r.at(207.5, 0.0), r.at(215.0, 0.0));
     let half = r.w() / 2.0;
-    assert!(edges.iter().any(|e| close(e[0], c + vec2(0.0, half)) && close(e[1], n + vec2(0.0, half))), "{edges:?}");
-    assert!(edges.iter().any(|e| close(e[0], c - vec2(0.0, half)) && close(e[1], n - vec2(0.0, half))));
+    // East's line e is not drawn for West: no joint at the normal leg's end.
+    assert!(has(&edges, c + vec2(0.0, half), n + vec2(0.0, half)), "{edges:?}");
+    assert!(has(&edges, c - vec2(0.0, half), n - vec2(0.0, half)));
     assert_eq!(lines_of(&d, TRACK_FREE, r.w()).len(), 2, "only West's own track is solid");
 }
 
@@ -189,17 +228,19 @@ fn points_show_the_lying_leg_whole_and_a_gap_in_the_other() {
     let mut r = Rig::new(Some("East"));
     let w = r.w();
     let (c, n, rv) = (r.at(207.5, 0.0), r.at(215.0, 0.0), r.at(215.0, 10.0));
+    // Both legs end at a joint (TE, TN), so each stops half a gap short.
+    let (n_end, rv_end) = (short(n, c), short(rv, c));
     let legs = lines_of(&r.idle(), TRACK_FREE, w);
-    assert!(legs.contains(&[c, n]), "normal lies: whole");
-    assert!(legs.contains(&[c + (rv - c) * GAP, rv]), "reverse: from the gap");
+    assert!(has(&legs, c, n_end), "normal lies: whole up to its joint {legs:?}");
+    assert!(has(&legs, c + (rv - c) * GAP, rv_end), "reverse: from the gap");
     r.view.points.insert(s("P"), PointsView { position: PointsPos::Reverse, moving: true, locked: false });
     let open = lines_of(&r.draw(None, &[], None, 0.0), TRACK_FREE, w);
-    assert!(open.contains(&[c, rv]) && open.contains(&[c + (n - c) * GAP, n]));
-    assert!(!open.contains(&[c, c + (n - c) * GAP]), "the gap open");
+    assert!(has(&open, c, rv_end) && has(&open, c + (n - c) * GAP, n_end));
+    assert!(!has(&open, c, c + (n - c) * GAP), "the gap open");
     let shut = lines_of(&r.draw(None, &[], None, 0.3), TRACK_FREE, w);
-    assert!(shut.contains(&[c, c + (n - c) * GAP]), "while moving, the gap flashes");
+    assert!(has(&shut, c, c + (n - c) * GAP), "while moving, the gap flashes");
     r.view.points.get_mut("P").unwrap().moving = false;
-    assert!(!lines_of(&r.draw(None, &[], None, 0.3), TRACK_FREE, w).contains(&[c, c + (n - c) * GAP]));
+    assert!(!has(&lines_of(&r.draw(None, &[], None, 0.3), TRACK_FREE, w), c, c + (n - c) * GAP));
 }
 
 /// W1 faces right (+x): its post goes up (the left of travel, y grows
@@ -351,4 +392,48 @@ fn a_signal_without_a_facing_is_a_bare_disc_at_its_point() {
     let base = r.at(100.0, 0.0);
     assert!(!lines_of(&d, TRACK_FREE, POST_W).iter().any(|p| p[0] == base && p[1].y < base.y), "no post");
     assert!(d.texts.iter().any(|t| t.text == "TAW1" && t.anchor == Align2::CENTER_BOTTOM), "its number above it");
+}
+
+/// An overlap that runs into points ends at the far end of the lying leg
+/// (spec owner decision 3), not at the points' toe where the route meets it.
+#[test]
+fn an_overlap_through_points_ends_in_a_tick_at_the_lying_leg() {
+    let mut r = Rig::new(Some("West"));
+    r.view.sections.insert(s("TW2"), SectionView { occupied: false, held: Held::Path });
+    r.view.sections.insert(s("TP"), SectionView { occupied: false, held: Held::Overlap });
+    // East's lines are not drawn for West, so the legs end where they are drawn.
+    let end = r.at(215.0, 0.0);
+    let half = vec2(0.0, (r.w() + TICK_EXTRA_PX) / 2.0);
+    let ticks = lines_of(&r.idle(), ROUTE, TICK_W);
+    assert_eq!(ticks.len(), 1, "the toe meets TW2's route: no tick there {ticks:?}");
+    assert!(has(&ticks, end - half, end + half) || has(&ticks, end + half, end - half), "{ticks:?}");
+    r.view.points.insert(s("P"), PointsView { position: PointsPos::Reverse, moving: false, locked: true });
+    let rv = r.at(215.0, 10.0);
+    let ticks = lines_of(&r.idle(), ROUTE, TICK_W);
+    assert_eq!(ticks.len(), 1, "{ticks:?}");
+    let mid = (ticks[0][0] + ticks[0][1].to_vec2()) / 2.0;
+    assert!(close(mid, rv), "reverse lies: the tick moves to its end {ticks:?}");
+    // An overlap ending on a plain line still has its tick (TW1 the route).
+    r.view.sections.insert(s("TW1"), SectionView { occupied: false, held: Held::Path });
+    r.view.sections.insert(s("TP"), SectionView { occupied: false, held: Held::Free });
+    r.view.sections.insert(s("TW2"), SectionView { occupied: false, held: Held::Overlap });
+    let w2_end = r.at(200.0, 0.0) - vec2(JOINT_GAP_PX / 2.0, 0.0);
+    let ticks = lines_of(&r.idle(), ROUTE, TICK_W);
+    assert_eq!(ticks.len(), 1, "{ticks:?}");
+    let half = vec2(0.0, (r.w() + TICK_EXTRA_PX) / 2.0);
+    assert!(has(&ticks, w2_end - half, w2_end + half) || has(&ticks, w2_end + half, w2_end - half), "{ticks:?}");
+}
+
+#[test]
+fn a_fringe_signals_post_stays_grey_while_a_route_is_set_from_it() {
+    let mut r = Rig::new(Some("East"));
+    let a = r.sc.signals.iter().find(|s| s.name == "A").unwrap();
+    assert!(a.fringe && !a.routes.is_empty(), "{a:?}");
+    let route = a.routes[0].clone();
+    r.view.routes.insert(route, RouteView { state: RouteState::Locked, auto_working: false });
+    let d = r.idle();
+    let base = r.at(200.0, 0.0);
+    let post = [base, base + vec2(0.0, -POST_PX)];
+    assert!(lines_of(&d, FRINGE, POST_W).contains(&post), "{:?}", lines_of(&d, FRINGE, POST_W));
+    assert!(!lines_of(&d, ROUTE, POST_W).contains(&post));
 }

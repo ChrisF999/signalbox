@@ -39,6 +39,12 @@ pub struct PointsMark {
     pub toe: Option<Pos2>,
     pub normal: Option<Pos2>,
     pub reverse: Option<Pos2>,
+    /// Sections of the drawn lines that start where each leg ends, sorted,
+    /// without repeats (the layout names no leg's far node, so they are
+    /// matched by position).
+    pub toe_meets: Vec<String>,
+    pub normal_meets: Vec<String>,
+    pub reverse_meets: Vec<String>,
     pub fringe: bool,
     pub operable: bool,
 }
@@ -116,6 +122,10 @@ pub struct Scene {
 /// and fits stay finite.
 pub const MAX_COORD: f64 = 1.0e7;
 
+/// How near (layout units) a drawn line's end must be to a points leg's
+/// end to meet it.
+const LEG_MATCH: f32 = 1.0e-3;
+
 fn pt(x: f64, y: f64) -> Option<Pos2> {
     (x.abs() <= MAX_COORD && y.abs() <= MAX_COORD).then(|| pos2(x as f32, y as f32))
 }
@@ -175,16 +185,30 @@ impl Scene {
             });
         }
         let line_of: BTreeMap<&str, (Pos2, Pos2)> = sc.tracks.iter().map(|t| (t.segment.as_str(), (t.a, t.b))).collect();
+        let ending_at = |q: Option<Pos2>| -> Vec<String> {
+            let Some(q) = q else { return Vec::new() };
+            let set: BTreeSet<&str> = sc
+                .tracks
+                .iter()
+                .filter(|t| t.a.distance(q) <= LEG_MATCH || t.b.distance(q) <= LEG_MATCH)
+                .map(|t| t.section.as_str())
+                .collect();
+            set.into_iter().map(str::to_string).collect()
+        };
         for p in &g.points {
             let (Some(at), Some(info)) = (pt(p.x, p.y), l.points.iter().find(|i| i.name == p.node)) else { continue };
             let leg = |v: Option<[f64; 2]>| v.and_then(|[x, y]| pt(x, y));
+            let (toe, normal, reverse) = (leg(p.toe), leg(p.normal), leg(p.reverse));
             sc.points.push(PointsMark {
                 name: p.node.clone(),
                 section: info.section.clone(),
                 at,
-                toe: leg(p.toe),
-                normal: leg(p.normal),
-                reverse: leg(p.reverse),
+                toe,
+                normal,
+                reverse,
+                toe_meets: ending_at(toe),
+                normal_meets: ending_at(normal),
+                reverse_meets: ending_at(reverse),
                 fringe: fringe_of.get(info.section.as_str()).copied().unwrap_or(true),
                 operable: info.operable,
             });

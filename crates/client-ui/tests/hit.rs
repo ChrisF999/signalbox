@@ -4,7 +4,7 @@ mod common;
 
 use client_core::Target;
 use client_ui::camera::Camera;
-use client_ui::hit::{BERTH_H, HIT_PX, Hit, berth_rect, hit_test};
+use client_ui::hit::{BERTH_H, HIT_PX, Hit, berth_rect, hit_test, signal_disc};
 use client_ui::scene::Scene;
 use common::*;
 use egui::{Pos2, Rect, pos2, vec2};
@@ -39,6 +39,10 @@ fn signals_berths_exits_points_and_track() {
     assert_eq!(hit_test(&sc, &cam, screen, at(&cam, screen, 50.0, 0.0) + vec2(0.0, HIT_PX + 1.0)), None);
     assert_eq!(hit_test(&sc, &cam, screen, pos2(999.0, 599.0)), None);
     assert!(BERTH_H < HIT_PX * 2.0);
+    let w1 = sc.signals.iter().find(|s| s.name == "W1").unwrap();
+    let disc = signal_disc(&cam, screen, w1);
+    assert!(disc.distance(at(&cam, screen, 100.0, -5.0)) > HIT_PX, "the disc is away from W1's own point");
+    assert_eq!(hit_test(&sc, &cam, screen, disc), hit(Target::Signal(s("W1")), true), "W1's disc");
 }
 
 #[test]
