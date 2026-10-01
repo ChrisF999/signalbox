@@ -157,3 +157,44 @@ fn an_on_demand_entry_is_due_only_once_offered() {
     sim.offer_entry(0).unwrap();
     assert_eq!(states(&build_trains(&sim, &west)), [("1E01", TrainState::Due), ("1N02", TrainState::Due)]);
 }
+
+/// A train standing at a call (here its first, booked in at 06:09 and out at
+/// 07:51, as TS2 books trains that start in a platform) is not late while it
+/// waits for its booked departure.
+#[test]
+fn a_train_standing_at_a_call_is_late_only_after_its_booked_departure() {
+    let mut json: serde_json::Value = serde_json::from_str(&twobox_json()).unwrap();
+    json["services"][0]["calls"] = serde_json::json!([{"place": "EST", "platform": "1", "arr": "06:09", "dep": "07:51"}]);
+    json["entries"][0] = serde_json::json!({"service": "1E01", "at": {"segment": "e", "offset_m": 880, "direction": "up"}, "time": "06:00", "speed_kmh": 0});
+    let w = signalbox_core::world::World::from_json(&json.to_string()).unwrap();
+    let m = AreaMap::new(&w);
+    let all = Visibility::spectator(&w, &m);
+    let mut sim = Sim::new(w, 1);
+    sim.run_for(60.0);
+    assert!(sim.trains().iter().any(|t| t.headcode == "1E01" && t.dwell.is_some()), "1E01 stands in EST 1: {:?}", sim.trains());
+    let row = build_trains(&sim, &all)["1E01"].clone();
+    assert_eq!(row.state, TrainState::AtPlatform);
+    assert_eq!(row.booked, Some(28_260.0), "booked against its departure");
+    assert_eq!(row.late_s, 0, "07:01, waiting for 07:51: {row:?}");
+    sim.run_for(49.0 * 60.0);
+    assert_eq!(build_trains(&sim, &all)["1E01"].late_s, 0, "07:50");
+}
+
+/// Held at its platform past its booked departure (here by a 10-minute
+/// minimum dwell), a train is late against the departure.
+#[test]
+fn a_train_held_past_its_booked_departure_is_late_against_it() {
+    let mut json: serde_json::Value = serde_json::from_str(&twobox_json()).unwrap();
+    json["services"][0]["calls"] = serde_json::json!([{"place": "EST", "platform": "1", "arr": "06:09", "dep": "07:00:30"}]);
+    json["entries"][0] = serde_json::json!({"service": "1E01", "at": {"segment": "e", "offset_m": 880, "direction": "up"}, "time": "06:00", "speed_kmh": 0});
+    json["options"]["min_dwell_s"] = serde_json::json!([600, 600]);
+    let w = signalbox_core::world::World::from_json(&json.to_string()).unwrap();
+    let m = AreaMap::new(&w);
+    let all = Visibility::spectator(&w, &m);
+    let mut sim = Sim::new(w, 1);
+    sim.run_for(350.0);
+    let row = build_trains(&sim, &all)["1E01"].clone();
+    assert_eq!(row.state, TrainState::AtPlatform, "{row:?}");
+    assert_eq!(row.booked, Some(25_230.0));
+    assert_eq!(row.late_s, 300, "07:05:50 against 07:00:30: {row:?}");
+}

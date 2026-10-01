@@ -103,8 +103,16 @@ pub fn late_s(now: f64, booked: Option<f64>) -> i64 {
     }
 }
 
+/// A row for a train whose next call is `call`. A train standing at the
+/// call (`AtPlatform`: it is dwelling there) is timed against the call's
+/// departure, so it is not late while it waits for it (TS2 books a train
+/// that starts in a platform in long before it is due out); without a
+/// booked departure, against the arrival as for a running train.
 fn row(call: Option<&Call>, now: f64, state: TrainState) -> TrainRow {
-    let booked = call.and_then(|c| c.arr_s.or(c.dep_s));
+    let booked = call.and_then(|c| match state {
+        TrainState::AtPlatform => c.dep_s.or(c.arr_s),
+        _ => c.arr_s.or(c.dep_s),
+    });
     TrainRow {
         next_place: call.map(|c| c.place.clone()),
         next_platform: call.and_then(|c| c.platform.clone()),

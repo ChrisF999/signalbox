@@ -243,7 +243,8 @@ pub struct TrainRow {
     /// The next call, `None` once the timetable is done.
     pub next_place: Option<String>,
     pub next_platform: Option<String>,
-    /// Booked time at the next call (arrival, else departure), seconds since midnight.
+    /// Booked time at the next call (arrival, else departure; departure, else
+    /// arrival, while the train stands at it), seconds since midnight.
     pub booked: Option<f64>,
     /// How late against `booked` right now, in whole minutes, as seconds; never negative.
     pub late_s: i64,
