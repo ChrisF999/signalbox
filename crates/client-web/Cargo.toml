@@ -26,6 +26,7 @@ web-sys = { workspace = true, features = [
     "Location",
     "MessageEvent",
     "Response",
+    "Storage",
     "WebSocket",
     "Window",
 ] }

@@ -5,6 +5,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
+mod store;
 mod transport;
 
 use client_core::App;
@@ -15,6 +16,7 @@ use eframe::wgpu::Backends;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::wasm_bindgen;
 
+use crate::store::LocalStore;
 use crate::transport::WebSocketTransport;
 
 struct WebApp {
@@ -78,7 +80,8 @@ async fn run(canvas: web_sys::HtmlCanvasElement) -> Result<(), String> {
                 cc.egui_ctx.set_theme(egui::Theme::Dark);
                 let now = cc.egui_ctx.input(|i| i.time);
                 let transport = WebSocketTransport::new(cc.egui_ctx.clone());
-                Ok(Box::new(WebApp { ui: UiApp::new(App::new(Box::new(transport), now)), sent_to_login: false }))
+                let ui = UiApp::with_store(App::new(Box::new(transport), now), Box::new(LocalStore));
+                Ok(Box::new(WebApp { ui, sent_to_login: false }))
             }),
         )
         .await
