@@ -1,0 +1,78 @@
+{
+  "schema": 1,
+  "title": "Saltmarsh",
+  "areas": [
+    {"name": "Saltmarsh"}
+  ],
+  "sections": [
+    {"name": "TA", "area": "Saltmarsh"},
+    {"name": "TB", "area": "Saltmarsh"},
+    {"name": "TC", "area": "Saltmarsh"},
+    {"name": "TD", "area": "Saltmarsh"}
+  ],
+  "nodes": [
+    {"name": "W", "kind": "boundary"},
+    {"name": "J1", "kind": "joint"},
+    {"name": "J2", "kind": "joint"},
+    {"name": "J3", "kind": "joint"},
+    {"name": "E", "kind": "boundary"}
+  ],
+  "segments": [
+    {"name": "a", "from": "W", "to": "J1", "length_m": 600, "line_speed_kmh": 100, "section": "TA"},
+    {"name": "b", "from": "J1", "to": "J2", "length_m": 600, "line_speed_kmh": 100, "section": "TB"},
+    {"name": "c", "from": "J2", "to": "J3", "length_m": 600, "line_speed_kmh": 100, "section": "TC"},
+    {"name": "d", "from": "J3", "to": "E", "length_m": 600, "line_speed_kmh": 100, "section": "TD"}
+  ],
+  "signals": [
+    {"name": "1", "area": "Saltmarsh", "segment": "a", "offset_m": 600, "direction": "up", "aspects": 3},
+    {"name": "3", "area": "Saltmarsh", "segment": "b", "offset_m": 600, "direction": "up", "aspects": 3},
+    {"name": "5", "area": "Saltmarsh", "segment": "c", "offset_m": 600, "direction": "up", "aspects": 3}
+  ],
+  "berths": [
+    {"name": "BW", "boundary": "W"},
+    {"name": "B1", "signal": "1"},
+    {"name": "B3", "signal": "3"},
+    {"name": "B5", "signal": "5"},
+    {"name": "BE", "boundary": "E"}
+  ],
+  "platforms": [
+    {"place": "SLT", "platform": "1", "segment": "b", "from_m": 150, "to_m": 450}
+  ],
+  "routes": [
+    {"entrance": "1", "exit": {"kind": "signal", "name": "3"}, "path": ["TB"]},
+    {"entrance": "3", "exit": {"kind": "signal", "name": "5"}, "path": ["TC"]},
+    {"entrance": "5", "exit": {"kind": "node", "name": "E"}, "path": ["TD"]}
+  ],
+  "train_types": [
+    {"code": "EMU", "max_speed_kmh": 100, "accel": 0.8, "service_brake": 0.7, "emergency_brake": 1.2, "length_m": 80}
+  ],
+  "services": [
+    {"headcode": "2S01", "train_type": "EMU", "calls": []}
+  ],
+  "entries": [
+    {"service": "2S01", "boundary": "W", "time": "00:00:00", "speed_kmh": 60, "on_demand": true}
+  ],
+  "options": {"start_time": "08:00:00", "entry_delay_s": [0, 0], "min_dwell_s": [30, 30]},
+  "layout": {
+    "box_prefix": "S",
+    "workstations": {"Saltmarsh": "A"},
+    "lines": [
+      {"segment": "a", "x1": 0, "y1": 0, "x2": 150, "y2": 0},
+      {"segment": "b", "x1": 150, "y1": 0, "x2": 300, "y2": 0},
+      {"segment": "c", "x1": 300, "y1": 0, "x2": 450, "y2": 0},
+      {"segment": "d", "x1": 450, "y1": 0, "x2": 600, "y2": 0}
+    ],
+    "points": [],
+    "signals": [
+      {"signal": "1", "x": 150, "y": 0, "berth_x": 130, "berth_y": -12},
+      {"signal": "3", "x": 300, "y": 0, "berth_x": 280, "berth_y": -12},
+      {"signal": "5", "x": 450, "y": 0, "berth_x": 430, "berth_y": -12}
+    ],
+    "platforms": [
+      {"place": "SLT", "platform": "1", "x1": 187.5, "y1": -16, "x2": 262.5, "y2": -8}
+    ],
+    "labels": [
+      {"text": "Saltmarsh", "x": 195, "y": -40}
+    ]
+  }
+}

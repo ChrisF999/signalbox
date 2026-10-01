@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "title": "Reading the panel",
+  "area": "Saltmarsh",
+  "start": "08:00:00",
+  "steps": [
+    {
+      "say": "Welcome to Saltmarsh signal box. You are the signaller: you decide where trains may go. The black area is your panel, a drawing of the railway you control. Trains here run from left to right. Press Next to go on.",
+      "wait_for": {"continue": {}}
+    },
+    {
+      "say": "The grey bars are the track. Small gaps split it into track circuits: each one knows whether a train is standing on it. Grey means empty. The bar pulsing now is one track circuit.",
+      "highlight": [{"section": "TB"}],
+      "wait_for": {"continue": {}}
+    },
+    {
+      "say": "This is signal S3. Its lamp is the dot on the short post beside the track, and S3 is its name. Red means stop. Move the pointer over the signal to read what it shows.",
+      "highlight": [{"signal": "3"}],
+      "wait_for": {"continue": {}}
+    },
+    {
+      "say": "The orange block is platform 1 at Saltmarsh station; its number is written on it. You can point at any part of the track to read its name and whether a train is on it.",
+      "highlight": [{"platform": {"place": "SLT", "platform": "1"}}],
+      "wait_for": {"continue": {}}
+    },
+    {
+      "say": "Every train has a headcode: a short name such as 2S01. The panel shows it in the berth, the place in the track just before the signal the train is waiting at. This is the berth of signal S1. It is empty now.",
+      "highlight": [{"berth": "B1"}],
+      "wait_for": {"continue": {}}
+    },
+    {
+      "say": "A train is coming. Its headcode 2S01 has appeared in the berth of S1, and the track under it has turned red: red track means a train is on it. The train will stop at S1, because S1 is red. Press Next.",
+      "highlight": [{"berth": "B1"}],
+      "do": [{"spawn": {"headcode": "2S01", "entry": "W"}}],
+      "wait_for": {"all": [{"berth": {"name": "B1", "headcode": "2S01"}}, {"continue": {}}]}
+    },
+    {
+      "say": "This time the lesson sets a route for you, from S1 to S3. A route is the path a train may take; it shows white. S1 now shows green, so the driver may go. Watch the train run through the station and stop at S3. Press Next.",
+      "highlight": [{"signal": "1"}, {"section": "TB"}],
+      "do": [{"set_route": {"entrance": "1", "exit": {"kind": "signal", "name": "3"}}}],
+      "wait_for": {"all": [{"route_set": {"entrance": "1", "exit": {"kind": "signal", "name": "3"}}}, {"continue": {}}]}
+    },
+    {
+      "say": "On a real panel a signal shows only red (stop) or green (go). Open Settings at the top and choose Real aspects: the signals then show what the driver sees, with yellow meaning 'the next signal is red'. Switch back to Red/green if you like, then press Next.",
+      "highlight": [{"ui": "settings"}],
+      "wait_for": {"continue": {}}
+    },
+    {
+      "say": "The lesson now clears the way out: S3 to S5, and S5 to the edge of your area. Watch 2S01 leave. Behind it the track turns grey again as it is freed.",
+      "do": [
+        {"set_route": {"entrance": "3", "exit": {"kind": "signal", "name": "5"}}},
+        {"set_route": {"entrance": "5", "exit": {"kind": "node", "name": "E"}}}
+      ],
+      "wait_for": {"train_left_area": {"headcode": "2S01"}}
+    },
+    {
+      "say": "Well done. You can read the panel: track, track circuits, signals, platforms, berths and headcodes. Next lesson: setting routes yourself. Press Next to finish.",
+      "wait_for": {"continue": {}}
+    }
+  ]
+}

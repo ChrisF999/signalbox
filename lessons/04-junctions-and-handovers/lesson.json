@@ -1,0 +1,81 @@
+{
+  "schema": 1,
+  "title": "Junctions, auto-working & handovers",
+  "area": "Kirkby",
+  "start": "08:00:00",
+  "steps": [
+    {
+      "say": "Kirkby Junction: the main line from the left and the branch from below join here. You work Kirkby, workstation A. The next box, Lowfield (workstation B), is worked by the robot. Signal names now carry the workstation letter: KA5 is signal 5 of workstation A, KB7 is Lowfield's. Press Next.",
+      "highlight": [{"points": "P"}, {"signal": "7"}],
+      "wait_for": {"continue": {}}
+    },
+    {
+      "say": "Two trains are coming: 1K01 on the main line and 2K02 on the branch. Both must cross the junction, and only one can at a time. Press Next.",
+      "highlight": [{"berth": "B1"}, {"berth": "B3"}],
+      "do": [{"spawn": {"headcode": "1K01", "entry": "W"}}, {"spawn": {"headcode": "2K02", "entry": "N"}}],
+      "wait_for": {"continue": {}}
+    },
+    {
+      "say": "Let 1K01 go first: set the route from KA1 to KA5.",
+      "highlight": [{"signal": "1"}, {"exit": {"kind": "signal", "name": "5"}}],
+      "wait_for": {"route_set": {"entrance": "1", "exit": {"kind": "signal", "name": "5"}}}
+    },
+    {
+      "say": "Now try the route from KA3 to KA5 for 2K02.",
+      "highlight": [{"signal": "3"}, {"exit": {"kind": "signal", "name": "5"}}],
+      "wait_for": {"rejected": {}},
+      "solution": [{"set_route": {"entrance": "3", "exit": {"kind": "signal", "name": "5"}}}]
+    },
+    {
+      "say": "Refused: the junction and the line to KA5 belong to 1K01's route, so the two routes conflict. 2K02 waits at KA3 until 1K01 has passed. Press Next.",
+      "highlight": [{"section": "TP"}, {"section": "TX"}],
+      "wait_for": {"continue": {}}
+    },
+    {
+      "say": "KA5 is the last signal in your area. Set the route from KA5 to KB7, the first signal in Lowfield.",
+      "highlight": [{"signal": "5"}, {"exit": {"kind": "signal", "name": "7"}}],
+      "wait_for": {"route_set": {"entrance": "5", "exit": {"kind": "signal", "name": "7"}}}
+    },
+    {
+      "say": "Beside KA5 is a small blue circle marked A: the auto-working button. Click it. It fills in, and the route from KA5 now stays set after each train, so the trains behind get a clear signal without you setting it again. Auto-working suits plain line with no junction.",
+      "highlight": [{"ui": "auto:5"}],
+      "wait_for": {"auto_working": {"signal": "5", "on": true}}
+    },
+    {
+      "say": "Watch 1K01 run on into Lowfield. As it passes KA5 its headcode steps into Lowfield's berth: the train is handed over to the next box, here the robot, which signals it from now on.",
+      "highlight": [{"berth": "B7"}],
+      "wait_for": {"train_left_area": {"headcode": "1K01"}}
+    },
+    {
+      "say": "The junction is free again. Set KA3 to KA5 for 2K02. You need not set KA5 again: auto-working keeps it set.",
+      "highlight": [{"signal": "3"}, {"exit": {"kind": "signal", "name": "5"}}],
+      "wait_for": {"route_set": {"entrance": "3", "exit": {"kind": "signal", "name": "5"}}}
+    },
+    {
+      "say": "A third train, 1K03, is coming on the main line. Wait while 2K02 passes KA5 and leaves your area.",
+      "highlight": [{"signal": "5"}],
+      "do": [{"spawn": {"headcode": "1K03", "entry": "W"}}],
+      "wait_for": {"train_left_area": {"headcode": "2K02"}}
+    },
+    {
+      "say": "The clock at the top runs the game. Pause it: press 'pause' beside the time. In a game with other players, everyone holding an area must agree before the clock pauses or changes speed: a vote.",
+      "highlight": [{"ui": "clock"}],
+      "wait_for": {"clock": {"paused": true}}
+    },
+    {
+      "say": "Nothing moves while the clock is paused. Press 'resume' to start it again.",
+      "highlight": [{"ui": "clock"}],
+      "wait_for": {"clock": {"paused": false}}
+    },
+    {
+      "say": "Now signal 1K03 through on your own: it needs only KA1 to KA5. Then watch it leave your area.",
+      "highlight": [{"signal": "1"}],
+      "wait_for": {"train_left_area": {"headcode": "1K03"}},
+      "solution": [{"set_route": {"entrance": "1", "exit": {"kind": "signal", "name": "5"}}}]
+    },
+    {
+      "say": "Well done: that is the end of the tutorial. You can read the panel, set and cancel routes, run trains to the timetable, work a junction, use auto-working and hand trains to the next box. Try a real layout from the lobby. Press Next to finish.",
+      "wait_for": {"continue": {}}
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "title": "Running trains",
+  "area": "Hollins Cross",
+  "start": "08:00:00",
+  "steps": [
+    {
+      "say": "Trains run to a timetable. In this lesson you signal one train through Hollins Cross. Press Next.",
+      "wait_for": {"continue": {}}
+    },
+    {
+      "say": "Train 2H05 has appeared at the left edge of your area. It is in the TRAINS list on the right, with where it calls next: Hollins Cross (HXC) platform 2, and its booked time. It will wait at H1. Press Next.",
+      "highlight": [{"ui": "trains"}, {"berth": "B1"}],
+      "do": [{"spawn": {"headcode": "2H05", "entry": "W"}}],
+      "wait_for": {"continue": {}}
+    },
+    {
+      "say": "Click the SIMPLIFIER tab above the train list. The simplifier is your timetable: every train booked through your box, where it calls, which platform (Plat) and its booked arrival (Arr) and departure (Dep).",
+      "highlight": [{"ui": "simplifier"}],
+      "wait_for": {"tab": "simplifier"}
+    },
+    {
+      "say": "2H05 is booked into platform 2, arriving 08:04 and leaving 08:05. Click TRAINS to go back to the train list whenever you like. Press Next.",
+      "highlight": [{"ui": "simplifier"}],
+      "wait_for": {"continue": {}}
+    },
+    {
+      "say": "Set the route from H1 to H3, so the train can move up to H3.",
+      "highlight": [{"signal": "1"}, {"exit": {"kind": "signal", "name": "3"}}],
+      "wait_for": {"route_set": {"entrance": "1", "exit": {"kind": "signal", "name": "3"}}}
+    },
+    {
+      "say": "Now route it into its booked platform: H3 to H7, platform 2. A train sent to the wrong platform costs penalty points in a real game.",
+      "highlight": [{"signal": "3"}, {"exit": {"kind": "signal", "name": "7"}}, {"platform": {"place": "HXC", "platform": "2"}}],
+      "wait_for": {"route_set": {"entrance": "3", "exit": {"kind": "signal", "name": "7"}}}
+    },
+    {
+      "say": "Watch the train. As it leaves each track circuit, the white route behind it turns grey: this is sectional release, which frees track for other routes as soon as the train has passed. The step ends when 2H05 stands at platform 2.",
+      "highlight": [{"platform": {"place": "HXC", "platform": "2"}}],
+      "wait_for": {"train_at": {"headcode": "2H05", "place": "HXC", "platform": "2"}}
+    },
+    {
+      "say": "2H05 is at platform 2. It leaves when its time comes, but only if its signal is clear. Set the route out: H7 to H9.",
+      "highlight": [{"signal": "7"}, {"exit": {"kind": "signal", "name": "9"}}],
+      "wait_for": {"route_set": {"entrance": "7", "exit": {"kind": "signal", "name": "9"}}}
+    },
+    {
+      "say": "Last, set H9 to the edge of your area: click H9, then the small square at the right-hand end of the line. The train then leaves your area.",
+      "highlight": [{"signal": "9"}, {"exit": {"kind": "node", "name": "E"}}],
+      "wait_for": {"train_left_area": {"headcode": "2H05"}}
+    },
+    {
+      "say": "Well done. A train that runs behind its booked time is late: the train list shows +minutes and the simplifier shows how late (OT means on time). In a real game late trains cost penalty points; tutorials keep no score. Next lesson: junctions, auto-working and handing trains to the next box. Press Next to finish.",
+      "wait_for": {"continue": {}}
+    }
+  ]
+}

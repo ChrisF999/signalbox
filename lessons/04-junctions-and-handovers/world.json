@@ -1,0 +1,98 @@
+{
+  "schema": 1,
+  "title": "Kirkby Junction",
+  "areas": [
+    {"name": "Kirkby"},
+    {"name": "Lowfield"}
+  ],
+  "sections": [
+    {"name": "TW", "area": "Kirkby"},
+    {"name": "TN", "area": "Kirkby"},
+    {"name": "TP", "area": "Kirkby"},
+    {"name": "TX", "area": "Kirkby"},
+    {"name": "TY", "area": "Lowfield"},
+    {"name": "TZ", "area": "Lowfield"}
+  ],
+  "nodes": [
+    {"name": "W", "kind": "boundary"},
+    {"name": "N", "kind": "boundary"},
+    {"name": "JW", "kind": "joint"},
+    {"name": "JN", "kind": "joint"},
+    {"name": "P", "kind": "points", "toe": "pt", "normal": "pw", "reverse": "pn"},
+    {"name": "JP", "kind": "joint"},
+    {"name": "JX", "kind": "joint"},
+    {"name": "JY", "kind": "joint"},
+    {"name": "E", "kind": "boundary"}
+  ],
+  "segments": [
+    {"name": "w", "from": "W", "to": "JW", "length_m": 600, "line_speed_kmh": 100, "section": "TW"},
+    {"name": "n", "from": "N", "to": "JN", "length_m": 600, "line_speed_kmh": 100, "section": "TN"},
+    {"name": "pw", "from": "JW", "to": "P", "length_m": 30, "line_speed_kmh": 40, "section": "TP"},
+    {"name": "pn", "from": "JN", "to": "P", "length_m": 30, "line_speed_kmh": 40, "section": "TP"},
+    {"name": "pt", "from": "P", "to": "JP", "length_m": 30, "line_speed_kmh": 40, "section": "TP"},
+    {"name": "x", "from": "JP", "to": "JX", "length_m": 800, "line_speed_kmh": 100, "section": "TX"},
+    {"name": "y", "from": "JX", "to": "JY", "length_m": 800, "line_speed_kmh": 100, "section": "TY"},
+    {"name": "z", "from": "JY", "to": "E", "length_m": 600, "line_speed_kmh": 100, "section": "TZ"}
+  ],
+  "signals": [
+    {"name": "1", "area": "Kirkby", "segment": "w", "offset_m": 600, "direction": "up", "aspects": 3},
+    {"name": "3", "area": "Kirkby", "segment": "n", "offset_m": 600, "direction": "up", "aspects": 3},
+    {"name": "5", "area": "Kirkby", "segment": "x", "offset_m": 800, "direction": "up", "aspects": 3},
+    {"name": "7", "area": "Lowfield", "segment": "y", "offset_m": 800, "direction": "up", "aspects": 3}
+  ],
+  "berths": [
+    {"name": "BW", "boundary": "W"},
+    {"name": "BN", "boundary": "N"},
+    {"name": "B1", "signal": "1"},
+    {"name": "B3", "signal": "3"},
+    {"name": "B5", "signal": "5"},
+    {"name": "B7", "signal": "7"},
+    {"name": "BE", "boundary": "E"}
+  ],
+  "platforms": [],
+  "routes": [
+    {"entrance": "1", "exit": {"kind": "signal", "name": "5"}, "path": ["TP", "TX"], "points": [{"points": "P", "position": "normal"}]},
+    {"entrance": "3", "exit": {"kind": "signal", "name": "5"}, "path": ["TP", "TX"], "points": [{"points": "P", "position": "reverse"}]},
+    {"entrance": "5", "exit": {"kind": "signal", "name": "7"}, "path": ["TY"]},
+    {"entrance": "7", "exit": {"kind": "node", "name": "E"}, "path": ["TZ"]}
+  ],
+  "train_types": [
+    {"code": "EMU", "max_speed_kmh": 100, "accel": 0.8, "service_brake": 0.7, "emergency_brake": 1.2, "length_m": 80}
+  ],
+  "services": [
+    {"headcode": "1K01", "train_type": "EMU", "calls": []},
+    {"headcode": "2K02", "train_type": "EMU", "calls": []},
+    {"headcode": "1K03", "train_type": "EMU", "calls": []}
+  ],
+  "entries": [
+    {"service": "1K01", "boundary": "W", "time": "00:00:00", "speed_kmh": 60, "on_demand": true},
+    {"service": "2K02", "boundary": "N", "time": "00:00:00", "speed_kmh": 60, "on_demand": true},
+    {"service": "1K03", "boundary": "W", "time": "00:00:00", "speed_kmh": 60, "on_demand": true}
+  ],
+  "options": {"start_time": "08:00:00", "entry_delay_s": [0, 0], "min_dwell_s": [30, 30]},
+  "layout": {
+    "box_prefix": "K",
+    "workstations": {"Kirkby": "A", "Lowfield": "B"},
+    "lines": [
+      {"segment": "w", "x1": 0, "y1": 0, "x2": 150, "y2": 0},
+      {"segment": "n", "x1": 0, "y1": 60, "x2": 150, "y2": 60},
+      {"segment": "x", "x1": 195, "y1": 0, "x2": 395, "y2": 0},
+      {"segment": "y", "x1": 395, "y1": 0, "x2": 595, "y2": 0},
+      {"segment": "z", "x1": 595, "y1": 0, "x2": 745, "y2": 0}
+    ],
+    "points": [
+      {"node": "P", "x": 180, "y": 0}
+    ],
+    "signals": [
+      {"signal": "1", "x": 150, "y": 0, "berth_x": 130, "berth_y": -12},
+      {"signal": "3", "x": 150, "y": 60, "berth_x": 130, "berth_y": 48},
+      {"signal": "5", "x": 395, "y": 0, "berth_x": 375, "berth_y": -12},
+      {"signal": "7", "x": 595, "y": 0, "berth_x": 575, "berth_y": -12}
+    ],
+    "platforms": [],
+    "labels": [
+      {"text": "Kirkby", "x": 120, "y": -40},
+      {"text": "Lowfield", "x": 560, "y": -40}
+    ]
+  }
+}

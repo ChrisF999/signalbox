@@ -1,0 +1,113 @@
+{
+  "schema": 1,
+  "title": "Hollins Cross",
+  "areas": [
+    {"name": "Hollins Cross"}
+  ],
+  "sections": [
+    {"name": "TA", "area": "Hollins Cross"},
+    {"name": "TB", "area": "Hollins Cross"},
+    {"name": "TP1", "area": "Hollins Cross"},
+    {"name": "TC", "area": "Hollins Cross"},
+    {"name": "TD", "area": "Hollins Cross"},
+    {"name": "TP2", "area": "Hollins Cross"},
+    {"name": "TE", "area": "Hollins Cross"},
+    {"name": "TF", "area": "Hollins Cross"}
+  ],
+  "nodes": [
+    {"name": "W", "kind": "boundary"},
+    {"name": "J1", "kind": "joint"},
+    {"name": "J2", "kind": "joint"},
+    {"name": "P1", "kind": "points", "toe": "p1t", "normal": "p1n", "reverse": "p1r"},
+    {"name": "K1", "kind": "joint"},
+    {"name": "K2", "kind": "joint"},
+    {"name": "L1", "kind": "joint"},
+    {"name": "L2", "kind": "joint"},
+    {"name": "P2", "kind": "points", "toe": "p2t", "normal": "p2n", "reverse": "p2r"},
+    {"name": "M", "kind": "joint"},
+    {"name": "N", "kind": "joint"},
+    {"name": "E", "kind": "boundary"}
+  ],
+  "segments": [
+    {"name": "a", "from": "W", "to": "J1", "length_m": 600, "line_speed_kmh": 100, "section": "TA"},
+    {"name": "b", "from": "J1", "to": "J2", "length_m": 400, "line_speed_kmh": 100, "section": "TB"},
+    {"name": "p1t", "from": "J2", "to": "P1", "length_m": 30, "line_speed_kmh": 40, "section": "TP1"},
+    {"name": "p1n", "from": "P1", "to": "K1", "length_m": 30, "line_speed_kmh": 40, "section": "TP1"},
+    {"name": "p1r", "from": "P1", "to": "K2", "length_m": 30, "line_speed_kmh": 40, "section": "TP1"},
+    {"name": "c", "from": "K1", "to": "L1", "length_m": 500, "line_speed_kmh": 60, "section": "TC"},
+    {"name": "d", "from": "K2", "to": "L2", "length_m": 500, "line_speed_kmh": 60, "section": "TD"},
+    {"name": "p2n", "from": "L1", "to": "P2", "length_m": 30, "line_speed_kmh": 40, "section": "TP2"},
+    {"name": "p2r", "from": "L2", "to": "P2", "length_m": 30, "line_speed_kmh": 40, "section": "TP2"},
+    {"name": "p2t", "from": "P2", "to": "M", "length_m": 30, "line_speed_kmh": 40, "section": "TP2"},
+    {"name": "e", "from": "M", "to": "N", "length_m": 500, "line_speed_kmh": 100, "section": "TE"},
+    {"name": "f", "from": "N", "to": "E", "length_m": 600, "line_speed_kmh": 100, "section": "TF"}
+  ],
+  "signals": [
+    {"name": "1", "area": "Hollins Cross", "segment": "a", "offset_m": 600, "direction": "up", "aspects": 3},
+    {"name": "3", "area": "Hollins Cross", "segment": "b", "offset_m": 400, "direction": "up", "aspects": 3},
+    {"name": "5", "area": "Hollins Cross", "segment": "c", "offset_m": 500, "direction": "up", "aspects": 3},
+    {"name": "7", "area": "Hollins Cross", "segment": "d", "offset_m": 500, "direction": "up", "aspects": 3},
+    {"name": "9", "area": "Hollins Cross", "segment": "e", "offset_m": 500, "direction": "up", "aspects": 3}
+  ],
+  "berths": [
+    {"name": "BW", "boundary": "W"},
+    {"name": "B1", "signal": "1"},
+    {"name": "B3", "signal": "3"},
+    {"name": "B5", "signal": "5"},
+    {"name": "B7", "signal": "7"},
+    {"name": "B9", "signal": "9"},
+    {"name": "BE", "boundary": "E"}
+  ],
+  "platforms": [
+    {"place": "HXC", "platform": "1", "segment": "c", "from_m": 100, "to_m": 400},
+    {"place": "HXC", "platform": "2", "segment": "d", "from_m": 100, "to_m": 400}
+  ],
+  "routes": [
+    {"entrance": "1", "exit": {"kind": "signal", "name": "3"}, "path": ["TB"]},
+    {"entrance": "3", "exit": {"kind": "signal", "name": "5"}, "path": ["TP1", "TC"], "points": [{"points": "P1", "position": "normal"}], "overlap": ["TP2"], "overlap_points": [{"points": "P2", "position": "normal"}]},
+    {"entrance": "3", "exit": {"kind": "signal", "name": "7"}, "path": ["TP1", "TD"], "points": [{"points": "P1", "position": "reverse"}], "overlap": ["TP2"], "overlap_points": [{"points": "P2", "position": "reverse"}]},
+    {"entrance": "5", "exit": {"kind": "signal", "name": "9"}, "path": ["TP2", "TE"], "points": [{"points": "P2", "position": "normal"}]},
+    {"entrance": "7", "exit": {"kind": "signal", "name": "9"}, "path": ["TP2", "TE"], "points": [{"points": "P2", "position": "reverse"}]},
+    {"entrance": "9", "exit": {"kind": "node", "name": "E"}, "path": ["TF"]}
+  ],
+  "train_types": [
+    {"code": "EMU", "max_speed_kmh": 100, "accel": 0.8, "service_brake": 0.7, "emergency_brake": 1.2, "length_m": 80}
+  ],
+  "services": [
+    {"headcode": "2H05", "train_type": "EMU", "calls": [{"place": "HXC", "platform": "2", "arr": "08:04:00", "dep": "08:05:00"}]}
+  ],
+  "entries": [
+    {"service": "2H05", "boundary": "W", "time": "00:00:00", "speed_kmh": 60, "on_demand": true}
+  ],
+  "options": {"start_time": "08:00:00", "entry_delay_s": [0, 0], "min_dwell_s": [30, 30]},
+  "layout": {
+    "box_prefix": "H",
+    "workstations": {"Hollins Cross": "A"},
+    "lines": [
+      {"segment": "a", "x1": 0, "y1": 0, "x2": 150, "y2": 0},
+      {"segment": "b", "x1": 150, "y1": 0, "x2": 250, "y2": 0},
+      {"segment": "c", "x1": 280, "y1": 0, "x2": 405, "y2": 0},
+      {"segment": "d", "x1": 280, "y1": 40, "x2": 405, "y2": 40},
+      {"segment": "e", "x1": 435, "y1": 0, "x2": 560, "y2": 0},
+      {"segment": "f", "x1": 560, "y1": 0, "x2": 710, "y2": 0}
+    ],
+    "points": [
+      {"node": "P1", "x": 265, "y": 0},
+      {"node": "P2", "x": 420, "y": 0}
+    ],
+    "signals": [
+      {"signal": "1", "x": 150, "y": 0, "berth_x": 130, "berth_y": -12},
+      {"signal": "3", "x": 250, "y": 0, "berth_x": 230, "berth_y": -12},
+      {"signal": "5", "x": 405, "y": 0, "berth_x": 385, "berth_y": -12},
+      {"signal": "7", "x": 405, "y": 40, "berth_x": 385, "berth_y": 28},
+      {"signal": "9", "x": 560, "y": 0, "berth_x": 540, "berth_y": -12}
+    ],
+    "platforms": [
+      {"place": "HXC", "platform": "1", "x1": 305, "y1": -16, "x2": 380, "y2": -8},
+      {"place": "HXC", "platform": "2", "x1": 305, "y1": 48, "x2": 380, "y2": 56}
+    ],
+    "labels": [
+      {"text": "Hollins Cross", "x": 300, "y": -40}
+    ]
+  }
+}
