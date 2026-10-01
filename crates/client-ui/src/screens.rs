@@ -46,6 +46,10 @@ const SIMPLIFIER_WIDTH: f32 = {
 /// margins and a scroll bar, so the table never scrolls sideways (its
 /// header would slip off its columns) and the tabs never resize the panel.
 const SIDE_W: f32 = SIMPLIFIER_WIDTH + 24.0;
+/// Repaint at least this often (ms): clocks, flashing, reconnect timers.
+const REPAINT_MS: u64 = 250;
+/// While a tutorial highlight shows: often enough for a smooth 1 Hz pulse.
+const PULSE_REPAINT_MS: u64 = 50;
 
 /// The upper half of the side panel.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -218,8 +222,10 @@ impl UiApp {
         } else {
             self.lobby(ui);
         }
-        // Clocks, flashing and reconnect timers move without input.
-        ui.ctx().request_repaint_after(Duration::from_millis(250));
+        // Clocks, flashing and reconnect timers move without input; a
+        // tutorial highlight's pulse needs more frames to look smooth.
+        let every = if self.highlights().is_empty() { REPAINT_MS } else { PULSE_REPAINT_MS };
+        ui.ctx().request_repaint_after(Duration::from_millis(every));
     }
 
     fn lobby(&mut self, ui: &mut Ui) {
@@ -345,13 +351,14 @@ impl UiApp {
     }
 
     fn game(&mut self, ui: &mut Ui, now: f64) {
+        self.top_bar(ui, now);
+        egui::Panel::right("side").default_size(SIDE_W).min_size(SIDE_W).show(ui, |ui| self.side(ui, now));
+        // After the side panel, so a tab clicked this frame is told at once.
         let tab = match self.side_tab {
             SideTab::Trains => "trains",
             SideTab::Simplifier => "simplifier",
         };
         self.core.report_screen(tab);
-        self.top_bar(ui, now);
-        egui::Panel::right("side").default_size(SIDE_W).min_size(SIDE_W).show(ui, |ui| self.side(ui, now));
         egui::CentralPanel::default().frame(Frame::NONE.fill(BG)).show(ui, |ui| self.diagram_ui(ui, now));
         self.enquiry_window(ui);
     }
@@ -501,6 +508,9 @@ impl UiApp {
                 }
                 if ui.button("Restart lesson").clicked() {
                     act = Some(App::lesson_restart);
+                }
+                if ui.button("Leave").clicked() {
+                    act = Some(App::leave);
                 }
             });
         }
@@ -727,11 +737,13 @@ impl UiApp {
     }
 }
 
-/// The tutorial's pulsing outline round a control the step points at.
+/// The tutorial's pulsing outline round a control the step points at,
+/// kept inside the clip so a control at a panel's edge is outlined whole.
 fn mark(ui: &Ui, r: &Response, on: bool, now: f64) {
     if on {
         let stroke = Stroke::new(paint::HIGHLIGHT_W, paint::highlight_colour(now));
-        ui.painter().rect_stroke(r.rect.expand(2.0), CornerRadius::same(3), stroke, StrokeKind::Outside);
+        let rect = r.rect.expand(2.0).intersect(ui.clip_rect().shrink(paint::HIGHLIGHT_W));
+        ui.painter().rect_stroke(rect, CornerRadius::same(3), stroke, StrokeKind::Outside);
     }
 }
 

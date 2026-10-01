@@ -258,3 +258,93 @@ fn ui_highlights_outline_the_named_controls() {
     r.click(simplifier);
     r.until("Step 4 of 10");
 }
+
+/// Is `at` inside a highlight outline, drawn whole (not cut by its clip)?
+fn outlined_whole(out: &FullOutput, at: Pos2) -> bool {
+    out.shapes.iter().any(|c| match &c.shape {
+        Shape::Rect(rs) => {
+            rs.stroke.width == client_ui::paint::HIGHLIGHT_W
+                && rs.rect.contains(at)
+                && c.clip_rect.contains_rect(rs.rect.expand(rs.stroke.width))
+        }
+        _ => false,
+    })
+}
+
+#[test]
+fn the_clock_and_settings_highlights_outline_them_in_the_top_bar() {
+    let mut r = Rig::in_lesson("02-setting-routes");
+    let out = r.frame();
+    // The top bar wraps: a label's galley starts at the row's left, so
+    // take a point at the clock text's right end.
+    let clock = |out: &FullOutput| {
+        let r = texts(out).into_iter().find(|(t, _)| t.len() == 8 && t.as_bytes()[2] == b':' && t.as_bytes()[5] == b':').unwrap().1;
+        pos2(r.max.x - 4.0, r.center().y)
+    };
+    assert!(!outlined_whole(&out, clock(&out)) && !outlined_whole(&out, find(&out, "Settings")));
+    let mut v = r.ui.core.game().unwrap().lesson().unwrap().clone();
+    v.highlight = vec![Highlight::Ui(s("clock")), Highlight::Ui(s("settings"))];
+    r.h.push(ServerFrame::Game(ServerMsg::Lesson(v)));
+    r.frame();
+    let out = r.frame();
+    assert!(outlined_whole(&out, clock(&out)), "the clock is outlined");
+    assert!(outlined_whole(&out, find(&out, "Settings")), "Settings is outlined");
+}
+
+#[test]
+fn a_showing_highlight_repaints_often_enough_to_pulse() {
+    let delay = |out: &FullOutput| out.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+    let mut r = Rig::in_lesson("03-running-trains");
+    for _ in 0..5 {
+        r.frame();
+    }
+    assert!(r.ui.core.game().unwrap().lesson().unwrap().highlight.is_empty());
+    let out = r.frame();
+    assert!(delay(&out) > std::time::Duration::from_millis(200), "no highlight: the usual pace, not {:?}", delay(&out));
+    let mut r = Rig::in_lesson("02-setting-routes");
+    for _ in 0..5 {
+        r.frame();
+    }
+    let out = r.frame();
+    assert!(delay(&out) <= std::time::Duration::from_millis(50), "{:?}", delay(&out));
+}
+
+#[test]
+fn leave_in_the_lesson_box_goes_back_to_the_lobby() {
+    let mut r = Rig::in_lesson("02-setting-routes");
+    let out = r.frame();
+    let right = r.ui.diagram_rect().unwrap().max.x;
+    let leave = texts(&out).into_iter().find(|(t, at)| t == "Leave" && at.min.x >= right).expect("Leave in the lesson box").1.center();
+    r.click(leave);
+    assert_eq!(r.lobby_sent, [LobbyMsg::Leave]);
+    assert!(r.ui.core.game().is_none());
+}
+
+/// egui's default fonts draw a box for a missing glyph: the Tutorial list,
+/// the lesson box and every lesson's text must all have theirs.
+#[test]
+fn every_tutorial_character_has_a_glyph() {
+    let mut r = Rig::in_lesson("02-setting-routes");
+    let mut shown: String = texts(&r.frame()).into_iter().map(|(t, _)| t).collect();
+    shown.extend(texts(&Rig::lobby("01-reading-the-panel\n").frame()).into_iter().map(|(t, _)| t));
+    for t in ["Lesson complete. Well done!", "Back to tutorials", lesson::SPAD_ALERT, lesson::COLLISION_ALERT] {
+        shown.push_str(t);
+    }
+    let mut dirs: Vec<_> = std::fs::read_dir(LESSONS).unwrap().map(|e| e.unwrap().path()).collect();
+    dirs.sort();
+    for d in dirs {
+        let l = lesson::load_lesson(&d).unwrap();
+        shown.push_str(&l.file.title);
+        for step in &l.file.steps {
+            shown.push_str(&step.say);
+        }
+    }
+    let missing: Vec<char> = r.ctx.fonts_mut(|f| {
+        shown
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .filter(|&c| !f.has_glyph(&egui::FontId::proportional(14.0), c) && !f.has_glyph(&egui::FontId::monospace(14.0), c))
+            .collect()
+    });
+    assert!(missing.is_empty(), "no glyph for {missing:?}");
+}

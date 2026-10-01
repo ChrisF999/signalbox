@@ -113,17 +113,22 @@ fn every_lesson_draws_with_its_highlights() {
             let names = Names::new(&l);
             for step in &steps {
                 let diagram: Vec<_> = step.highlight.iter().filter(|h| !matches!(h, protocol::Highlight::Ui(u) if !u.starts_with("auto:"))).cloned().collect();
-                let st = PaintState { view: Some(&v), selected: None, exits: &[], refused: None, time: 0.25, aspects: AspectMode::Real, numbers: true, names: &names, highlight: &diagram };
-                let dr = draw(&sc, &cam, screen, &st);
+                let st = |highlight| PaintState { view: Some(&v), selected: None, exits: &[], refused: None, time: 0.25, aspects: AspectMode::Real, numbers: true, names: &names, highlight };
+                let dr = draw(&sc, &cam, screen, &st(&diagram));
                 assert!(dr.shapes.iter().all(finite), "{}", d.display());
                 if who == "pat" {
-                    let lit = dr.shapes.iter().filter(|s| match s {
-                        Shape::Circle(c) => c.stroke.color.r() == 0xFF && c.stroke.color.g() == 0x8C,
-                        Shape::Rect(r) => r.stroke.color.r() == 0xFF && r.stroke.color.g() == 0x8C,
-                        Shape::LineSegment { stroke, .. } => stroke.color.r() == 0xFF && stroke.color.g() == 0x8C,
-                        _ => false,
-                    }).count();
-                    assert!(lit >= diagram.len(), "{}: step `{}` highlights something not drawn", d.display(), step.say);
+                    // Each highlight on its own: one that resolves to nothing
+                    // must not hide behind another's several lines.
+                    for h in &diagram {
+                        let dr = draw(&sc, &cam, screen, &st(std::slice::from_ref(h)));
+                        let lit = dr.shapes.iter().filter(|s| match s {
+                            Shape::Circle(c) => c.stroke.color.r() == 0xFF && c.stroke.color.g() == 0x8C,
+                            Shape::Rect(r) => r.stroke.color.r() == 0xFF && r.stroke.color.g() == 0x8C,
+                            Shape::LineSegment { stroke, .. } => stroke.color.r() == 0xFF && stroke.color.g() == 0x8C,
+                            _ => false,
+                        }).count();
+                        assert!(lit >= 1, "{}: step `{}`: {h:?} is not drawn", d.display(), step.say);
+                    }
                 }
             }
         }
