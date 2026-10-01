@@ -2,24 +2,35 @@
 
 Date: 2026-10-01
 Status: approved by the owner 2026-10-01 (P1–P6, P9–P22; P7–P8 withdrawn; P18 amended, P22 conditional). Amended 2026-10-01: the
-Drain timetable is the real Waterloo & City WTT (§4), replacing the repeat timetable (P7, P8 withdrawn).
+Drain timetable is the real Waterloo & City WTT (§4), replacing the repeat timetable (P7, P8 withdrawn). Amended again
+2026-10-01: P18 shows train numbers only (§4.4), P22 waits for the `robot-fixes` branch (§4.6), the hands-on UI review's
+High and Medium findings join the pass (§10; the findings owner approved, the new design choices in §10.2 proposed), and
+the WTT (§4 with P18) ships as its own plan first (§9).
 License: GPL-2.0-or-later
 Builds on: `2026-10-01-panel-realism-design.md` (D1.1, deployed) and `2026-09-30-browser-client-design.md` (D1).
-Base for the plan: **`main` after the `tutorial` branch merges** (`0c0ea67`). Line references in the plan were taken
-at `5eb82f0` and must be re-checked; the WTT tasks (4a–4c) and Task 5's screen test were written and run on
-`0c0ea67`.
+Two plans implement this spec, in this order:
+
+1. **`docs/superpowers/plans/2026-10-01-drain-wtt.md`** — §4 and P18 (the WTT reader, the image, the whole-day soak, the
+   display headcode, and P22 if still needed). Base: **`main` after the `robot-fixes` merge**.
+2. **`docs/superpowers/plans/2026-10-01-browser-polish.md`** — everything else (§3, §5–§7, §10). Base: **`main` after
+   the `drain-wtt` merge** (a `perf-quick-wins` branch may merge in between; §9).
+
+Both plans' code was written and run on scratch copies of `main` `0c0ea67` (the polish plan's on top of the WTT plan's
+P18 changes); line references must be re-checked on the real base.
 
 ## 1. Goal
 
 Finish the browser client before any desktop (D2) work: a panel that is legible at every zoom, Drain running
 the real Waterloo & City timetable for a whole day (when the owner supplies the WTT), old Drain saves that show
 today's names, and a real-browser check that the WebGL2 fallback works. Plus one small edge the long timetable
-makes urgent (the simplifier opening at "now"). Nothing here changes the simulation, the wire protocol or the
-save schema; one rule of the robot signaller changes (P22, §4.6).
+makes urgent (the simplifier opening at "now"). And the hands-on UI review's High and Medium findings (§10). The
+simulation and the save schema are unchanged; the wire protocol gains only additive fields and messages (P18, §10.3);
+one rule of the robot signaller may change (P22, conditional, §4.6).
 
-The `tutorial` branch is changing protocol, the server front, client-core and client-ui at the same time.
-This pass therefore keeps to drawing and layout code, the converter, the robot's standing rule, the game
-library's resume path and deploy scripts; its only server change is one game-process argument (§5.3).
+The `tutorial` branch (merged as `0c0ea67`) changed protocol, the server front, client-core and client-ui while §3–§7
+were planned, so those sections keep to drawing and layout code, the converter, the robot's standing rule, the game
+library's resume path and deploy scripts, with one game-process argument (§5.3). The UI review's findings (§10) reach
+further: client-core, client-ui, the protocol, the game library, the lessons and the front's lobby list.
 
 ## 2. Owner decisions
 
@@ -41,7 +52,7 @@ library's resume path and deploy scripts; its only server change is one game-pro
 | P10 | Old saves' names | On every resume the game takes the display data (`layout`) from the current layout file when the saved network matches it exactly; in memory only, never written back | **owner approved 2026-10-01** |
 | P11 | Where the browser check runs | `deploy/browser-check.sh` on ra (Docker + the Playwright image), run by the controller before every deploy and in this pass's final verification; not in Forge CI, whose runner has neither Docker nor internet | **owner approved 2026-10-01** |
 | P12 | Simplifier start | The simplifier opens scrolled to the first train not yet finished, not to the first train of the day | **owner approved 2026-10-01** |
-| P13 | Headcode boxes | Every berth's knock-out is as wide as the layout's longest booked headcode (at least today's 34 px): Gretz's 7-character numbers overflowed theirs onto the track and its neighbours (and the WTT's `202/163` would) | **owner approved 2026-10-01** |
+| P13 | Headcode boxes | Every berth's knock-out is as wide as the layout's longest booked headcode as displayed (P18; at least today's 34 px): Gretz's 7–8-character numbers overflowed theirs onto the track and its neighbours. The WTT's trains show `201` (P18), which fits today's box: the WTT plan needs nothing from P13 | **owner approved 2026-10-01** |
 | P14 | Reading the WTT | From `pdftotext -bbox` (every word with its box), not `-layout` text, whose 34 stacked fractions break their rows; anything that does not fit is an error naming the page (§4.2) | **owner approved 2026-10-01** |
 | P15 | The weekday | Wednesday: the `TThX` variants without Monday's weekend moves (`MO`) or the Monday/Friday late depot run (`MFO`); 585 trips (§4.4) | **owner approved 2026-10-01** |
 | P16 | Checks | Running times, train workings, trains in service and service intervals checked before converting; a failure stops the conversion (and the image build). Trains in service at 21:00 checked as **4**, not the printed 3 (the WTT's own workings give 4) (§4.3) | **owner approved 2026-10-01** |
@@ -117,7 +128,7 @@ All of it is client-ui drawing; nothing else changes.
      nudged by up to half/one text height and width, line names by up to one line height vertically
      (their arrow stays). A platform number must also fit inside its block.
    - Headcodes are never moved or hidden: they are state. Their knock-out boxes (kept clear) are as wide
-     as the layout's longest booked headcode (P13).
+     as the layout's longest booked headcode as displayed (P13, P18).
 3. **Static and cached (P3).** `plan` sees no train state (headcodes are not inputs; every berth box is kept
    clear), and no screen edge, so its result depends only on the scene, the scale and the numbers setting.
    `UiApp` caches the decisions under (game, layout generation, scale, numbers on/off) and re-plans only on
@@ -186,8 +197,8 @@ the real London Underground Waterloo & City line timetable instead.
   The PDF and everything made from it (its text, the parsed timetable, the converted world) are never committed.
   The owner keeps the PDF locally; the release image still gets the real timetable (how: P21). CI tests the reader
   on a small hand-made synthetic fixture in the same textual format, not copied from TfL.
-- **Headcodes.** The real train numbers (201–207), as LU train describers show them; train number plus trip where
-  the game needs a unique code per trip (P18).
+- **Headcodes.** The real train numbers (201–207), as LU train describers show them. Each trip keeps a unique code
+  inside the game (train number plus trip), but only the train number is ever shown (P18, amended).
 - **Old saves (P9, kept).** A save carries its world, so an old Drain save keeps the timetable it was created with.
 
 ### 4.2 Reading the PDF: `pdftotext -bbox`, not `-layout` (P14)
@@ -275,9 +286,20 @@ likely to find its road still taken. Real WTT: 290 road stays, 164/73/53 on road
 
 Converted: 574 services, 5 entries, every road stay booked.
 
-**Headcodes (P18).** `<train>/<trip>`, e.g. `201/7`, `202/163`: the train number first, as the describer shows,
-and the trip so every service is unique (the world loader requires it). 5–7 characters; P13 sizes Drain's berth
-boxes to fit them. Typing `201/` in the simplifier search lists one train's day.
+**Headcodes (P18, amended by the owner).** Inside the game every trip has a unique service code `<train>/<trip>`, e.g.
+`201/7`, `202/163` (the world loader requires unique headcodes; saves, logs, the robot and the wire use it). The panel
+shows only the train number, `201`, as LU train describers do: in berths, the train list, the simplifier, the enquiry,
+hover text, menus and alarms. The design is general, not Drain's:
+
+- The world's services gain an optional **display headcode** (`ServiceFile.display`, `Service.display`; serde default:
+  none, i.e. the headcode itself; not written when absent, so every other world converts byte-identically). The sim
+  never reads it. An empty display headcode, or one equal to the headcode, is none.
+- `game::display` collects `headcode → display` for the services that have one; every `Layout` carries it
+  (`Layout.headcodes`, additive, omitted when empty). Views, deltas, notices and commands keep the unique code.
+- The client shows `Names::headcode(h)` wherever it shows a headcode; anything without an entry (an interposed
+  headcode, other layouts) shows as it is. Lateness and the enquiry still look trains up by the unique code.
+- The simplifier searches what is shown: typing `201` lists train 201's whole day.
+- P13's berth boxes are sized by the longest headcode *as displayed*, so Drain's stay at 34 px.
 
 **Start and entries (P19).** The game starts at 05:40 (10 minutes before the first train leaves the depot, on the
 5 minutes). Train 203, stabled at Bank platform 8 overnight, is there from the start. Trains starting from the
@@ -307,7 +329,21 @@ differ, which P10 never takes from the current file.
 - `ts2-import --wtt <wtt.bbox.html>` applies after `--areas` and `--lines` and prints what it did (trips, checks,
   services, what was left out, the road use, the 203 change).
 
-### 4.6 The robot rule the WTT needs (P22, a core change)
+### 4.6 The robot rule the WTT may need (P22, a core change; conditional)
+
+**Conditional (owner, 2026-10-01).** The `robot-fixes` branch merges to `main` first: it rewrites the robot's planning
+to search the whole itinerary at once, adds weighted entry-delay bands (TS2's generators), fixes the lateness of
+trains standing at their first platform (UI review H1) and keeps terminating headcodes in their terminal platforms.
+The WTT plan then re-runs the whole-day WTT soak on `main` after that merge, before anything else in the robot:
+
+- **If the Drain no longer gridlocks** (five seeds: every train stabled by 01:00, none stuck, no stop or departure
+  more than 3 minutes late), P22 is **not** added and this section stays as a record of the finding.
+- **If it still gridlocks** (or runs more than 3 minutes late), P22 is added as below, and kept only if Liverpool
+  Street's 3-hour soak is not worse with it than without it on the same base: longest fringe wait not longer, no
+  fewer trains entered, mean entry and arrival lateness not higher (the soak metrics `robot-fixes` adds). If it is
+  worse, P22 is not merged and the owner decides (the two other robot changes below are the alternatives).
+
+The finding and the measurements below were taken on `main` `0c0ea67`, before `robot-fixes`.
 
 **Finding.** With today's robot the WTT gridlocks at 06:52, as the morning peak builds. Drain's westbound line is
 three 700 m blocks (73, 74, 75), and the last one also holds platform 26. The robot gives a train its routes only
@@ -364,8 +400,11 @@ routes the robot asks for from now on; a resumed save replays its logged command
   roads, entries, the platform-26 pass, byte-identical twice); the converted day runs an hour under the robot with
   no incident; a non-timetable and a garbled time are refused. CLI: `--wtt` refuses the synthetic WTT (it fails the
   Waterloo & City checks) and writes nothing; `--wtt` needs a value.
-- CI (`tests/soak.rs`): on Drain, a train leaves Bank for signal 73 while platform 26 is occupied (fails with
-  today's robot).
+- CI (`tests/soak.rs`), only if P22 is added (§4.6): on Drain, a train leaves Bank for signal 73 while platform 26 is
+  occupied (fails without P22).
+- The display headcode (P18): the synthetic day's services carry display headcodes `301`, `302`; a world's display
+  headcode reaches every `Layout`; the client shows it in berths, lists, the simplifier (and searches it), the enquiry,
+  menus, hover text and alarms.
 - Owner-run (`tests/wtt_day.rs`, `#[ignore]`, skipped without `external/wtt/wtt.bbox.html`): the real WTT, the
   whole day, five seeds: no SPADs, collisions or stuck trains, all stabled by 01:00, no stop or departure more
   than 3 minutes late.
@@ -465,6 +504,13 @@ a screen test on Drain's TS2 timetable at 06:30 where BW01 is scrolled out of vi
 
 ## 8. Excluded (and why)
 
+- **UI review H1** (trains at their first platform shown late): fixed on the `robot-fixes` branch, which merges first.
+  M6's single lateness style (§10.1) shows whatever lateness that fix gives.
+- **The UI review's Low findings** (L1–L15): a later pass; a few are met in passing (L3 by M6's empty-list line, L10
+  in part by H2's dead-click lines).
+- **An overview strip** beside a readable Fit (M13 suggested one): Fit at a readable scale is enough this pass.
+- **Forcing red/green aspects in tutorials** (H6's first option): the lesson texts are worded for both modes instead.
+
 - **The repeat timetable** (P7, P8): withdrawn for the real WTT.
 - **The other weekdays and Saturday** as choices (a per-game or per-layout weekday): one representative weekday
   (P15) this pass; the reader already selects by day, so a later choice is a small change.
@@ -485,6 +531,23 @@ a screen test on Drain's TS2 timetable at 06:30 where BW01 is scrolled out of vi
 
 ## 9. Risks
 
+- **Two plans, one spec.** The WTT section (§4) and P18 ship as their own plan
+  (`docs/superpowers/plans/2026-10-01-drain-wtt.md`) right after `robot-fixes` merges, before the rest of this pass;
+  the polish plan's base is `main` after that merge. Its P13 sizing uses P18's `Layout.headcodes`.
+- **`perf-quick-wins` may merge between the two plans.** It touches `game/src/save.rs`, `game/src/game.rs` (about
+  lines 156 and 632–667), `protocol/src/lobby.rs` (parsing), the front's `layouts.rs` and `assets.rs`,
+  `scripts/build-web.sh` and the Dockerfile's `wasm-tools` stage: the polish plan's resume task (§5), its votes task
+  (M8, `game.rs`), its lobby tasks (M9, M14: `lobby.rs`, `layouts.rs`) and the WTT plan's Dockerfile stage must be
+  re-applied by intent there.
+- **The UI review's protocol additions** (§10.3) are all additive with serde defaults, but a client and front built
+  from different commits would disagree on `vote_decline` (an old front answers `bad_message`); the image ships both
+  together.
+- **Lesson texts** change (M1 names points `HP1`; H5 adds `done` texts; H6 rewords lesson 1 and moves its Real aspects
+  step): the CI play-through (`crates/game/tests/lessons.rs`) must still finish every lesson; it now presses Next on a
+  done step as a player would.
+- **Readable Fit (M13)** shows Gretz's boxes part at a time; criterion 3 of §3.4 is held only where Fit frames the whole
+  area (§10.2 U19), so Gretz's numbers at Fit are reported, not asserted.
+
 - **Tutorial merge.** `crates/server/src/process.rs` and `supervisor.rs` (§5.3) and `crates/game/src/game.rs`
   are edited on both branches; the plan's edits there are a few lines each and must be re-applied against the
   merged code. client-ui is not touched by the tutorial at `b5a9657`, but its lesson highlights may land in
@@ -502,15 +565,101 @@ a screen test on Drain's TS2 timetable at 06:30 where BW01 is scrolled out of vi
   is booked into — can still lock five trains in a circle in a robot-held area (seen in scratch runs with long
   dwells). Players can always break it by using the other platform or road. The two robot changes in §4.6 that
   avoid it are the follow-up if it bites.
-- **P22 changes the robot for every layout.** The soaks pass and Gretz is unchanged, but Liverpool Street's
-  longest fringe wait over 3 hours rose from 686 to 997 s (while more trains got through: 76 entered, 60 exited,
-  against 71 and 58).
+- **P22 changes the robot for every layout, if it is added.** On `0c0ea67` the soaks passed and Gretz was unchanged,
+  but Liverpool Street's longest fringe wait over 3 hours rose from 686 to 997 s (while more trains got through: 76
+  entered, 60 exited, against 71 and 58). The condition in §4.6 re-measures this on the `robot-fixes` base.
+- **`robot-fixes` moves the ground under the WTT numbers.** §4.7's results were measured with the old robot plus P22;
+  whole-itinerary planning and weighted entry delays will change them (Drain's entries are timed, so the delay bands
+  matter little there; the planning does). The whole-day soak's limits (no stop more than 3 minutes late) stay.
 - **The WTT reader fits WTT No. 7.** Another WTT (a later number, another line) may lay its pages out differently;
   the checks and the strict reader stop the build rather than guess. Its constants (label and data columns,
   tolerances, the W&C checks) are in one place (`ts2_import::wtt`).
 - **Licence.** The image built with the PDF holds a timetable made from TfL's document: it must stay on ra and
   never be pushed to a public registry (`deploy/README.md`, `external/wtt/README.md`). The repository has only
   the reader, a synthetic fixture and its generator.
-- **Headcode width on Drain.** `202/163` is 7 characters, as wide as Gretz's numbers; the legibility measurement
-  (§3.4) runs on the committed TS2 timetable (4 characters) in CI, so the deployed Drain's wider berth boxes are not
-  measured there. The browser check's screenshots (TS2 timetable) do not show them either.
+- **Headcode width on Drain.** No longer a risk: P18 (amended) shows `201`, three characters, so Drain's berth boxes
+  stay 34 px. An interposed headcode (up to 10 characters) can still overflow a box, as today.
+
+## 10. The hands-on UI review (owner approved 2026-10-01)
+
+Source: the review of `main` `0c0ea67` in a real browser (Playwright Chromium, WebGL2), 1024–1920 px wide, every area
+of the three layouts, lessons 1 and 2. Its **High findings H2–H7 and Medium findings M1–M16 are owner approved
+2026-10-01** for this pass; H1 is fixed on `robot-fixes` and the Low findings wait (§8). Where a finding overlaps work
+above they are merged: H3 with P13 (both size by the displayed headcode), M11 with the label placer (bigger glyphs
+are kept clear like the rest), M13 with P1's measurement (§3.4), M16 with the placer (a highlight ring is kept clear),
+H4–H6 with the lessons and their CI play-through.
+
+### 10.1 The findings and what is done
+
+| # | Finding (owner approved) | What this pass does |
+|---|---|---|
+| H2 | Create makes you a spectator; signal clicks then do nothing, silently | The lobby's New game form chooses where you start: an area to signal, or *watch*; the client claims the area as soon as the new game's first layout comes. A spectator's top bar says "You are watching. Claim an area to signal:" beside the Claim buttons. A click on a signal that chooses nothing logs one line saying why (watching; another area's; no route of yours starts there), once until something else is logged |
+| H3 | Gretz's simplifier headcodes truncated (`118…`) | The Train column fits the layout's longest headcode as displayed (Gretz: 8 characters, `W118412a`), the side panel starts wide enough for it, and every cell shows its whole text on hover (places by name, M2) |
+| H4 | The lesson's Next moves with the text | A button row above the text that never moves: Next on the left (greyed, not removed, while the step waits for something else), Restart step, Restart lesson and Leave on the right; Enter presses Next |
+| H5 | Action steps advance the moment they succeed | A step may carry a `done` text: once its task is done it says it and waits for Next. Given to lesson 2 steps 4, 5 and 9, lesson 3 step 7 and lesson 4 step 7 |
+| H6 | Lesson text contradicts saved Real aspects | Texts say "a proceed aspect" where the mode matters; lesson 1's Real aspects step moves before the train comes and shows S3 cleared by a demonstrated route, so yellow is there to see |
+| H7 | At 1024 px the panel is unusable | Hide panel / Show panel in the top bar; the panel can be dragged to 240 pt (the simplifier then scrolls sideways, its header with it); an untouched Fit follows the window's size |
+| M1 | Points, track and berths show converter ids | Points as `<box><workstation>P<number>` (`N153` → `LAP153`; a lesson's `P1` → `HP1`), berths by their signal (`Berth LA29`; a boundary berth is an `Edge berth`), track never by id (`Track at LIVERPOOL STREET 10`, else `Track`) in hover text, menus, command texts and alarms |
+| M2 | Places as raw TS2 codes | The converter writes TS2's place names (`layout.places`: `LIVST` → `LIVERPOOL STREET`); every `Layout` carries them. Tables keep the short codes and show the name on hover; sentences (alarms, the enquiry, hover text) use names |
+| M3 | Nothing says what is clickable | A pointing hand over what you can work; hover text ends with what a click does ("click: choose as entrance", "click: swing them", "right-click: interpose or cancel a headcode"…); a left click on your points opens their menu (it never swings them by itself) |
+| M4 | Refusals do not name the conflict | The refusal carries the route in the way (`by`), named in the alarm (`… (conflicts with a route already set: LA31 to LA29)`) and its entrance outlined with yours for the 2 s |
+| M5 | The top bar reflows under the pointer | Row one: title and clock left, buttons right-aligned in a fixed order (Fit, Hide panel, Settings, Release area, Leave); the clock state and pause/resume are fixed widths. Row two: an open vote, else the spectator's hint, then the players. The lobby's layout list is a fixed width |
+| M6 | Train list: no headings, arrival time, its own lateness style | Headings (Train, State, Next, Arr, Dep, Late), the next call's booked arrival and departure, lateness as the simplifier writes it (`OT`, `3L`; blank while due), and "No trains here or due in the next 30 minutes" when empty. The lateness value is whatever `robot-fixes`' H1 rule gives |
+| M7 | Enquiry window over the Players row, unlabelled | It opens beside where it was asked for (kept on screen), with a labelled grid (State; Next: `depart LIVERPOOL STREET 10 at 06:00` / `arrive …` / `pass …`; Runs: from and to) and headed timetable rows |
+| M8 | Votes: no Agree/Decline, no "waiting for", no outcome | The view's vote lists who has still to agree; voters who have not get Agree and Decline (the proposer Withdraw); declining ends the vote at once; every player hears how a vote ended (passed, declined by whom, lapsed); a paused clock's hover says why and how to restart it |
+| M9 | Leave keeps your area; the lobby list goes stale | Leave releases a held area first (a tutorial ends anyway); the front sends the games list to every player in the lobby whenever a game's holders or players change |
+| M10 | Release area at one click | Two steps: Release area → Yes, release / Cancel |
+| M11 | Zoom coarse, signals tiny when zoomed in | A wheel notch zooms about ×1.2 (was ×1.8); + and − buttons in the diagram's corner and the + / = / − keys zoom ×1.25 about the middle; once the track is at its widest the signal glyphs (lamp, post, hook, ○A, numbers, platform text) grow with the zoom, up to twice their size; "Drag to move · wheel, + or - to zoom · Fit shows it all" until the player first moves the view |
+| M12 | Hard to tell which way points lie | The leg the points do not lie to is drawn at 40 % of the track's width; while they move, the leg they move to flashes; a crossover's middle neither end of which lies over it is thin too (unless something is on it) |
+| M13 | Gretz at Fit is a thin strip | For a player (not a spectator), Fit never shows the area smaller than 0.55 px per unit: an area too long for that is shown at that scale round its busiest station (the place its simplifier calls at most) |
+| M14 | The lobby gives no orientation | A first line saying what this is and pointing at the tutorial; "Signed in as …" and Sign out; layouts by title with a one-line description (from the layout's areas file); labels before fields with hover help for Seed and Start; By and Last played columns; a centred column in wide windows |
+| M15 | Form errors at the top shift every row; a junk seed becomes random | Seed and Start are checked as typed, the problem shown in a fixed slot beside each field, Create greyed until both are right; the front's answers show in a fixed line below the form |
+| M16 | Tutorial highlights weak or over what they point at | The pulse never drops below 60 %; every highlight stroke has a black underlay; points are outlined along their legs, not ringed; a signal's ring is kept clear so the placer moves its number off it |
+
+### 10.2 Design choices for the owner (proposed — needs owner OK)
+
+The findings are approved; these are the choices made in specifying them. Each is what the plan implements, so a
+"no" means a change to its task.
+
+| # | Topic | Proposed |
+|---|---|---|
+| U1 | H2: where a new game's creator starts | A "Signal" list beside Layout: *watch* (default) or one of the layout's areas; the claim is made by the client after the first layout, so nothing changes on the front |
+| U2 | H2: dead-click lines | Logged as ordinary (not alarm) lines, once until another line is logged: "You are watching: claim an area to signal", "`LB72` is worked from Bethnal Green, not your area", "No route of yours starts at `LA31`", "Auto-working `LA31`: set a route from it first" |
+| U3 | H3/H7: the panel's width | It starts at the simplifier's width for the longest displayed headcode (Gretz: about 15 pt wider than today's 398) and can be dragged down to 240 pt, the simplifier then scrolling sideways |
+| U4 | H4: the lesson buttons | Next alone on the left, the others on the right; Enter is Next whenever Next is enabled and no text field has the keyboard |
+| U5 | H5: which steps pause | Opt-in per step (`done` text): lesson 2 steps 4, 5, 9; lesson 3 step 7; lesson 4 step 7, with texts such as "Done: the track is grey again and H3 is back to red. Press Next." Other steps move on as before |
+| U6 | H6: Real aspects in lessons | Not forced; texts say "a proceed aspect"; lesson 1's Real aspects step comes before the train (step 6), with the lesson setting S3 to S5 so S3 shows green or yellow, and cancelling it as the train is spawned |
+| U7 | M1: display names | Points `<box><ws>P<n>` (`n` = the digits after a leading `N` or `P`, else the name); berths by signal; boundary berths `Edge berth`; track by its platform or just `Track`; commands "swing LAP153 reverse", "interpose 1A01 at LA29", "cancel the headcode at LA29"; lesson 2's text says HP1 |
+| U8 | M2: place names | From TS2's Place items with a place code (Gretz's code-less labels are left out); tables keep codes with the name on hover; alarms, the enquiry and hover text use names |
+| U9 | M3: left click on points | Opens the menu (one more click to swing), never swings directly |
+| U10 | M4: the outline | The blocking route's entrance gets the same steady magenta ring for the same 2 s; for a refused points swing (no entrance of yours) only the blocking entrance is ringed |
+| U11 | M5: widths | Clock state 52 pt, pause/resume 64 pt, the lobby's layout list 180 pt; Release confirm as Delete's |
+| U12 | M6: lateness | `OT` under a minute, else `nL`, red when late, grey on time, blank while due, in both lists |
+| U13 | M7: placement | 16 px right of and below the pointer, kept on screen by egui |
+| U14 | M8: Decline | Any voter's Decline ends the proposal at once (a veto), as any voter's silence does after 30 s; a lone voter's proposal that applies at once is not announced |
+| U15 | M9: lobby push | Sent only to players in the lobby, when a game's holders or connected players change (the front hears each game's status once a second); tutorials are never listed |
+| U16 | M11: steps and growth | ×1.2 a wheel notch (1/600 per point), ×1.25 a button or key; glyphs grow linearly from 14/9 px per unit (where the track reaches its 14 px) to twice their size; headcodes and berth boxes do not grow |
+| U17 | M12: widths | The unused leg and an unused crossover middle at 40 % of the track's width; the moving leg's first half blinks at the panel's 2 Hz |
+| U18 | M13: the scale | 0.55 px per unit for players only, centred on the place with the most simplifier calls among those with a platform in the area |
+| U19 | M13 × P1 | §3.4's criterion 3 (every own number drawn, ≤ 4 tight at 1280 × 800 Fit) holds for views whose Fit frames the whole area; the Gretz boxes at readable Fit are printed, not asserted (measured on the scratch copy: Gretz 1 hidden and 6 tight, Tournan 1 hidden, Mortcerf 2 hidden; before M13 they drew no numbers at all) |
+| U20 | M14: words | First line "Run a signal box: set routes for trains on real layouts, alone or with friends. New here? Start with the tutorial below."; descriptions: Liverpool Street "London Liverpool Street: a busy terminus and its approaches, worked from three workstations."; Drain "The Waterloo & City line: two stations and a shuttle between them. The gentlest place to start."; Gretz "Gretz-Armainvilliers, east of Paris: a long main line and its branches, three signal boxes."; Last played as `2026-10-01 14:45 UTC`; column 900 pt |
+| U21 | M15: messages | "a whole number, or blank for random"; "HH:MM, or blank for the layout's start" (hours 0–23, minutes and seconds 0–59) |
+| U22 | M16: strength | Pulse 60–100 %; a black underlay 2 px wider than the 2.5 px stroke |
+
+### 10.3 What changes on the wire and in files (all additive)
+
+- `Layout`: `headcodes` (P18), `places` (M2) — maps, omitted when empty.
+- `LayoutInfo`: `title`, `description`; `LobbyReply::Layouts`: `you`; `GameInfo`: `last_played` (M14).
+- `TrainRow`: `arr`, `dep` (M6). `VoteView`: `waiting` (M8). `LessonView`: `completed`, `after` (H5).
+- `Notice::Rejected`: `by` (M4); `Notice::VoteEnded { proposal, outcome }` and `ClientMsg::VoteDecline` (M8), the
+  only new message types (`vote_decline` joins `CLIENT_MSG_TYPES`).
+- Files: `ServiceFile.display` (P18), the converted world's `layout.places` and `layout.description` (M2, M14; the
+  areas file gains an optional `description`), a lesson step's `done` (H5). Save schema unchanged.
+
+### 10.4 Tests
+
+Each task pins its finding with a test in the crate that owns the code: the client-core logic natively (hints, dead
+clicks, names, the form, the enquiry's next line, Leave), the screens headless (cursor, buttons that do not move,
+the panel, zoom, readable Fit, the lobby, the lesson box), the game library (the blocker, vote outcomes, `done`
+steps), the front (the lobby push) and the converter (places, descriptions). The legibility measurement (§3.4) runs
+with the readable Fit and the growing glyphs, and the CI play-through finishes every lesson.
