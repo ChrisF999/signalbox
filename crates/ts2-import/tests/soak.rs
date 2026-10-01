@@ -36,17 +36,6 @@ fn drain_runs_its_whole_timetable() {
     assert_eq!(r.waiting_to_enter, 0, "{r:?}");
 }
 
-/// Three sim-hours from 05:00:15. Slow in debug builds: run with
-/// `scripts/cargo test --release -p ts2-import --test soak -- --ignored`.
-#[test]
-#[ignore]
-fn liverpool_street_runs_three_hours() {
-    let r = run("liverpool-st", 3.0);
-    assert_safe("liverpool-st", &r);
-    assert!(r.max_fringe_wait_s < 1800.0, "{r:?}");
-    assert!(r.exited + r.stabled > 0, "{r:?}");
-}
-
 /// The seed of the owner's Liverpool Street run the robot fixes were measured on.
 const LIVERPOOL_SEED: u64 = 8036132600083564156;
 
@@ -138,16 +127,84 @@ fn measure(world: World, seed: u64, hours: f64) -> Metrics {
     Metrics { report, rounds, robot_total: total, robot_max: max, unlabelled }
 }
 
-/// The owner's seeded three-hour Liverpool Street run, printed (no asserts).
+/// The owner's seeded three-hour Liverpool Street run and three more seeds,
+/// printed (no asserts): `-- --ignored --nocapture liverpool_street_metrics`.
 #[test]
 #[ignore]
 fn liverpool_street_metrics() {
-    let m = measure(liverpool_world(), LIVERPOOL_SEED, 3.0);
-    println!("liverpool-st seed {LIVERPOOL_SEED}: {}", m.summary());
-    println!("{:?}", m.report);
-    let mut seen: Vec<&str> = m.unlabelled.iter().map(|u| u.split('@').next().unwrap()).collect();
-    seen.dedup();
-    println!("unlabelled {:?} first {:?}", seen, m.unlabelled.first());
+    for seed in [LIVERPOOL_SEED, 7, 1, 2] {
+        let m = measure(liverpool_world(), seed, 3.0);
+        println!("liverpool-st seed {seed}: {}", m.summary());
+    }
+}
+
+/// Upper bounds for a Liverpool Street robot run.
+struct Bounds {
+    never_entered: usize,
+    entry_late_p90_s: i64,
+    arrival_late_p50_s: i64,
+    arrival_late_p90_s: i64,
+    wrong_platforms: usize,
+    penalties: i64,
+}
+
+fn assert_bounds(what: &str, m: &Metrics, b: &Bounds) {
+    let r = &m.report;
+    let s = m.summary();
+    assert_safe(what, r);
+    let late: Vec<i64> = r.arrival_late_s.iter().map(|&l| l.max(0)).collect();
+    assert!(r.entries_due - r.entries_due_entered <= b.never_entered, "{what}: never entered: {s}");
+    assert!(pct(&r.entry_late_s, 0.9) <= b.entry_late_p90_s, "{what}: entry lateness: {s}");
+    assert!(pct(&late, 0.5) <= b.arrival_late_p50_s, "{what}: arrival lateness p50: {s}");
+    assert!(pct(&late, 0.9) <= b.arrival_late_p90_s, "{what}: arrival lateness p90: {s}");
+    assert!(r.wrong_platforms <= b.wrong_platforms, "{what}: wrong platforms: {s}");
+    assert!(r.penalties <= b.penalties, "{what}: penalties: {s}");
+    assert!(m.unlabelled.is_empty(), "{what}: trains at buffers without a headcode {:?}", &m.unlabelled[..m.unlabelled.len().min(10)]);
+}
+
+/// Three sim-hours from 05:00:15 under the robot, on the owner's seed and
+/// on seed 7: safe, and trains run near time on their booked platforms.
+/// Measured after the robot fixes (owner's seed; seed 7): never entered
+/// 3; 5, entry lateness p90 273; 290 s, arrival lateness (early = 0) p50
+/// 16; 44 s and p90 413; 478 s, wrong platforms 0; 0, penalties 1206; 1271.
+/// Before them the owner's seed gave 27 never entered, entry p90 3320 s,
+/// arrival p50 972 s / p90 2742 s, 8 wrong platforms, penalties 7778.
+/// Slow in debug builds: run with
+/// `scripts/cargo test --release -p ts2-import --test soak -- --ignored`.
+#[test]
+#[ignore]
+fn liverpool_street_runs_three_hours() {
+    let b = Bounds {
+        never_entered: 10,
+        entry_late_p90_s: 600,
+        arrival_late_p50_s: 180,
+        arrival_late_p90_s: 900,
+        wrong_platforms: 2,
+        penalties: 2500,
+    };
+    for seed in [LIVERPOOL_SEED, 7] {
+        let m = measure(liverpool_world(), seed, 3.0);
+        assert_bounds(&format!("liverpool-st seed {seed}"), &m, &b);
+        assert!(m.report.max_fringe_wait_s < 1800.0, "{}", m.summary());
+        assert!(m.report.exited + m.report.stabled > 0, "{}", m.summary());
+    }
+}
+
+/// The first 45 sim minutes of the owner's run, fast enough for every test
+/// run (measured: 2 of 20 due not yet entered, entry p90 160 s, arrival
+/// p50 10 s / p90 180 s, no wrong platforms, penalties 77).
+#[test]
+fn liverpool_street_runs_its_first_45_minutes_to_time() {
+    let m = measure(liverpool_world(), LIVERPOOL_SEED, 0.75);
+    let b = Bounds {
+        never_entered: 5,
+        entry_late_p90_s: 600,
+        arrival_late_p50_s: 120,
+        arrival_late_p90_s: 600,
+        wrong_platforms: 0,
+        penalties: 400,
+    };
+    assert_bounds("liverpool-st 45 min", &m, &b);
 }
 
 /// Liverpool Street with its options stripped to what converters wrote
