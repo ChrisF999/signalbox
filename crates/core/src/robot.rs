@@ -263,17 +263,35 @@ pub struct SoakReport {
     pub stuck: Vec<String>,
     /// Longest time any due entry waited at the fringe during the run.
     pub max_fringe_wait_s: f64,
+    /// Timetabled entries booked at or before the end of the run.
+    pub entries_due: usize,
+    /// Of those, how many entered.
+    pub entries_due_entered: usize,
+    /// Seconds after its booked time each entering train entered, in order.
+    #[serde(skip)]
+    pub entry_late_s: Vec<i64>,
+    /// `late_s` of every arrival at a stopping call, in order.
+    #[serde(skip)]
+    pub arrival_late_s: Vec<i64>,
+    pub wrong_platforms: usize,
 }
 
 /// Run `secs` seconds with the robot signalling, and report.
 pub fn soak(sim: &mut Sim, secs: f64) -> SoakReport {
+    soak_with(sim, secs, commands)
+}
+
+/// `soak` with `robot` standing in for `commands` (e.g. to time it).
+pub fn soak_with(sim: &mut Sim, secs: f64, mut robot: impl FnMut(&Sim) -> Vec<Command>) -> SoakReport {
     let mut r = SoakReport::default();
+    let end_s = sim.now_s() + secs;
+    let mut entered: BTreeSet<usize> = BTreeSet::new();
     let ticks = (secs / TICK_S).round() as u64;
     // train → (head segment, head position, standing since)
     let mut still: BTreeMap<TrainId, (SegmentId, f64, f64)> = BTreeMap::new();
     for i in 0..ticks {
         if i % ROBOT_EVERY_TICKS == 0 {
-            for c in commands(sim) {
+            for c in robot(sim) {
                 sim.submit(c);
             }
             let now = sim.now_s();
@@ -289,13 +307,26 @@ pub fn soak(sim: &mut Sim, secs: f64) -> SoakReport {
             still.retain(|id, _| sim.trains().iter().any(|t| t.id == *id));
             r.max_fringe_wait_s = r.max_fringe_wait_s.max(sim.longest_fringe_wait_s());
         }
+        let now = sim.now_s();
         for e in sim.step() {
             match e {
                 Event::SignalPassedAtDanger { .. } => r.spads += 1,
                 Event::Collision { .. } => r.collisions += 1,
                 Event::InvariantViolated { .. } => r.invariant_violations += 1,
                 Event::CommandRejected { .. } => r.rejected += 1,
-                Event::TrainEntered { .. } => r.entered += 1,
+                Event::TrainEntered { train, .. } => {
+                    r.entered += 1;
+                    let w = sim.world();
+                    let svc = sim.trains().iter().find(|t| t.id == train).map(|t| t.service);
+                    let entry = (0..w.entries.len())
+                        .find(|&i| Some(w.entries[i].service) == svc && !entered.contains(&i));
+                    if let Some(i) = entry {
+                        entered.insert(i);
+                        r.entry_late_s.push((now - w.entries[i].time_s).round() as i64);
+                    }
+                }
+                Event::TrainArrived { late_s, .. } => r.arrival_late_s.push(late_s),
+                Event::WrongPlatform { .. } => r.wrong_platforms += 1,
                 _ => {}
             }
         }
@@ -312,6 +343,10 @@ pub fn soak(sim: &mut Sim, secs: f64) -> SoakReport {
         .map(|t| t.headcode.clone())
         .collect();
     r.waiting_to_enter = sim.entries_waiting();
+    let w = sim.world();
+    let due: Vec<usize> = (0..w.entries.len()).filter(|&i| !w.entries[i].on_demand && w.entries[i].time_s <= end_s).collect();
+    r.entries_due = due.len();
+    r.entries_due_entered = due.iter().filter(|i| entered.contains(i)).count();
     r.penalties = sim.scores().total();
     r
 }
