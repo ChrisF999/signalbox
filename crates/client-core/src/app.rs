@@ -139,6 +139,16 @@ impl InGame {
     fn sim_time(&self) -> Option<f64> {
         self.bot.view().map(|v| v.sim_time)
     }
+
+    /// Log `text` (not an alarm) unless it is already the newest line, so a
+    /// player clicking again and again gets one line.
+    pub(crate) fn log_once(&mut self, text: String) {
+        if self.log.entries().next_back().is_some_and(|e| e.text == text) {
+            return;
+        }
+        let t = self.sim_time();
+        self.log.push(t, text, false);
+    }
 }
 
 /// A `join` or `create_game` whose `joined` has not come yet.
@@ -174,6 +184,11 @@ pub struct App {
     pub(crate) last_frame: f64,
     /// The watchdog sent a join on this connection and no frame has come since.
     pub(crate) watchdog_join_sent: bool,
+    /// The area to claim once the game just created sends its first layout
+    /// (polish spec H2: the creator signals at once instead of watching).
+    /// With a late start that layout comes only when the game is ready, so
+    /// nothing is claimed while it is being prepared.
+    pub(crate) claim_on_join: Option<String>,
 }
 
 impl App {
@@ -196,6 +211,7 @@ impl App {
             me: None,
             last_frame: now,
             watchdog_join_sent: false,
+            claim_on_join: None,
         }
     }
 
@@ -313,6 +329,7 @@ impl App {
     }
 
     fn to_lobby(&mut self, note: Option<String>) {
+        self.claim_on_join = None;
         self.game = None;
         self.rejoin = None;
         self.joining = None;
@@ -419,8 +436,13 @@ impl App {
         let is_layout = matches!(m, ServerMsg::Layout(_));
         let reply = g.bot.receive(m);
         g.bot.take_notices();
+        let mut claim = None;
         if let (true, Some(l)) = (is_layout, g.bot.layout()) {
             g.names = Names::new(l);
+            // The creator's chosen area, once, if it is still a spectator's layout.
+            if let Some(a) = self.claim_on_join.take().filter(|a| l.area.is_none() && l.areas.contains(a)) {
+                claim = Some(ClientMsg::Claim { area: a });
+            }
         }
         if let (Some(sel), Some(l)) = (g.selected.as_deref(), g.bot.layout()) {
             if !crate::select::can_enter(l, sel) {
@@ -429,6 +451,9 @@ impl App {
         }
         if let Some(r) = reply {
             self.send_game(r);
+        }
+        if let Some(c) = claim {
+            self.send_game(c);
         }
     }
 
@@ -491,8 +516,18 @@ impl App {
 
     /// `start` is "HH:MM" or "HH:MM:SS"; the front checks it.
     pub fn create_game(&mut self, layout: &str, seed: Option<u64>, start: Option<String>) {
+        self.claim_on_join = None;
         if self.send(ClientFrame::Lobby(LobbyMsg::CreateGame { layout: layout.to_string(), seed, start })) {
             self.joining = Some(Joining { game: None, rejoin: false });
+        }
+    }
+
+    /// `create_game`, then claim `area` as soon as the game's first layout
+    /// comes (polish spec H2); `None` watches, as `create_game` does.
+    pub fn create_game_in(&mut self, layout: &str, seed: Option<u64>, start: Option<String>, area: Option<&str>) {
+        self.create_game(layout, seed, start);
+        if self.joining.is_some() {
+            self.claim_on_join = area.map(str::to_string);
         }
     }
 
@@ -503,6 +538,7 @@ impl App {
     }
 
     pub fn join(&mut self, game: &str) {
+        self.claim_on_join = None;
         if self.send(ClientFrame::Lobby(LobbyMsg::Join { game: game.to_string() })) {
             self.joining = Some(Joining { game: Some(game.to_string()), rejoin: false });
         }
@@ -510,6 +546,7 @@ impl App {
 
     /// Back to the lobby (the front answers with the games list).
     pub fn leave(&mut self) {
+        self.claim_on_join = None;
         self.send(ClientFrame::Lobby(LobbyMsg::Leave));
         self.game = None;
         self.rejoin = None;

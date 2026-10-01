@@ -65,6 +65,19 @@ pub fn click(l: &Layout, selected: Option<&str>, target: &ExitName) -> Click {
     }
 }
 
+/// Why a click on `signal` chose nothing (polish spec H2): you are
+/// watching, it is another area's, or no route of yours starts there.
+pub fn why_not_entrance(l: &Layout, signal: &str) -> String {
+    let names = Names::new(l);
+    let shown = names.signal(signal);
+    match (l.area.as_deref(), l.signals.iter().find(|s| s.name == signal)) {
+        (None, _) => "You are watching: claim an area to signal".to_string(),
+        (Some(mine), Some(s)) if s.area != mine => format!("{shown} is worked from {}, not your area", s.area),
+        (Some(_), None) => format!("{shown} is not in your area"),
+        _ => format!("No route of yours starts at {shown}"),
+    }
+}
+
 /// Routes from `entrance` that are set (not idle) in the view.
 fn active_from<'a>(l: &'a Layout, v: &'a View, entrance: &'a str) -> impl Iterator<Item = &'a RouteInfo> + 'a {
     l.routes.iter().filter(move |r| r.entrance == entrance && v.routes.contains_key(&r.name))

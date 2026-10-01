@@ -304,6 +304,10 @@ output is byte-identical for the same input.
   and a cancelling route's lamp; the tutorial highlight is a calm pulse.
   Arrows and the ○A button are shapes: egui's default fonts have no arrow
   glyphs.
+- A new game's creator may choose an area in the lobby ("Signal", default watch); the client claims it when the
+  game's first layout comes (`App::create_game_in`, polish spec H2). With a late start that layout comes only when
+  the game is ready, so nothing is claimed while it is "Preparing"; a game that is not created leaves no claim.
+  A click that chooses nothing logs why, once (`select::why_not_entrance`, `InGame::log_once`).
 - ○A (spec decision 6, amended) sits beside a controlled signal the player
   works and makes a set route stay set for following trains (real
   auto-working), not beside permanently automatic signals; there is none on

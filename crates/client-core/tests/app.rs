@@ -622,3 +622,77 @@ fn a_game_that_was_not_created_returns_to_the_lobby() {
     assert!(app.game().is_none());
     assert_eq!(app.lobby_note(), Some("The game was stopped before it was ready; create it again."));
 }
+
+/// Polish spec H2: a game created "to signal" an area claims it as soon as
+/// its first layout comes, once; a plain create stays watching.
+#[test]
+fn a_new_game_claims_the_creators_area_once_its_layout_comes() {
+    let (mut app, h) = open_app();
+    h.take_sent();
+    app.create_game_in("twobox", None, None, Some("West"));
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::CreateGame { layout: s("twobox"), seed: None, start: None })]);
+    h.push(joined("g-new"));
+    h.push(layout("ann"));
+    app.tick(1.0);
+    assert_eq!(h.take_sent(), [ClientFrame::Game(ClientMsg::Claim { area: s("West") })]);
+    h.push(layout("ann"));
+    app.tick(2.0);
+    assert!(h.take_sent().is_empty(), "only once");
+    let (mut app, h) = open_app();
+    h.take_sent();
+    app.create_game_in("twobox", None, None, None);
+    h.push(joined("g-new"));
+    h.push(layout("ann"));
+    app.tick(1.0);
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::CreateGame { layout: s("twobox"), seed: None, start: None })], "no claim");
+}
+
+/// Late start: the area is claimed when the game is ready and its first
+/// layout arrives, never while it is still being prepared; a game that is
+/// never created leaves no claim behind for the next one.
+#[test]
+fn a_late_start_claims_after_preparing_not_during() {
+    let (mut app, h) = open_app();
+    h.take_sent();
+    app.create_game_in("drain", None, Some(s("05:40")), Some("West"));
+    h.take_sent();
+    h.push(joined("g-late"));
+    let prep = Preparing { from: 20_400.0, to: 27_000.0 };
+    let info = GameInfo {
+        id: s("g-late"),
+        layout: s("drain"),
+        state: GameState::Running,
+        sim_time: 21_000.0,
+        areas: vec![],
+        players: vec![],
+        error: None,
+        creator: Some(s("ann")),
+        can_delete: false,
+        preparing: Some(prep),
+    };
+    h.push(ServerFrame::Lobby(LobbyReply::Games { games: vec![info] }));
+    app.tick(1.0);
+    assert!(app.preparing().is_some());
+    assert!(h.take_sent().is_empty(), "nothing is claimed while preparing");
+    app.tick(2.0);
+    assert!(h.take_sent().is_empty(), "still nothing");
+    h.push(layout("ann"));
+    app.tick(3.0);
+    assert_eq!(h.take_sent(), [ClientFrame::Game(ClientMsg::Claim { area: s("West") })]);
+
+    // Not created: back in the lobby; the next game, joined plainly, is not claimed.
+    let (mut app, h) = open_app();
+    h.take_sent();
+    app.create_game_in("drain", None, Some(s("05:40")), Some("West"));
+    h.push(joined("g-late"));
+    h.push(ServerFrame::error(codes::SEED_TOO_SLOW, "The game could not be prepared in time."));
+    app.tick(1.0);
+    assert!(app.game().is_none());
+    h.take_sent();
+    app.join("g-other");
+    h.take_sent();
+    h.push(joined("g-other"));
+    h.push(layout("ann"));
+    app.tick(2.0);
+    assert!(h.take_sent().is_empty(), "no stale claim");
+}

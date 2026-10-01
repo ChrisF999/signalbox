@@ -422,3 +422,20 @@ fn cancelling_routes_and_busy_points_offer_no_menu() {
     v.points.insert(s("P"), PointsView { position: PointsPos::Normal, moving: false, locked: false });
     assert_eq!(select::points_menu(&l, &v, "P").len(), 1);
 }
+
+/// Polish spec H2: a click that chooses nothing says why, once.
+#[test]
+fn a_click_that_chooses_nothing_says_why_once() {
+    let mut spec = Table::new("sam", None);
+    spec.app.click(&sig("W1"));
+    spec.app.click(&sig("W1"));
+    spec.app.click(&Target::Auto(s("W1")));
+    assert_eq!(spec.log_lines(), [(s("You are watching: claim an area to signal"), false)]);
+    let mut t = Table::new("ann", Some("West"));
+    t.app.click(&sig("C"));
+    t.app.click(&Target::Auto(s("W1")));
+    assert_eq!(
+        t.log_lines(),
+        [(s("C is not in your area"), false), (s("Auto-working TAW1: set a route from it first"), false)]
+    );
+}

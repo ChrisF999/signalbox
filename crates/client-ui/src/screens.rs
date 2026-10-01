@@ -63,6 +63,8 @@ pub enum SideTab {
 #[derive(Default)]
 struct NewGame {
     layout: usize,
+    /// 0: watch; `i + 1`: claim the layout's area `i` (polish spec H2).
+    area: usize,
     seed: String,
     start: String,
 }
@@ -249,6 +251,7 @@ impl UiApp {
             ui.separator();
             ui.label(RichText::new("New game").strong());
             let layouts: Vec<String> = self.core.layouts().iter().map(|l| l.name.clone()).collect();
+            let areas: Vec<Vec<String>> = self.core.layouts().iter().map(|l| l.areas.clone()).collect();
             if layouts.is_empty() {
                 ui.label("No layouts yet.");
             } else {
@@ -259,6 +262,16 @@ impl UiApp {
                             ui.selectable_value(&mut self.new_game.layout, i, name.as_str());
                         }
                     });
+                    // Where the creator starts (polish spec H2): an area to signal, or watching.
+                    let mine = &areas[self.new_game.layout];
+                    self.new_game.area = self.new_game.area.min(mine.len());
+                    let shown = |i: usize| if i == 0 { "watch".to_string() } else { mine[i - 1].clone() };
+                    ui.label("Signal");
+                    egui::ComboBox::from_id_salt("new_game_area").selected_text(shown(self.new_game.area)).show_ui(ui, |ui| {
+                        for i in 0..=mine.len() {
+                            ui.selectable_value(&mut self.new_game.area, i, shown(i));
+                        }
+                    });
                     ui.label("Seed");
                     ui.add(egui::TextEdit::singleline(&mut self.new_game.seed).desired_width(90.0).hint_text("random"));
                     ui.label("Start");
@@ -266,7 +279,8 @@ impl UiApp {
                     if ui.button("Create").clicked() {
                         let seed = self.new_game.seed.trim().parse().ok();
                         let start = Some(self.new_game.start.trim().to_string()).filter(|s| !s.is_empty());
-                        self.core.create_game(&layouts[self.new_game.layout], seed, start);
+                        let area = self.new_game.area.checked_sub(1).map(|i| mine[i].clone());
+                        self.core.create_game_in(&layouts[self.new_game.layout], seed, start, area.as_deref());
                     }
                 });
             }
@@ -445,6 +459,10 @@ impl UiApp {
                 }
             });
             ui.horizontal_wrapped(|ui| {
+                // Polish spec H2: a spectator's clicks do nothing; say so where they look.
+                if !holding && !lesson {
+                    ui.label(RichText::new("You are watching. Claim an area to signal:").color(paint::YELLOW));
+                }
                 ui.label("Players:");
                 for area in &areas {
                     let holder = view.as_ref().and_then(|v| v.holders.get(area)).map_or("robot", String::as_str);

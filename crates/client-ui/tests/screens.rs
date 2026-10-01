@@ -803,3 +803,23 @@ fn the_simplifier_opens_at_now_when_the_view_follows_the_layout() {
     assert!(!side.iter().any(|t| t == "BW01"), "BW01 ran at 06:00: {side:?}");
     assert!(side.iter().any(|t| t == "BW06"), "06:30's trains: {side:?}");
 }
+
+/// Polish spec H2: the lobby offers an area to signal, a spectator is told
+/// how to start signalling, and a click on a signal while watching says why
+/// nothing happened.
+#[test]
+fn a_spectator_is_told_to_claim_an_area() {
+    let r = Rig::lobby(drawn_twobox());
+    let mut r = r;
+    let out = r.frame();
+    assert!(has_text(&out, "Signal") && has_text(&out, "watch"), "{:?}", texts(&out));
+    let mut r = Rig::in_game(drawn_twobox(), None);
+    let out = r.frame();
+    assert!(has_text(&out, "You are watching. Claim an area to signal:"));
+    let w1 = r.at(100.0, 0.0);
+    r.click(w1, PointerButton::Primary);
+    let out = r.frame();
+    assert!(has_text(&out, "You are watching: claim an area to signal"), "{:?}", side_texts(&r, &out));
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    assert!(!has_text(&r.frame(), "You are watching"));
+}

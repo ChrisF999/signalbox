@@ -40,7 +40,13 @@ impl App {
                 g.selected = None;
                 self.command(cmd);
             }
-            Click::Ignore => {}
+            Click::Ignore => {
+                // Say why nothing happened (polish spec H2).
+                if let Target::Signal(s) = target {
+                    let why = select::why_not_entrance(l, s);
+                    g.log_once(why);
+                }
+            }
         }
     }
 
@@ -48,8 +54,18 @@ impl App {
     /// one; the selection is left as it is.
     fn toggle_auto(&mut self, signal: &str) {
         let cmd = self.game.as_ref().and_then(|g| select::auto_toggle(g.bot.layout()?, g.bot.view()?, signal));
-        if let Some(cmd) = cmd {
-            self.command(cmd);
+        match cmd {
+            Some(cmd) => self.command(cmd),
+            None => {
+                let Some(g) = self.game.as_mut() else { return };
+                let Some(l) = g.bot.layout() else { return };
+                let why = if l.signals.iter().any(|s| s.name == signal && s.operable) {
+                    format!("Auto-working {}: set a route from it first", g.names.signal(signal))
+                } else {
+                    select::why_not_entrance(l, signal)
+                };
+                g.log_once(why);
+            }
         }
     }
 
