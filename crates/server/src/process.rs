@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use game::lesson::{self, Runner, load_lesson};
 use game::{Game, GameMeta, GameStatus, Out};
 use ipc::{Counters, FromGame, LogLevel, PlayerStatus, StatusMsg, ToGame, read_frame, write_frame};
 use signalbox_core::time::{fmt_hms, parse_hms};
@@ -16,7 +17,8 @@ use tokio::sync::mpsc;
 use tokio::time::{Instant, MissedTickBehavior, interval, timeout};
 
 pub const USAGE: &str = "usage: signalbox-game --save <db> --socket <path> [--empty-exit-s <secs>] \
-[--create --layout <world.json> --layout-name <name> --seed <u64> [--start HH:MM:SS] [--creator <user>]]";
+[--create --layout <world.json> --layout-name <name> --seed <u64> [--start HH:MM:SS] [--creator <user>]]\n\
+       signalbox-game --lesson <dir> --socket <path> [--empty-exit-s <secs>]";
 /// Real seconds a game with nobody connected waits before it saves and exits.
 pub const EMPTY_EXIT_S: u64 = 600;
 pub const ADVANCE_EVERY: Duration = Duration::from_millis(100);
@@ -40,17 +42,20 @@ pub struct CreateArgs {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Args {
+    /// Empty for a lesson, which keeps no save.
     pub save: PathBuf,
     pub socket: PathBuf,
     pub empty_exit: Duration,
     /// Create the save first; without it, resume the save.
     pub create: Option<CreateArgs>,
+    /// Run this lesson directory as a tutorial (tutorial spec §3).
+    pub lesson: Option<PathBuf>,
 }
 
 impl Args {
     /// Parse the arguments after the program name.
     pub fn parse(args: &[String]) -> Result<Args, String> {
-        let (mut save, mut socket, mut empty_exit_s, mut create) = (None, None, EMPTY_EXIT_S, false);
+        let (mut save, mut socket, mut empty_exit_s, mut create, mut lesson) = (None, None, EMPTY_EXIT_S, false, None);
         let (mut world, mut layout_name, mut seed, mut start, mut creator) = (None, None, None, None, None);
         let mut it = args.iter();
         while let Some(a) = it.next() {
@@ -70,8 +75,18 @@ impl Args {
                     start = Some(normalise_start(&v).ok_or_else(|| format!("bad --start `{v}`"))?);
                 }
                 "--creator" => creator = Some(value()?),
+                "--lesson" => lesson = Some(PathBuf::from(value()?)),
                 other => return Err(format!("unknown argument `{other}`")),
             }
+        }
+        if let Some(lesson) = lesson {
+            let saved = save.is_some() || create || world.is_some() || layout_name.is_some();
+            if saved || seed.is_some() || start.is_some() || creator.is_some() {
+                return Err("--lesson takes only --socket and --empty-exit-s".into());
+            }
+            let socket = socket.ok_or("--socket is required")?;
+            let empty_exit = Duration::from_secs(empty_exit_s);
+            return Ok(Args { save: PathBuf::new(), socket, empty_exit, create: None, lesson: Some(lesson) });
         }
         let save = save.ok_or("--save is required")?;
         let socket = socket.ok_or("--socket is required")?;
@@ -89,7 +104,7 @@ impl Args {
             }
             None
         };
-        Ok(Args { save, socket, empty_exit: Duration::from_secs(empty_exit_s), create })
+        Ok(Args { save, socket, empty_exit: Duration::from_secs(empty_exit_s), create, lesson: None })
     }
 }
 
@@ -107,6 +122,12 @@ pub fn set_start_time(world_json: &str, start: &str) -> Result<String, String> {
     let options = options.as_object_mut().ok_or("world: `options` is not an object")?;
     options.insert("start_time".into(), serde_json::Value::String(start.to_string()));
     Ok(serde_json::to_string(&v).expect("JSON values serialise"))
+}
+
+/// The lesson's game and its runner, at the first step.
+pub fn open_lesson(dir: &Path) -> Result<(Game, Runner), String> {
+    let lesson = load_lesson(dir).map_err(|e| format!("lesson {}: {e}", dir.display()))?;
+    Ok(lesson::start(lesson))
 }
 
 /// Create or resume the game the arguments name.
@@ -158,6 +179,8 @@ pub enum Next {
 /// The game process's decisions, without sockets or clocks.
 pub struct Shell {
     game: Game,
+    /// A tutorial's lesson (no save; the clock runs only for its player).
+    runner: Option<Runner>,
     empty_exit_s: f64,
     /// Real seconds with nobody connected.
     empty_s: f64,
@@ -168,11 +191,20 @@ pub struct Shell {
 impl Shell {
     pub fn new(game: Game, empty_exit: Duration) -> Shell {
         let reported = game.last_snapshot_tick();
-        Shell { game, empty_exit_s: empty_exit.as_secs_f64(), empty_s: 0.0, reported }
+        Shell { game, runner: None, empty_exit_s: empty_exit.as_secs_f64(), empty_s: 0.0, reported }
+    }
+
+    /// A tutorial: `game` run by its lesson's `runner`.
+    pub fn lesson(game: Game, runner: Runner, empty_exit: Duration) -> Shell {
+        Shell { runner: Some(runner), ..Shell::new(game, empty_exit) }
     }
 
     pub fn game(&self) -> &Game {
         &self.game
+    }
+
+    pub fn runner(&self) -> Option<&Runner> {
+        self.runner.as_ref()
     }
 
     pub fn on_frame(&mut self, msg: ToGame) -> (Vec<FromGame>, Next) {
@@ -180,13 +212,20 @@ impl Shell {
             ToGame::Connect { player } => {
                 // Somebody is here, however briefly: the empty clock restarts.
                 self.empty_s = 0.0;
-                self.game.connect(&player)
+                match self.runner.as_mut() {
+                    Some(r) => r.connect(&mut self.game, &player),
+                    None => self.game.connect(&player),
+                }
             }
-            ToGame::Client { player, msg } => self.game.handle(&player, msg),
+            ToGame::Client { player, msg } => match self.runner.as_mut() {
+                Some(r) => r.handle(&mut self.game, &player, msg),
+                None => self.game.handle(&player, msg),
+            },
             ToGame::Disconnect { player } => {
                 let before = self.game.status().connected;
                 self.game.disconnect(&player);
-                if before > 0 && self.game.status().connected == 0 {
+                // A lesson's clock stops by itself without its player.
+                if self.runner.is_none() && before > 0 && self.game.status().connected == 0 {
                     self.game.pause_for_empty();
                     self.game.save_now()
                 } else {
@@ -201,7 +240,10 @@ impl Shell {
     /// Run the game for `dt` real seconds; exits after `empty_exit` with
     /// nobody connected.
     pub fn on_advance(&mut self, dt: f64) -> (Vec<FromGame>, Next) {
-        let outs = self.game.advance(dt);
+        let outs = match self.runner.as_mut() {
+            Some(r) => r.advance(&mut self.game, dt),
+            None => self.game.advance(dt),
+        };
         let mut out = self.wrap(outs);
         if self.game.status().connected == 0 {
             self.empty_s += if dt.is_finite() && dt > 0.0 { dt } else { 0.0 };
@@ -263,10 +305,16 @@ async fn send_all(w: &mut OwnedWriteHalf, out: Vec<FromGame>) -> Result<(), ipc:
 
 /// Open the game, listen on the socket, serve one front until told to stop.
 pub async fn run(args: Args) -> Result<(), String> {
-    let game = open_game(&args)?;
+    let shell = match &args.lesson {
+        Some(dir) => {
+            let (game, runner) = open_lesson(dir)?;
+            Shell::lesson(game, runner, args.empty_exit)
+        }
+        None => Shell::new(open_game(&args)?, args.empty_exit),
+    };
     let _ = std::fs::remove_file(&args.socket);
     let listener = UnixListener::bind(&args.socket).map_err(|e| format!("{}: {e}", args.socket.display()))?;
-    serve(Shell::new(game, args.empty_exit), listener, &args.socket).await
+    serve(shell, listener, &args.socket).await
 }
 
 /// Accept exactly one front connection, then run the game for it.

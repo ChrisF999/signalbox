@@ -388,3 +388,79 @@ fn a_player_who_joins_and_leaves_between_advances_restarts_the_empty_clock() {
     sh.on_frame(ToGame::Disconnect { player: s("ann") });
     assert_eq!(sh.on_advance(0.2).1, Next::Continue, "somebody was here since the last advance");
 }
+
+// ---- tutorials (tutorial spec §3) ----
+
+const LESSON_1: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../lessons/01-reading-the-panel");
+
+#[test]
+fn lesson_arguments_take_no_save() {
+    let a = Args::parse(&args(&["--lesson", "/l/01-x", "--socket", "/d/t.sock", "--empty-exit-s", "60"])).unwrap();
+    assert_eq!(a.lesson, Some(PathBuf::from("/l/01-x")));
+    assert_eq!((a.save, a.create, a.empty_exit), (PathBuf::new(), None, Duration::from_secs(60)));
+    let err = |v: &[&str]| Args::parse(&args(v)).unwrap_err();
+    assert_eq!(err(&["--lesson", "x", "--socket", "y", "--save", "z"]), "--lesson takes only --socket and --empty-exit-s");
+    assert_eq!(err(&["--lesson", "x", "--socket", "y", "--create"]), "--lesson takes only --socket and --empty-exit-s");
+    assert_eq!(err(&["--lesson", "x"]), "--socket is required");
+    assert_eq!(Args::parse(&args(&["--save", "g", "--socket", "s"])).unwrap().lesson, None);
+}
+
+fn lesson_shell(empty_exit_s: u64) -> Shell {
+    let (game, runner) = open_lesson(Path::new(LESSON_1)).unwrap();
+    Shell::lesson(game, runner, Duration::from_secs(empty_exit_s))
+}
+
+#[test]
+fn a_lesson_shell_puts_its_player_in_the_lesson() {
+    let mut sh = lesson_shell(60);
+    let (out, next) = sh.on_frame(ToGame::Connect { player: s("ann") });
+    assert_eq!(next, Next::Continue);
+    assert!(out.iter().any(|m| matches!(m, FromGame::ToPlayer { msg: ServerMsg::Lesson(v), .. } if v.index == 0)));
+    assert_eq!(sh.game().area_of("ann"), Some("Saltmarsh"));
+    let (out, _) = sh.on_frame(ToGame::Client { player: s("ann"), msg: ClientMsg::LessonNext });
+    assert!(out.iter().any(|m| matches!(m, FromGame::ToPlayer { msg: ServerMsg::Lesson(v), .. } if v.index == 1)));
+    assert_eq!(sh.runner().unwrap().step(), 1);
+}
+
+#[test]
+fn a_lesson_left_alone_neither_pauses_nor_saves_and_exits_after_the_empty_time() {
+    let mut sh = lesson_shell(2);
+    sh.on_frame(ToGame::Connect { player: s("ann") });
+    sh.on_advance(0.5);
+    let (out, _) = sh.on_frame(ToGame::Disconnect { player: s("ann") });
+    assert!(out.is_empty(), "{out:?}");
+    assert!(!sh.game().clock().paused, "a lesson's clock stops by itself, without a pause");
+    let t = sh.game().sim().now_s();
+    let (_, next) = sh.on_advance(1.0);
+    assert_eq!((next, sh.game().sim().now_s()), (Next::Continue, t));
+    let (out, next) = sh.on_advance(1.0);
+    assert_eq!(next, Next::Exit);
+    assert!(saved_ticks(&out).is_empty(), "nothing is saved");
+}
+
+#[tokio::test]
+async fn the_binary_runs_a_lesson_and_writes_nothing() {
+    let dir = temp_dir("bin-lesson");
+    let sock_path = dir.join("t.sock");
+    let mut child = spawn(&args(&["--lesson", LESSON_1, "--socket", sock_path.to_str().unwrap()]));
+    let mut sock = connect(&sock_path).await;
+    write_frame(&mut sock, &ToGame::Connect { player: s("ann") }).await.unwrap();
+    let got = read_until(&mut sock, |m| matches!(m, FromGame::ToPlayer { msg: ServerMsg::Lesson(_), .. })).await;
+    assert!(got.iter().any(|m| matches!(m, FromGame::ToPlayer { msg: ServerMsg::Layout(l), .. } if l.area.as_deref() == Some("Saltmarsh"))));
+    write_frame(&mut sock, &ToGame::Shutdown).await.unwrap();
+    assert_eq!(exit_code(&mut child).await, Some(0));
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0, "no save, and the socket is gone");
+}
+
+#[tokio::test]
+async fn a_broken_lesson_exits_non_zero_with_its_reason() {
+    let dir = temp_dir("bin-bad-lesson");
+    let lesson = dir.join("01-broken");
+    std::fs::create_dir_all(&lesson).unwrap();
+    std::fs::write(lesson.join("lesson.json"), "{}").unwrap();
+    let mut child = spawn(&args(&["--lesson", lesson.to_str().unwrap(), "--socket", dir.join("t.sock").to_str().unwrap()]));
+    let err = stderr_of(&mut child).await;
+    assert_eq!(exit_code(&mut child).await, Some(1));
+    assert!(err.starts_with("signalbox-game: lesson "), "{err}");
+    assert!(err.contains("01-broken"), "{err}");
+}
