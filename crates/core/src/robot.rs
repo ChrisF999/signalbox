@@ -267,7 +267,8 @@ pub struct SoakReport {
     pub entries_due: usize,
     /// Of those, how many entered.
     pub entries_due_entered: usize,
-    /// Seconds after its booked time each entering train entered, in order.
+    /// Seconds after its booked time (or the start, if later) each entering
+    /// train entered, in order; negative is early.
     #[serde(skip)]
     pub entry_late_s: Vec<i64>,
     /// `late_s` of every arrival at a stopping call, in order.
@@ -322,7 +323,8 @@ pub fn soak_with(sim: &mut Sim, secs: f64, mut robot: impl FnMut(&Sim) -> Vec<Co
                         .find(|&i| Some(w.entries[i].service) == svc && !entered.contains(&i));
                     if let Some(i) = entry {
                         entered.insert(i);
-                        r.entry_late_s.push((now - w.entries[i].time_s).round() as i64);
+                        // Trains booked before the start are on time if they enter at once.
+                        r.entry_late_s.push((now - w.entries[i].time_s.max(w.options.start_s)).round() as i64);
                     }
                 }
                 Event::TrainArrived { late_s, .. } => r.arrival_late_s.push(late_s),
