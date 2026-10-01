@@ -8,6 +8,7 @@ pub mod display;
 pub mod game;
 pub mod geometry;
 pub mod layout;
+pub mod lesson;
 pub mod names;
 pub mod notices;
 pub mod save;
