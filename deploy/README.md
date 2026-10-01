@@ -9,7 +9,7 @@ checks the `groups` claim). Nothing is on the public edge.
 
 | File | What |
 |---|---|
-| `Dockerfile` | release image: both binaries, the browser client (`/opt/signalbox/web`, built by the `wasm-tools` and `web` stages) and the converted layouts `liverpool-st`, `drain`, `gretz-armainvilliers` (no dev login) |
+| `Dockerfile` | release image: both binaries, the browser client (`/opt/signalbox/web`, built by the `wasm-tools` and `web` stages) and the converted layouts `liverpool-st`, `drain`, `gretz-armainvilliers` with their areas, box prefixes and line names from `layouts/` (no dev login) |
 | `Dockerfile.dockerignore` | keeps `target/`, `.cargo-home/`, `.git/` out of the build context |
 | `docker-compose.yml` | the service; copied to `/opt/stack/apps/signalbox/` |
 | `authentik/signalbox-oidc-blueprint.yaml.example` | OAuth2 provider + application; rendered with the real secret into the vault |

@@ -32,7 +32,7 @@ scripts/ci/test.sh                                            # the CI gate (nat
 scripts/cargo run -p sim-cli -- run crates/core/tests/fixtures/junction.json --robot --hours 1 --record /w/target/log.json
 scripts/cargo run -p sim-cli -- replay crates/core/tests/fixtures/junction.json /w/target/log.json
 scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/drain.json -o /w/target/drain.json
-scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/liverpool-st.json -o /w/target/lst.json --areas /w/layouts/liverpool-st.areas.json
+scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/liverpool-st.json -o /w/target/lst.json --areas /w/layouts/liverpool-st.areas.json --lines /w/layouts/liverpool-st.lines.json
 ```
 
 Paths passed through `scripts/cargo` resolve inside the container (`/w` = repo root).
@@ -134,7 +134,22 @@ output is byte-identical for the same input.
 ### Multiplayer (`protocol`, `game`, `bot`)
 - Areas for converted layouts come from `layouts/<name>.areas.json`, applied by
   `ts2-import --areas`: each area floods the section graph from its seeds and
-  stops at nodes holding boundary signals (`ts2_import::areas`).
+  stops at nodes holding boundary signals (`ts2_import::areas`). The file also
+  names the box (`prefix`, 1-3 capitals) and each area's `workstation` letter;
+  both go into the world's client-only `layout` JSON (`box_prefix`,
+  `workstations`), never into the sim. Optional line names come from
+  `layouts/<name>.lines.json` (`ts2-import --lines`): `direction` there is the
+  world's `up`/`down` (the direction of the line's signals), not the railway's.
+- `game::display` reads those display keys once per game (defaults: the
+  title's first letter, A, B, C... in area order) and builds each area's
+  simplifier from the timetable; every `Layout` carries them.
+- Clock votes (realism owner decision 12): holders vote; while nobody holds
+  an area every connected player does (`Game::voters`), re-settled on every
+  claim, release, grace expiry, connect and spectator disconnect.
+- Deleting games (owner decision 13): lobby `delete_game`, saved or crashed
+  games only, by the creator (meta row `creator`, written by the game
+  process; save schema still 2) or a `SIGNALBOX_ADMINS` user (comma-separated
+  usernames; the deploy compose file sets `skye`).
 - `game::Game` is pure: `connect`/`handle`/`advance(real_dt)`/`flush` return
   `(player, ServerMsg)` pairs. It maps every command to its subject's area
   (`game::areas::AreaMap`), refuses commands outside the sender's area, and runs
@@ -202,6 +217,21 @@ output is byte-identical for the same input.
   installed).
 - The workspace `rand` has no default features (getrandom does not build for
   wasm32-unknown-unknown); the server turns on `thread_rng`.
+- The look follows `docs/superpowers/specs/2026-10-01-panel-realism-design.md`
+  (IECC conventions): signals are shown as `<box><workstation><number>`
+  (`client_core::Names`; display only, wire names stay plain). Settings
+  (aspects red/green or real, headcode enquiry, signal numbers) live behind
+  `client_core::SettingsStore`, which `client-web` backs with `localStorage`
+  (`LocalStore`). Nothing flashes except points moving, the selected entrance
+  and a cancelling route's lamp. Arrows and the ○A button are shapes: egui's
+  default fonts have no arrow glyphs.
+- ○A (spec decision 6, amended) sits beside a controlled signal the player
+  works and makes a set route stay set for following trains (real
+  auto-working), not beside permanently automatic signals; there is none on
+  fringe signals, and spectators see it grey and read-only.
+- `hit_test` takes the view as well as the scene; points and exits win over
+  an empty berth under the pointer. The side panel's minimum width is 398 pt
+  (it fits the simplifier).
 
 ### Tests
 - Core fixtures: `crates/core/tests/fixtures/{plain_line,terminus,junction}.json`.
