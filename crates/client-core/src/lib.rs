@@ -6,6 +6,7 @@
 pub mod app;
 pub mod input;
 pub mod log;
+pub mod names;
 pub mod select;
 pub mod text;
 pub mod trains;
@@ -13,4 +14,5 @@ pub mod transport;
 
 pub use app::{App, InGame, Link};
 pub use input::Target;
+pub use names::Names;
 pub use transport::{ConnState, MemHandle, MemTransport, Transport};

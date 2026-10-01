@@ -229,7 +229,8 @@ async fn a_client_sets_a_route_on_liverpool_street() {
         let cmd = PlayerCommand::SetRoute { entrance: r.entrance.clone(), exit: r.exit.clone() };
         // The refusal of exactly this command: a count of all refusals would
         // stop growing once the log is at its cap.
-        let refused_line = format!("Refused: {}", client_core::text::command_text(&cmd));
+        let shown = app.game().unwrap().names().clone();
+        let refused_line = format!("Refused: {}", client_core::text::command_text(&cmd, &shown));
         let refused = |a: &App| a.game().unwrap().log().entries().any(|e| e.text.starts_with(&refused_line));
         assert!(!refused(&app));
         h.take_sent();

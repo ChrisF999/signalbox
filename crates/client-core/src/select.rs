@@ -1,11 +1,13 @@
 //! What clicks mean (spec D1 §3.2), as pure functions of the layout and
 //! view: route setting by entrance then exit, the right-click menus, and
 //! hover text. Only operable things (your own area) can be worked; the
-//! fringe and spectators get hover text only.
+//! fringe and spectators get hover text only. Signals are named as the
+//! screen shows them (`Names`).
 
 use protocol::{Aspect, ExitName, Held, Layout, PlayerCommand, PointsPos, RouteInfo, RouteState, View};
 
-use crate::text::{exit_text, pos_text};
+use crate::names::Names;
+use crate::text::pos_text;
 
 /// What a left click on a signal or an exit node does.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,10 +79,11 @@ pub fn signal_menu(l: &Layout, v: &View, signal: &str) -> Vec<MenuItem> {
     if !l.signals.iter().any(|s| s.name == signal && s.operable) {
         return vec![];
     }
+    let names = Names::new(l);
     let mut items = Vec::new();
     if let Some(r) = live_from(l, v, signal).next() {
         items.push(MenuItem {
-            label: format!("Cancel route {signal} to {}", exit_text(&r.exit)),
+            label: format!("Cancel route {} to {}", names.signal(signal), names.exit(&r.exit)),
             cmd: PlayerCommand::CancelRoute { entrance: signal.to_string() },
         });
     }
@@ -92,6 +95,22 @@ pub fn signal_menu(l: &Layout, v: &View, signal: &str) -> Vec<MenuItem> {
         });
     }
     items
+}
+
+/// What the ○A button beside `signal` sends when clicked: exactly the
+/// signal menu's auto-working command, if it offers one.
+pub fn auto_toggle(l: &Layout, v: &View, signal: &str) -> Option<PlayerCommand> {
+    signal_menu(l, v, signal).into_iter().map(|m| m.cmd).find(|c| matches!(c, PlayerCommand::SetAutoWorking { .. }))
+}
+
+/// Whether an automatic route from `signal` is auto-working (○A filled).
+pub fn auto_working(l: &Layout, v: &View, signal: &str) -> bool {
+    l.routes.iter().any(|r| r.automatic && r.entrance == signal && v.routes.get(&r.name).is_some_and(|rv| rv.auto_working))
+}
+
+pub fn describe_auto(l: &Layout, v: &View, signal: &str) -> String {
+    let state = if auto_working(l, v, signal) { "on" } else { "off" };
+    format!("Auto-working {}: {state}", Names::new(l).signal(signal))
 }
 
 pub fn points_menu(l: &Layout, v: &View, points: &str) -> Vec<MenuItem> {
@@ -143,8 +162,10 @@ fn area_note(l: &Layout, area: &str) -> String {
 }
 
 pub fn describe_signal(l: &Layout, v: &View, signal: &str) -> String {
+    let names = Names::new(l);
     let Some(s) = l.signals.iter().find(|s| s.name == signal) else { return format!("Signal {signal}") };
-    let mut out = format!("Signal {signal}{}: {}", area_note(l, &s.area), v.signals.get(signal).map_or("?", |a| aspect_text(*a)));
+    let aspect = v.signals.get(signal).map_or("?", |a| aspect_text(*a));
+    let mut out = format!("Signal {}{}: {aspect}", names.signal(signal), area_note(l, &s.area));
     for r in active_from(l, v, signal) {
         let rv = &v.routes[&r.name];
         let state = match rv.state {
@@ -152,7 +173,7 @@ pub fn describe_signal(l: &Layout, v: &View, signal: &str) -> String {
             RouteState::Locked => "set",
             RouteState::Cancelling => "cancelling",
         };
-        out.push_str(&format!("; route to {} {state}", exit_text(&r.exit)));
+        out.push_str(&format!("; route to {} {state}", names.exit(&r.exit)));
         if rv.auto_working {
             out.push_str(", auto-working");
         }

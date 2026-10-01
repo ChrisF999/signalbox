@@ -1,5 +1,6 @@
 //! Words on the screen.
 
+use client_core::Names;
 use client_core::text::*;
 use protocol::*;
 
@@ -20,20 +21,21 @@ fn clock_times() {
 #[test]
 fn commands_and_refusals() {
     let c = PlayerCommand::SetRoute { entrance: s("39,1V1"), exit: ExitName::Node(s("N12")) };
-    assert_eq!(command_text(&c), "set route 39,1V1 to N12");
+    let plain = Names::default();
+    assert_eq!(command_text(&c, &plain), "set route 39,1V1 to N12");
     assert_eq!(
-        notice_text(&Notice::Rejected { cmd: c, reason: Rejection::PointsLocked }),
+        notice_text(&Notice::Rejected { cmd: c, reason: Rejection::PointsLocked }, &plain),
         (s("Refused: set route 39,1V1 to N12 (points locked)"), true)
     );
     assert_eq!(
-        command_text(&PlayerCommand::SwingPoints { points: s("P"), to: PointsPos::Reverse }),
+        command_text(&PlayerCommand::SwingPoints { points: s("P"), to: PointsPos::Reverse }, &plain),
         "swing P reverse"
     );
     assert_eq!(
-        notice_text(&Notice::Late { train: s("1A01"), place: s("EST"), platform: s("1"), late_s: 125 }),
+        notice_text(&Notice::Late { train: s("1A01"), place: s("EST"), platform: s("1"), late_s: 125 }, &plain),
         (s("1A01 at EST 1, 2 min late"), false)
     );
-    assert_eq!(notice_text(&Notice::Error { code: s("bad_speed"), message: s("no") }), (s("Error: no"), true));
+    assert_eq!(notice_text(&Notice::Error { code: s("bad_speed"), message: s("no") }, &plain), (s("Error: no"), true));
 }
 
 #[test]

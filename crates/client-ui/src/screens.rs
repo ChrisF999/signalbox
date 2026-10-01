@@ -340,7 +340,7 @@ impl UiApp {
         }
         let exits = self.core.valid_exits();
         let Some(g) = self.core.game() else { return };
-        let st = PaintState { view: g.view(), selected: g.selected(), exits: &exits, flashing: g.flashing(), time: now };
+        let st = PaintState { view: g.view(), selected: g.selected(), exits: &exits, flashing: g.refused(), time: now };
         paint::paint(&painter, paint::draw(scene, &cam, rect, &st));
         match click {
             Some(Some(t)) => self.core.click(&t),

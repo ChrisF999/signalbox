@@ -11,14 +11,16 @@ use protocol::{
 };
 
 use crate::log::Log;
+use crate::names::Names;
 use crate::text::notice_text;
 use crate::transport::{ConnState, Transport};
 
 /// The first retry waits this long; each failure doubles it up to `MAX_BACKOFF_S`.
 pub const FIRST_BACKOFF_S: f64 = 0.5;
 pub const MAX_BACKOFF_S: f64 = 10.0;
-/// How long a refused command's entrance signal flashes.
-pub const FLASH_S: f64 = 2.0;
+/// How long a refused command's entrance signal stays outlined (a steady
+/// outline, not a flash: realism spec owner decision 9).
+pub const REFUSED_S: f64 = 2.0;
 /// In a game with an open connection and nothing received for this long,
 /// join the game again: the front answers with a fresh layout and view, or
 /// with the error that ends the game (a lost `game_crashed`, say). If that
@@ -53,13 +55,24 @@ pub struct InGame {
     pub(crate) bot: Bot,
     pub(crate) layout_gen: u64,
     pub(crate) selected: Option<String>,
-    pub(crate) flash: Option<(String, f64)>,
+    pub(crate) refused: Option<(String, f64)>,
     pub(crate) log: Log,
+    /// Display names for the layout held (rebuilt with every layout).
+    pub(crate) names: Names,
 }
 
 impl InGame {
     fn new(id: String, you: String) -> InGame {
-        InGame { id, you, bot: Bot::new(), layout_gen: 0, selected: None, flash: None, log: Log::default() }
+        InGame {
+            id,
+            you,
+            bot: Bot::new(),
+            layout_gen: 0,
+            selected: None,
+            refused: None,
+            log: Log::default(),
+            names: Names::default(),
+        }
     }
 
     pub fn layout(&self) -> Option<&Layout> {
@@ -91,9 +104,14 @@ impl InGame {
         self.selected.as_deref()
     }
 
-    /// The signal flashing for a refused command.
-    pub fn flashing(&self) -> Option<&str> {
-        self.flash.as_ref().map(|(s, _)| s.as_str())
+    /// The entrance of a command just refused, outlined for `REFUSED_S`.
+    pub fn refused(&self) -> Option<&str> {
+        self.refused.as_ref().map(|(s, _)| s.as_str())
+    }
+
+    /// How this layout's signals are shown (plain names before any layout).
+    pub fn names(&self) -> &Names {
+        &self.names
     }
 
     pub fn log(&self) -> &Log {
@@ -202,8 +220,8 @@ impl App {
             }
         }
         if let Some(g) = self.game.as_mut() {
-            if g.flash.as_ref().is_some_and(|(_, until)| now >= *until) {
-                g.flash = None;
+            if g.refused.as_ref().is_some_and(|(_, until)| now >= *until) {
+                g.refused = None;
             }
         }
     }
@@ -345,7 +363,7 @@ impl App {
             self.link = Link::Replaced;
             if let Some(g) = self.game.as_mut() {
                 let t = g.sim_time();
-                g.log.push(t, notice_text(&Notice::Replaced).0, true);
+                g.log.push(t, notice_text(&Notice::Replaced, &g.names).0, true);
             }
             return;
         }
@@ -358,20 +376,24 @@ impl App {
                 return self.to_lobby(Some("The game stopped unexpectedly. Join it again to resume it.".into()));
             }
             ServerMsg::Notice(n) => {
-                let (text, alarm) = notice_text(n);
+                let (text, alarm) = notice_text(n, &g.names);
                 let t = g.sim_time();
                 g.log.push(t, text, alarm);
                 if let Notice::Rejected { cmd, .. } = n {
                     if let Some(e) = entrance_of(cmd) {
-                        g.flash = Some((e.to_string(), self.now + FLASH_S));
+                        g.refused = Some((e.to_string(), self.now + REFUSED_S));
                     }
                 }
             }
             ServerMsg::Layout(_) => g.layout_gen += 1,
             ServerMsg::View(_) | ServerMsg::Delta(_) => {}
         }
+        let is_layout = matches!(m, ServerMsg::Layout(_));
         let reply = g.bot.receive(m);
         g.bot.take_notices();
+        if let (true, Some(l)) = (is_layout, g.bot.layout()) {
+            g.names = Names::new(l);
+        }
         if let (Some(sel), Some(l)) = (g.selected.as_deref(), g.bot.layout()) {
             if !crate::select::can_enter(l, sel) {
                 g.selected = None;

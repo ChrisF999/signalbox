@@ -15,6 +15,8 @@ pub enum Target {
     /// A buffer stop or boundary node a route can end at.
     Exit(String),
     Section(String),
+    /// The ○A auto-working button beside this signal.
+    Auto(String),
 }
 
 impl App {
@@ -25,6 +27,7 @@ impl App {
         let exit = match target {
             Target::Signal(s) => ExitName::Signal(s.clone()),
             Target::Exit(n) => ExitName::Node(n.clone()),
+            Target::Auto(s) => return self.toggle_auto(s),
             Target::Points(_) | Target::Berth(_) | Target::Section(_) => return self.escape(),
         };
         let Some(g) = self.game.as_mut() else { return };
@@ -37,6 +40,15 @@ impl App {
                 self.command(cmd);
             }
             Click::Ignore => {}
+        }
+    }
+
+    /// The ○A button: the signal menu's auto-working command, if it offers
+    /// one; the selection is left as it is.
+    fn toggle_auto(&mut self, signal: &str) {
+        let cmd = self.game.as_ref().and_then(|g| select::auto_toggle(g.bot.layout()?, g.bot.view()?, signal));
+        if let Some(cmd) = cmd {
+            self.command(cmd);
         }
     }
 
@@ -64,7 +76,7 @@ impl App {
             Target::Signal(s) => select::signal_menu(l, v, s),
             Target::Points(p) => select::points_menu(l, v, p),
             Target::Berth(b) => select::berth_menu(l, v, b),
-            Target::Exit(_) | Target::Section(_) => vec![],
+            Target::Exit(_) | Target::Section(_) | Target::Auto(_) => vec![],
         }
     }
 
@@ -93,6 +105,7 @@ impl App {
             Target::Berth(b) => select::describe_berth(l, v, b),
             Target::Exit(n) => format!("Exit {n}"),
             Target::Section(s) => select::describe_section(l, v, s),
+            Target::Auto(s) => select::describe_auto(l, v, s),
         }
     }
 }

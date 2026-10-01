@@ -6,7 +6,7 @@ mod common;
 use std::collections::BTreeMap;
 
 use client_core::Target;
-use client_core::app::FLASH_S;
+use client_core::app::REFUSED_S;
 use client_core::select::{self, Click, MenuItem};
 use client_core::trains::train_list;
 use common::*;
@@ -85,7 +85,7 @@ fn fringe_and_spectators_get_hover_only() {
     assert!(spec.h.take_sent().is_empty(), "a spectator's interpose sends nothing");
     t.app.interpose("BC", "2Z99");
     assert!(t.h.take_sent().is_empty(), "nor does one on the fringe");
-    assert_eq!(spec.app.describe(&sig("W1")), "Signal W1 (West): red");
+    assert_eq!(spec.app.describe(&sig("W1")), "Signal TAW1 (West): red", "twobox: box T, West is A");
 }
 
 #[test]
@@ -103,9 +103,10 @@ fn right_click_cancels_a_route_and_swings_points() {
     assert!(t.view().routes.contains_key("C-W2"));
     assert_eq!(
         t.app.menu(&sig("C")),
-        [MenuItem { label: s("Cancel route C to W2"), cmd: PlayerCommand::CancelRoute { entrance: s("C") } }]
+        [MenuItem { label: s("Cancel route TBC to TAW2"), cmd: PlayerCommand::CancelRoute { entrance: s("C") } }],
+        "C is East's (B), W2 West's (A)"
     );
-    assert_eq!(t.app.describe(&sig("C")), "Signal C: yellow; route to W2 set");
+    assert_eq!(t.app.describe(&sig("C")), "Signal TBC: yellow; route to TAW2 set");
     let MenuItem { cmd, .. } = t.app.menu(&sig("C")).remove(0);
     t.app.command(cmd);
     t.pump();
@@ -114,7 +115,7 @@ fn right_click_cancels_a_route_and_swings_points() {
 }
 
 #[test]
-fn a_refused_command_flashes_its_entrance_and_raises_an_alarm() {
+fn a_refused_command_outlines_its_entrance_and_raises_an_alarm() {
     let mut t = Table::new("eve", Some("East"));
     t.app.click(&sig("C"));
     t.app.click(&sig("W2"));
@@ -125,13 +126,13 @@ fn a_refused_command_flashes_its_entrance_and_raises_an_alarm() {
     t.pump();
     t.run(0.2);
     let g = t.app.game().unwrap();
-    assert_eq!(g.flashing(), Some("D"));
+    assert_eq!(g.refused(), Some("D"));
     assert_eq!(
         t.log_lines().last().unwrap(),
-        &(s("Refused: set route D to W2 (conflicts with a route already set)"), true)
+        &(s("Refused: set route TBD to TAW2 (conflicts with a route already set)"), true)
     );
-    t.run(FLASH_S);
-    assert_eq!(t.app.game().unwrap().flashing(), None);
+    t.run(REFUSED_S);
+    assert_eq!(t.app.game().unwrap().refused(), None);
 }
 
 #[test]
@@ -220,6 +221,36 @@ fn automatic_routes_offer_auto_working_on_and_off() {
     );
     assert_eq!(select::click(&l, None, &ExitName::Signal(s("S9"))), Click::Ignore, "no routes from S9");
     assert_eq!(select::click(&l, Some("S1"), &ExitName::Node(s("Z"))), Click::Clear);
+}
+
+/// The ○A button sends exactly what the signal menu's auto-working entry
+/// would, and nothing when the menu has none.
+#[test]
+fn the_auto_button_is_the_menus_auto_working_command() {
+    let l = auto_layout();
+    let mut v = empty_view();
+    assert_eq!(select::auto_toggle(&l, &v, "S1"), None, "no route set from S1");
+    assert_eq!(select::describe_auto(&l, &v, "S1"), "Auto-working S1: off");
+    v.routes.insert(s("S1-S2"), RouteView { state: RouteState::Locked, auto_working: false });
+    assert_eq!(select::auto_toggle(&l, &v, "S1"), Some(PlayerCommand::SetAutoWorking { entrance: s("S1"), on: true }));
+    v.routes.insert(s("S1-S2"), RouteView { state: RouteState::Locked, auto_working: true });
+    assert_eq!(select::auto_toggle(&l, &v, "S1"), Some(PlayerCommand::SetAutoWorking { entrance: s("S1"), on: false }));
+    assert!(select::auto_working(&l, &v, "S1"));
+    assert_eq!(select::describe_auto(&l, &v, "S1"), "Auto-working S1: on");
+    let mut theirs = l.clone();
+    theirs.signals[0].operable = false;
+    assert_eq!(select::auto_toggle(&theirs, &v, "S1"), None, "not on the fringe or for a spectator");
+}
+
+#[test]
+fn clicking_an_auto_button_never_touches_the_selection() {
+    let mut t = Table::new("ann", Some("West"));
+    t.app.click(&sig("W1"));
+    t.app.click(&Target::Auto(s("W1")));
+    assert_eq!(t.app.game().unwrap().selected(), Some("W1"));
+    assert!(t.h.take_sent().is_empty(), "twobox has no automatic routes: nothing to toggle");
+    assert_eq!(t.app.describe(&Target::Auto(s("W1"))), "Auto-working TAW1: off");
+    assert!(t.app.menu(&Target::Auto(s("W1"))).is_empty());
 }
 
 #[test]

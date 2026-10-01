@@ -340,7 +340,7 @@ fn every_character_on_screen_has_a_glyph() {
     r.frame();
     let with_banner = r.frame();
     let mut shown: String = texts(&with_menu).into_iter().chain(texts(&with_banner)).map(|(t, _)| t).collect();
-    assert!(shown.contains("Refused") && shown.contains("Cancel route W1 to A"), "{shown}");
+    assert!(shown.contains("Refused") && shown.contains("Cancel route TAW1 to TAA"), "{shown}");
     // Not reached above: a train with no next call and an open vote show a dash.
     shown.push('—');
     let missing: Vec<char> = r.ctx.fonts_mut(|f| {
