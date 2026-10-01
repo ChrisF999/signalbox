@@ -12,6 +12,7 @@ use protocol::{Aspect, ExitName, Held, Highlight, PointsPos, RouteState, Section
 
 use crate::camera::Camera;
 use crate::hit::{auto_button, berth_rect, signal_disc};
+use crate::labels::{KeepClear, Movable};
 use crate::scene::{PointsMark, Run, Scene, SignalMark, TrackLine};
 
 pub const BG: Color32 = Color32::from_rgb(0x00, 0x00, 0x00);
@@ -143,10 +144,19 @@ pub struct TextItem {
     pub monospace: bool,
 }
 
+/// The font a text is drawn in.
+pub fn font(t: &TextItem) -> FontId {
+    if t.monospace { FontId::monospace(t.size) } else { FontId::proportional(t.size) }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Drawing {
     pub shapes: Vec<Shape>,
     pub texts: Vec<TextItem>,
+    /// The texts `labels::plan` may move or hide (polish spec §3.3).
+    pub movable: Vec<Movable>,
+    /// What those texts must keep clear of.
+    pub keep: KeepClear,
 }
 
 /// What changes from frame to frame.
@@ -575,7 +585,7 @@ fn highlight_shapes(d: &mut Drawing, scene: &Scene, cam: &Camera, screen: Rect, 
 pub fn paint(p: &Painter, d: Drawing) {
     p.extend(d.shapes);
     for t in d.texts {
-        let font = if t.monospace { FontId::monospace(t.size) } else { FontId::proportional(t.size) };
-        p.text(t.at, t.anchor, t.text, font, t.colour);
+        let f = font(&t);
+        p.text(t.at, t.anchor, t.text, f, t.colour);
     }
 }

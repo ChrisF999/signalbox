@@ -6,6 +6,7 @@
 
 pub mod camera;
 pub mod hit;
+pub mod labels;
 pub mod paint;
 pub mod scene;
 
