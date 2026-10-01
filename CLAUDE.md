@@ -196,6 +196,11 @@ output is byte-identical for the same input.
 - Resume (`game::save::resume_sim`) restores the newest snapshot and replays the
   log rows after its `last_seq` up to the last logged tick, leaving
   that tick's commands queued (and the robot marked as run if it logged there).
+- Saves are WAL with `synchronous=NORMAL` (a power cut may lose the last
+  moments; the owner accepted that). Every command is logged before
+  `sim.submit`; a robot run's commands are one transaction
+  (`SaveDb::begin_batch`/`commit_batch`) committed before the sim steps
+  with them, so a resume replays exactly what was committed.
 
 ### Server (`ipc`, `server`)
 - `signalbox-game` (`server::process`) wraps one `Game`: `Shell` is the sync

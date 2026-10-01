@@ -663,14 +663,33 @@ impl Game {
         self.settle_vote();
     }
 
-    /// The robot's commands for areas nobody holds.
+    /// The robot's commands for areas nobody holds, logged in one
+    /// transaction that is committed before the sim steps with them.
     fn run_robot(&mut self) -> Vec<Out> {
         let mut out = Vec::new();
-        for cmd in robot::commands(&self.sim) {
-            let Some(area) = self.map.subject(&cmd) else { continue };
-            if self.holders[area.idx()].is_none() {
-                self.stats.robot_commands += 1;
-                out.extend(self.submit(ROBOT, cmd));
+        let cmds: Vec<Command> = robot::commands(&self.sim)
+            .into_iter()
+            .filter(|cmd| self.map.subject(cmd).is_some_and(|area| self.holders[area.idx()].is_none()))
+            .collect();
+        if cmds.is_empty() {
+            return out;
+        }
+        // Without a batch each append is its own transaction, as before.
+        let batch = match self.save.as_ref().map(SaveDb::begin_batch) {
+            Some(Err(e)) => {
+                out.extend(self.save_failed(&e.to_string()));
+                false
+            }
+            Some(Ok(())) => true,
+            None => false,
+        };
+        for cmd in cmds {
+            self.stats.robot_commands += 1;
+            out.extend(self.submit(ROBOT, cmd));
+        }
+        if batch {
+            if let Err(e) = self.save.as_ref().expect("a batch was begun").commit_batch() {
+                out.extend(self.save_failed(&e.to_string()));
             }
         }
         out

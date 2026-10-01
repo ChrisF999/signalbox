@@ -129,8 +129,15 @@ fn now_text() -> String {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).to_string()
 }
 
+/// WAL with `synchronous=NORMAL`: a commit is not synced to disk on its
+/// own (the WAL is at checkpoints), so a power cut can lose the last
+/// moments of play, but the database stays consistent and a crash of the
+/// process alone loses nothing committed (owner decision on the
+/// performance review: a busy hour's saving went from seconds to
+/// milliseconds).
 fn wal(conn: &Connection) -> Result<(), SaveError> {
     let _mode: String = conn.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
+    conn.execute_batch("PRAGMA synchronous=NORMAL")?;
     Ok(())
 }
 
@@ -194,13 +201,35 @@ impl SaveDb {
         r
     }
 
+    /// Start a batch: the commands appended until `commit_batch` are
+    /// written in one transaction (all of one robot run). Until then no
+    /// other connection sees them, and a crash loses them all, which is
+    /// safe as long as the sim has not stepped with them: commit before it
+    /// does.
+    pub fn begin_batch(&self) -> Result<(), SaveError> {
+        self.timed(|| Ok(self.conn.execute_batch("BEGIN")?))
+    }
+
+    /// Write the batch. On failure it is rolled back (its commands are not
+    /// logged, as if each append had failed) and the connection is back to
+    /// one transaction per statement.
+    pub fn commit_batch(&self) -> Result<(), SaveError> {
+        self.timed(|| {
+            let r = self.conn.execute_batch("COMMIT");
+            if r.is_err() && !self.conn.is_autocommit() {
+                let _ = self.conn.execute_batch("ROLLBACK");
+            }
+            Ok(r?)
+        })
+    }
+
     pub fn append_command(&self, tick: u64, player: &str, area: &str, cmd: &Command) -> Result<(), SaveError> {
         self.timed(|| {
             let json = serde_json::to_string(cmd).expect("commands serialise");
-            self.conn.execute(
+            self.conn.prepare_cached(
                 "INSERT INTO commands (tick, player, area, command) VALUES (?1, ?2, ?3, ?4)",
-                params![tick as i64, player, area, json],
-            )?;
+            )?
+            .execute(params![tick as i64, player, area, json])?;
             Ok(())
         })
     }
@@ -294,4 +323,29 @@ pub fn resume_sim(world: World, snapshot: SimState, last_seq: i64, commands: &[L
     let end = sim.tick();
     let robot_ran = commands.iter().any(|c| c.tick == end && c.player == ROBOT);
     Ok((sim, robot_ran))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saves_are_wal_with_synchronous_normal() {
+        let dir = std::env::temp_dir().join(format!("signalbox-save-unit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sync.sqlite");
+        for ext in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{ext}", path.display()));
+        }
+        let world = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../core/tests/fixtures/plain_line.json")).unwrap();
+        let meta = GameMeta { layout: "plain".into(), seed: 1 };
+        let check = |db: &SaveDb| {
+            let mode: String = db.conn.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
+            let sync: i64 = db.conn.query_row("PRAGMA synchronous", [], |r| r.get(0)).unwrap();
+            assert_eq!((mode.as_str(), sync), ("wal", 1), "1 = NORMAL");
+        };
+        check(&SaveDb::create(&path, &meta, &world).unwrap());
+        check(&SaveDb::open(&path).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

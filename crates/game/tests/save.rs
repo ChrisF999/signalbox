@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use common::*;
 use game::names::resolve;
-use game::save::{KEEP_SNAPSHOTS, SaveError};
+use game::save::{KEEP_SNAPSHOTS, SaveDb, SaveError};
 use game::{Game, GameError, ROBOT};
 use protocol::*;
 use rusqlite::Connection;
@@ -364,6 +364,96 @@ fn a_failed_append_does_not_make_resume_skip_a_later_command() {
     rejoin(&mut resumed);
     run_to_tick(&mut resumed, 2000);
     assert_eq!(resumed.sim().state_hash(), reference.sim().state_hash());
+}
+
+fn count_commands(path: &Path, filter: &str) -> i64 {
+    open(path).query_row(&format!("SELECT COUNT(*) FROM commands WHERE {filter}"), [], |r| r.get(0)).unwrap()
+}
+
+/// A batch (one robot run) is one transaction: nothing of it is visible,
+/// or survives a crash, until it is committed; appends outside a batch are
+/// committed one by one as before.
+#[test]
+fn a_batch_of_commands_is_committed_together() {
+    let path = temp_save("batch");
+    let db = SaveDb::create(&path, &meta(), &twobox_json()).unwrap();
+    let cmd = resolve(&twobox(), &set_route("W1", ExitName::Signal(s("A")))).unwrap();
+    db.begin_batch().unwrap();
+    db.append_command(10, ROBOT, "West", &cmd).unwrap();
+    db.append_command(10, ROBOT, "West", &cmd).unwrap();
+    assert_eq!(count_commands(&path, "1"), 0, "not visible before the commit");
+    db.commit_batch().unwrap();
+    assert_eq!(count_commands(&path, "1"), 2);
+    db.append_command(11, "alice", "West", &cmd).unwrap();
+    assert_eq!(count_commands(&path, "1"), 3, "a single append commits at once");
+    db.begin_batch().unwrap();
+    db.append_command(20, ROBOT, "West", &cmd).unwrap();
+    drop(db);
+    assert_eq!(count_commands(&path, "1"), 3, "a batch cut off by a crash leaves nothing");
+    assert_eq!(count_commands(&path, "tick = 20"), 0);
+}
+
+/// The robot's commands are committed before the sim steps with them, so
+/// a crash in the middle of a later batch resumes exactly at what was
+/// committed and carries on as an uninterrupted game.
+#[test]
+fn a_crash_in_the_middle_of_a_batch_resumes_at_the_last_commit() {
+    let path = temp_save("batch-crash");
+    let mut reference = game();
+    run_to_tick(&mut reference, 3000);
+
+    let mut saved = Game::create(&path, &twobox_json(), meta()).unwrap();
+    run_to_tick(&mut saved, 11);
+    let robot = saved.stats().robot_commands;
+    assert!(robot > 0, "the robot routes 1E01 at tick 10");
+    assert_eq!(count_commands(&path, "player = 'robot' AND tick = 10"), robot as i64, "committed before tick 10 ran");
+    drop(saved);
+    // The next run's batch, cut off by a crash before its commit.
+    let db = SaveDb::open(&path).unwrap();
+    let cmd = resolve(&twobox(), &set_route("W1", ExitName::Signal(s("A")))).unwrap();
+    db.begin_batch().unwrap();
+    db.append_command(20, ROBOT, "West", &cmd).unwrap();
+    drop(db);
+
+    let mut resumed = Game::resume(&path).unwrap();
+    assert_eq!(resumed.sim().tick(), 10, "the last committed tick, with its commands queued");
+    assert_eq!(resumed.sim().snapshot().queue.len(), robot);
+    unpause(&mut resumed);
+    run_to_tick(&mut resumed, 3000);
+    assert_eq!(resumed.sim().state_hash(), reference.sim().state_hash());
+}
+
+/// Appends that fail in the middle of a robot run are save failures for
+/// those commands only: what was appended before them is committed, and a
+/// resume replays exactly the committed rows.
+#[test]
+fn a_failed_append_in_a_batch_keeps_the_rest_of_it() {
+    let path = temp_save("batch-fail");
+    let mut saved = Game::create(&path, &twobox_json(), meta()).unwrap();
+    run_to_tick(&mut saved, 9);
+    let fail = "CREATE TRIGGER fail BEFORE INSERT ON commands \
+                WHEN NEW.tick = 10 AND EXISTS (SELECT 1 FROM commands WHERE tick = 10) \
+                BEGIN SELECT RAISE(ABORT, 'injected'); END";
+    open(&path).execute(fail, []).unwrap();
+    run_to_tick(&mut saved, 11);
+    let robot = saved.stats().robot_commands;
+    assert!(robot >= 2, "the robot sends several commands at tick 10: {robot}");
+    let errors = saved.take_save_errors();
+    assert_eq!(errors.len(), robot - 1, "all but the first: {errors:?}");
+    assert!(errors.iter().all(|e| e.contains("injected")), "{errors:?}");
+    assert_eq!(count_commands(&path, "tick = 10"), 1);
+    assert_eq!(saved.sim().log().len(), robot, "every command still ran");
+    open(&path).execute("DROP TRIGGER fail", []).unwrap();
+    let committed: Vec<Command> = {
+        let c = open(&path);
+        let mut st = c.prepare("SELECT command FROM commands WHERE tick = 10 ORDER BY seq").unwrap();
+        st.query_map([], |r| r.get::<_, String>(0)).unwrap().map(|j| serde_json::from_str(&j.unwrap()).unwrap()).collect()
+    };
+    drop(saved);
+
+    let resumed = Game::resume(&path).unwrap();
+    assert_eq!(resumed.sim().tick(), 10);
+    assert_eq!(resumed.sim().snapshot().queue, committed);
 }
 
 #[test]
