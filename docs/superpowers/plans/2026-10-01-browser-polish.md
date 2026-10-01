@@ -2,64 +2,56 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A diagram legible at every zoom (no text over text, numbers off the track), Drain running the real Waterloo & City Working Timetable for a whole day (from the owner's own PDF; only the reader is committed), old Drain saves showing today's `W…` names, the simplifier opening at "now", and a real-browser check of the WebGL2 fallback.
+**Goal:** A diagram legible at every zoom (no text over text, numbers off the track), old Drain saves showing today's `W…` names, the simplifier opening at "now", a real-browser check of the WebGL2 fallback, and the hands-on UI review's High and Medium findings fixed: spectating explained, the panel usable at 1024 px, stable controls, named refusals, votes with Agree/Decline, readable zoom and Fit, a lobby that orients a newcomer, and lessons that wait to show their result.
 
-**Architecture:** `paint::draw` stays pure and now records which texts may move (role + other spots) and what must be kept clear; a new pure `labels` module plans placement greedily by priority and `UiApp` caches the plan per zoom. The converter gains `--wtt`: a reader of `pdftotext -bbox` output of LU WTT No. 7 that checks the timetable against the WTT's own figures and replaces Drain's services, entries and start time (a pure `WorldFile` transform); the image gets that text from the git-ignored `external/wtt/` in a Docker stage. The robot gains one standing rule (core), without which the WTT's peaks gridlock. Resume optionally takes the current layout file and swaps in its display-only `layout` JSON when the saved network matches. A shell + Python script drives Playwright Chromium against a throwaway dev-login front.
+**Architecture:** `paint::draw` stays pure and now records which texts may move (role + other spots) and what must be kept clear; a pure `labels` module plans placement greedily by priority and `UiApp` caches the plan per zoom. Resume optionally takes the current layout file and swaps in its display-only `layout` JSON when the saved network matches. A shell + Python script drives Playwright Chromium against a throwaway dev-login front. The UI review's fixes are client-core logic (tested natively), client-ui screens (tested headless with synthetic input), a few additive protocol fields and messages, two game-library rules (the route in the way of a refusal; how votes end), a lesson-runner rule (a step may wait after its task), the front's lobby push, and converter display data (place names, layout descriptions).
 
-**Tech Stack:** Rust 1.98 (Docker `scripts/cargo`), egui 0.36 (headless tests), serde_json, rusqlite, tokio; Playwright 1.55 Chromium (Docker image on ra); poppler-utils `pdftotext` 22.12 (Debian bookworm, in the image's `wtt` stage).
+**Tech Stack:** Rust 1.98 (Docker `scripts/cargo`), egui 0.36 (headless tests), serde_json, rusqlite, tokio; Playwright 1.55 Chromium (Docker image on ra).
 
-**Spec:** `docs/superpowers/specs/2026-10-01-browser-polish-design.md`
+**Spec:** `docs/superpowers/specs/2026-10-01-browser-polish-design.md` (§3, §5–§7, §10). Its §4 (the Waterloo & City WTT) and P18 (display headcodes) are the separate plan `docs/superpowers/plans/2026-10-01-drain-wtt.md`, which merges first.
 
-**Base:** `main` **after the `tutorial` branch merges** (this plan was written against `5eb82f0`). Before Task 1, re-check every file and line reference below against the merged code — the tutorial edits `crates/server/src/process.rs`, `crates/server/src/supervisor.rs` and `crates/game/src/game.rs`, which Tasks 6 and 7 touch, and may add lesson highlights to `crates/client-ui/src/paint.rs`. Every Rust and script block in this plan was compiled and its tests run (and `deploy/browser-check.sh` run end to end) on a scratch copy of `5eb82f0`; the `deploy/Dockerfile` loop was not built (the controller's deploy exercises it). Where the merged code differs, keep the intent and the tests. **Amended 2026-10-01:** the tutorial has merged (`main` = `0c0ea67`); Tasks 4a–4c (the WTT, replacing the repeat timetable) and Task 5's screen test were written and run on a scratch copy of `0c0ea67`, including the `wtt` Docker stage (not the full image).
+**Base:** `main` **after the `drain-wtt` merge** (which itself follows the `robot-fixes` merge). This plan relies on drain-wtt's `Layout.headcodes`, `Layout: Default`, `Names::headcode`, `simplifier::{shown, lines(l, r)}` and `Line.shown`. Every Rust block was compiled and its tests run (workspace, `--features dev-auth`, `scripts/wasm-build`) on a scratch copy of `main` `0c0ea67` with drain-wtt's P18 change and WTT reader applied, Tasks 1–24 in order; `deploy/browser-check.sh` was run end to end on `5eb82f0` when Task 7 was first written. Re-check every file and line reference on the base before each task: `robot-fixes` changes `crates/game/src/view.rs` (`row`, the lateness of standing trains — Task 15 keeps its rule and adds two fields) and the robot; a **`perf-quick-wins`** branch may merge between drain-wtt and this plan and touches `crates/game/src/save.rs` (Task 5), `crates/game/src/game.rs` around lines 156 and 632–667 (Tasks 5 and 12), `crates/protocol/src/lobby.rs` parsing (Tasks 12, 22), `crates/server/src/layouts.rs` and `assets.rs` (Task 22), `scripts/build-web.sh` and the Dockerfile's `wasm-tools` stage — re-apply those tasks' edits by intent there and keep their tests. The diffs in Tasks 8–24 carry scratch line numbers: apply them by content.
 
 ## Global Constraints
 
 - License GPL-2.0-or-later; **no new crates** (no `Cargo.lock` package changes, so the CI runner's offline cache needs no reseed).
 - Every cargo command runs through `scripts/cargo` from the repo root (Docker `rust:1.98-slim-bookworm`, repo at `/w`, no environment forwarded); wasm32 builds through `scripts/wasm-build`.
 - CI builds with `-D warnings --locked --offline`: no unused imports, variables or dead code; rustfmt and clippy are unavailable, so match the surrounding style by hand (4-space indent, ~120 columns).
-- Determinism rules stay for `core`, `game`, `protocol` and `ts2-import`: `BTreeMap`/`BTreeSet`/`Vec` only, no wall clock; converter output byte-identical for the same input. The sim never reads the world's `layout` JSON.
-- **No protocol change, no save-schema change** (save schema stays 2). The only new process argument is `signalbox-game --current-layout <world.json>` (resume only).
-- `client-core` and `client-ui` never touch the browser, the clock or storage directly; text sizes reach `labels` through a `measure` function.
-- Placement depends only on the scene, the zoom and the settings: never on train state, never on the screen edge (spec P3).
+- Determinism rules stay for `core`, `game`, `protocol` and `ts2-import`: `BTreeMap`/`BTreeSet`/`Vec` only, no wall clock; converter output byte-identical for the same input. The sim never reads the world's `layout` JSON. **No change to `crates/core`** in this plan.
+- **Protocol changes are additive only** (spec §10.3), each with a serde default and omitted when empty: `Layout.places`, `LayoutInfo.{title, description}`, `LobbyReply::Layouts.you`, `GameInfo.last_played`, `TrainRow.{arr, dep}`, `VoteView.waiting`, `LessonView.{completed, after}`, `Notice::Rejected.by`; the only new message types are `ClientMsg::VoteDecline` (`vote_decline`) and `Notice::VoteEnded`. **No save-schema change** (save schema stays 2). The only new process argument is `signalbox-game --current-layout <world.json>` (resume only).
+- `client-core` and `client-ui` never touch the browser, the clock or storage directly; text sizes reach `labels` through a `measure` function; Sign out reaches the browser only through `UiApp::wants_logout`, which `client-web` follows.
+- Placement depends only on the scene, the zoom, the settings and the lesson's highlights: never on train state, never on the screen edge (spec P3, M16).
 - Priority (spec P2): own signal numbers, ○A letters, line names, platform numbers, labels, fringe signal numbers. Headcodes are never moved or hidden.
-- The legibility targets (spec §3.4): 0 overlapping texts and 0 covered texts in all 66 renders; at 1280 × 800 Fit every own number drawn in every box view and ≤ 4 numbers tight against track in total.
-- **Licence (spec §4.1, owner decision):** TfL's WTT PDF, its text and anything made from it (parsed trips, a converted world) are never committed, logged into a commit message or pasted into a test. `external/wtt/` ignores everything but its `README.md` and `.gitignore`; tests use only the synthetic `wtt-synthetic.bbox.html`; the real-WTT soak is `#[ignore]` and skips without the file. Before every commit in Tasks 4b/4c, `git status --short` must show nothing from `external/wtt/`.
-- Drain from the WTT (spec §4.4): Wednesday, 574 services, 5 entries, start 05:40, headcodes `<train>/<trip>` (`201/7` … `202/163`), roads `DPT` 5/6/7 for both the siding and the depot.
-- The only core change is the robot's standing rule (Task 4a, spec P22); the sim, protocol and save schema are untouched.
+- The legibility targets (spec §3.4, with §10.2 U19): 0 overlapping texts and 0 covered texts in all 66 renders; at 1280 × 800 Fit, in every box view whose Fit frames the whole area, every own number drawn and ≤ 4 numbers tight against track in total.
+- Lesson texts name signals and points as the client shows them; `crates/game/tests/lessons.rs` must play every lesson to the end after every task that touches `lessons/` or the runner.
 - Infra (deploying, the CI runner, `/opt/stack`, `tailscale serve`) is controller-only, in the final Controller section. Subagents may run `scripts/cargo`, `scripts/wasm-build` and `deploy/browser-check.sh` (it starts and removes its own throwaway container), and must not touch any other container, image, volume or network.
 
 ## Review Focus
 
-1. **Nonsense geometry reaching the placer** — coordinates of ±1e9 or NaN from a bad layout, a text that measures NaN: `plan` must return within a second, place nothing at a non-finite offset, and hide what it cannot measure rather than draw it somewhere odd. Pinned in Task 1 (`nonsense_geometry_stays_cheap_and_finite`).
-2. **A save whose layout the front no longer lists** (renamed or removed from the image) or whose layout file is unreadable: it must still resume, with its own display data, exactly as today. Pinned in Task 7 (`a_save_of_a_layout_no_longer_listed_still_resumes`) and Task 6 (`a_different_network_or_a_bad_file_keeps_the_saves_own`).
-3. **A WTT that is damaged or not WTT No. 7** (another PDF, a different `pdftotext`): the conversion must stop with a message naming the page or the failed check, never produce a partial timetable, and the image build must fail with it. Pinned in Task 4b (`a_wrong_file_is_refused`, `a_day_is_checked_against_what_the_wtt_says`, CLI `wtt_flag_checks_the_timetable_and_writes_nothing_when_it_fails`).
-4. **A stale placement plan** applied to a different drawing (numbers toggled, a claim changing the layout, a tutorial pushing extra texts): nothing may be moved by another drawing's offsets. Pinned in Task 1 (`apply_drops_hidden_texts_and_points_the_rest_at_their_new_index`: a plan of the wrong length changes nothing) and Task 3 (the cache key holds game, layout generation, scale and the numbers setting).
-5. **Train movement re-placing labels** (flicker): placement must be identical with and without a headcode in a berth and after a pan. Pinned in Task 2 (`a_plan_depends_on_neither_pan_nor_trains`).
-6. **The robot standing where it blocks a route to somewhere else** (Task 4a): `may_stand` must refuse sections with points and sections used by a route ending at another signal. Pinned by the Liverpool Street and bot soaks (no stuck trains) and Task 4a's Drain test.
+1. **Train movement re-placing labels** (flicker): placement must be identical with and without a headcode in a berth and after a pan; a lesson's highlight changes it only when the highlight changes. Pinned in Task 2 (`a_plan_depends_on_neither_pan_nor_trains`) and Task 24 (the cache key holds the highlights).
+2. **A stale placement plan** applied to a different drawing (numbers toggled, a claim changing the layout, a tutorial pushing extra texts): nothing may be moved by another drawing's offsets. Pinned in Task 1 (`apply_drops_hidden_texts_and_points_the_rest_at_their_new_index`: a plan of the wrong length changes nothing) and Task 3 (the cache key holds game, layout generation, scale and the numbers setting).
+3. **A narrow window** (1024 px laptops, a resized browser): the diagram must stay usable and fitted — the panel hides or narrows, the simplifier scrolls sideways with its header, an untouched Fit follows the window and a moved view is left alone. Pinned in Task 18 (`the_panel_hides_and_the_fit_follows_the_window`).
+4. **A save whose layout the front no longer lists** (renamed or removed from the image) or whose layout file is unreadable: it must still resume, with its own display data, exactly as today. Pinned in Task 6 (`a_save_of_a_layout_no_longer_listed_still_resumes`) and Task 5 (`a_different_network_or_a_bad_file_keeps_the_saves_own`).
+5. **A lesson player who presses Next early** (before a done step's task is done) or whose task completes while they read: the step must still wait and show its result, never skip it. Pinned in Task 23 (`a_done_step_waits_for_next_after_its_task`: an early Next does nothing).
 
 ## File Structure
 
 | File | Task | Responsibility |
 |---|---|---|
 | `crates/client-ui/src/labels.rs` (new) | 1 | Roles, `Movable`, `KeepClear`, `plan`, `apply`, `audit`: pure placement |
-| `crates/client-ui/src/lib.rs` | 1 | `pub mod labels;` |
-| `crates/client-ui/src/paint.rs` | 1, 2 | `Drawing.movable`/`keep`, `font()`; `draw` records movable texts, alternative spots and keep-clear shapes; ○A letter outward |
-| `crates/client-ui/src/hit.rs` | 2 | ○A hidden below the number threshold; berth boxes sized to the longest headcode (`berth_width`, `berth_box`) |
-| `crates/client-ui/src/scene.rs` | 2 | `BerthMark.width_px` |
-| `crates/client-ui/src/screens.rs` | 3, 5 | Plan cache and `labels::apply` before painting; simplifier scroll to now |
-| `crates/client-ui/tests/labels.rs` (new) | 1, 2 | Placement unit tests |
-| `crates/client-ui/tests/paint.rs` | 2 | ○A threshold, keep-clear lists, number spots, berth width |
-| `crates/client-ui/tests/legibility.rs` (new) | 3 | The spec §3.4 acceptance measurement over the shipped layouts |
-| `crates/client-ui/tests/screens.rs` | 3, 5 | Wiring: no text over text on screen; simplifier opens at now |
-| `crates/core/src/robot.rs`, `crates/ts2-import/tests/soak.rs` | 4a | `may_stand`: wait at an automatic signal on plain line |
-| `crates/ts2-import/src/wtt.rs` (new), `src/lib.rs`, `src/main.rs` | 4b | Read, check and apply the WTT; the `--wtt` flag |
-| `crates/ts2-import/tests/wtt.rs`, `tests/data/wtt-synthetic.py`, `tests/data/wtt-synthetic.bbox.html` (new), `tests/cli.rs` | 4b | Reader, checks, Drain, CLI on the synthetic WTT |
-| `external/wtt/README.md`, `external/wtt/.gitignore`, `crates/ts2-import/tests/wtt_day.rs` (new), `deploy/Dockerfile`, `deploy/README.md` | 4c | Where the owner's PDF lives; the image's `wtt` stage; the owner-run whole-day soak |
-| `crates/client-core/src/simplifier.rs`, `tests/simplifier.rs` | 5 | `last_time`, `now_line` |
-| `crates/game/src/save.rs`, `src/game.rs`, `src/lib.rs`, `tests/refresh.rs` (new) | 6 | `refresh_display`, `Game::resume_with_layout`, `Refresh` |
-| `crates/server/src/process.rs`, `src/supervisor.rs`, `tests/process.rs`, `tests/supervisor.rs` | 7 | `--current-layout`; the front passes it on resume |
-| `deploy/browser-check.sh`, `deploy/browser-check.py` (new), `deploy/README.md` | 8 | The real-browser renderer check |
-| `CLAUDE.md` | 3, 4a, 4b, 4c, 6, 7, 8 | One paragraph per change, in the task that makes it |
+| `crates/client-ui/src/paint.rs` | 1, 2, 11, 19, 20, 24 | Placement data; ○A threshold; blocking outline; growing glyphs; points lie; highlights |
+| `crates/client-ui/src/hit.rs`, `src/scene.rs` | 2, 19, 21 | ○A threshold; berth width; glyph-aware hits; readable Fit |
+| `crates/client-ui/src/screens.rs` | 3, 4, 9–10, 12–13, 15–19, 22–23 | Plan cache; simplifier; lobby; top bar; side panel; diagram input; enquiry; lesson box |
+| `crates/client-ui/tests/{labels,legibility}.rs` (new), `tests/{paint,screens,lesson,layouts,hit}.rs` | 1–4, 8–24 | Placement, measurement, drawing, screens |
+| `crates/client-core/src/{names,select,input,text,simplifier,app}.rs`, `src/form.rs` (new) | 4, 8–12, 14–16, 22 | Display names, hints, dead clicks, refusals, votes, Leave, lateness, enquiry, the form |
+| `crates/protocol/src/{view,msg,lobby,lesson}.rs` | 8, 11, 12, 15, 22, 23 | The additive fields and the two new messages |
+| `crates/game/src/{save,game,display,names,view,clock,layout}.rs`, `src/lesson/{run,file}.rs` | 5, 8, 11, 12, 15, 23 | Resume refresh; places; blocker; vote outcomes; Arr/Dep; done steps |
+| `crates/server/src/{process,supervisor,layouts}.rs` | 6, 14, 22 | `--current-layout`; the lobby push; layout titles and descriptions |
+| `crates/ts2-import/src/{layout,areas}.rs`, `layouts/*.areas.json` | 8, 22 | Place names; layout descriptions |
+| `crates/client-web/src/lib.rs` | 22 | Follow Sign out to `/auth/logout` |
+| `lessons/*/lesson.json` | 8, 15, 23 | Points names; lateness words; `done` texts; lesson 1's Real aspects step |
+| `deploy/browser-check.sh`, `deploy/browser-check.py` (new), `deploy/README.md` | 7 | The real-browser renderer check |
+| `CLAUDE.md` | 3, 5–24 | One paragraph per change, in the task that makes it |
 
 ---
 
@@ -274,7 +266,17 @@ fn a_plan_depends_on_neither_pan_nor_trains() {
     empty.berths.clear();
     busy.berths.insert("BW1".into(), "1A01".into());
     let plan_at = |cam: &Camera, v: &protocol::View| {
-        let st = PaintState { view: Some(v), selected: None, exits: &[], refused: None, time: 0.0, aspects: AspectMode::RedGreen, numbers: true, names: &names };
+        let st = PaintState {
+            view: Some(v),
+            selected: None,
+            exits: &[],
+            refused: None,
+            time: 0.0,
+            aspects: AspectMode::RedGreen,
+            numbers: true,
+            names: &names,
+            highlight: &[],
+        };
         plan(&draw(&sc, cam, screen, &st), &mut measure)
     };
     let cam = Camera::fit(sc.all.unwrap(), screen);
@@ -718,6 +720,8 @@ git commit -m "feat(client-ui): a pure placer for the diagram's texts, by priori
 
 ---
 
+---
+
 ### Task 2: `draw` records what may move and what to keep clear
 
 **Files:**
@@ -726,6 +730,7 @@ git commit -m "feat(client-ui): a pure placer for the diagram's texts, by priori
 
 **Interfaces:**
 - Consumes: Task 1's `labels::{Movable, KeepClear, Role, corner}`, `Drawing.movable`/`keep`.
+- Consumes also: the drain-wtt plan's `Layout.headcodes` (headcode → displayed headcode).
 - Produces: `paint::number_alts(base: Pos2, disc: Pos2, facing: Vec2, track_w: f32, has_auto: bool) -> Vec<(Pos2, Align2)>` (six spots); constants `paint::{NUMBER_CLEAR_PX = 1.5, AUTO_LETTER_PX = 9.0, AUTO_LETTER_GAP_PX = 1.0}`; `hit::{HEADCODE_CHAR_PX = 6.7, BERTH_PAD_PX = 6.0, berth_width(chars: usize) -> f32, berth_box(cam, screen, b: &BerthMark) -> Rect}`; `scene::BerthMark.width_px: f32`; `hit::auto_button` returns `None` below the number threshold.
 
 - [ ] **Step 1: Write the failing tests**
@@ -812,6 +817,18 @@ fn berth_boxes_fit_the_longest_headcode() {
     let sc = Scene::build(&l).unwrap();
     assert!(sc.berths.iter().all(|b| b.width_px == berth_width(7)));
 }
+
+/// Spec P13 with P18: boxes are sized for display headcodes, not the longer
+/// unique ones (`202/163` shows as `202`, which fits `BERTH_W`).
+#[test]
+fn berth_boxes_fit_display_headcodes() {
+    use client_ui::hit::BERTH_W;
+    let mut l = layout_for(Some("West"));
+    l.simplifier.push(SimplifierRow { headcode: "202/163".into(), origin: None, destination: None, calls: vec![] });
+    l.headcodes.insert(s("202/163"), s("202"));
+    let sc = Scene::build(&l).unwrap();
+    assert!(sc.berths.iter().all(|b| b.width_px == BERTH_W), "`202`, not `202/163`");
+}
 ```
 
 In `crates/client-ui/tests/labels.rs`, add the Task-2 imports (`mod common;`, `use client_core::{AspectMode, Names};`, `use client_ui::camera::Camera;`, `use client_ui::paint::{Drawing, LABEL, PaintState, TextItem, draw};`, `use client_ui::scene::Scene;`, `use common::*;`) and the last test of the file shown in Task 1 (`a_plan_depends_on_neither_pan_nor_trains`).
@@ -870,8 +887,10 @@ pub fn berth_box(cam: &Camera, screen: Rect, b: &BerthMark) -> Rect {
 - in `Scene::build`, right after `let mut sc = Scene::default();`:
 
 ```rust
-        // Every berth box fits the longest headcode the layout books.
-        let chars = l.simplifier.iter().map(|r| r.headcode.chars().count()).max().unwrap_or(0).max(4);
+        // Every berth box fits the longest headcode the layout books, as it is
+        // displayed (spec P18: the WTT's `202/163` shows as `202`).
+        let shown = |h: &str| l.headcodes.get(h).map_or(h.chars().count(), |d| d.chars().count());
+        let chars = l.simplifier.iter().map(|r| shown(&r.headcode)).max().unwrap_or(0).max(4);
         let berth_w = crate::hit::berth_width(chars);
 ```
 
@@ -1010,6 +1029,8 @@ git commit -m "feat(client-ui): draw lists movable texts and what to keep clear;
 
 ---
 
+---
+
 ### Task 3: Place the texts on screen, and the legibility measurement
 
 **Files:**
@@ -1118,6 +1139,7 @@ fn every_view_is_legible_at_every_zoom() {
                         aspects: AspectMode::RedGreen,
                         numbers: true,
                         names: &names,
+                        highlight: &[],
                     };
                     let d = draw(&sc, &cam, screen, &st);
                     let t0 = std::time::Instant::now();
@@ -1185,7 +1207,7 @@ fn the_diagram_never_draws_text_over_text() {
 - [ ] **Step 2: Run them**
 
 Run: `scripts/cargo test -p signalbox-client-ui --test legibility --test screens -- --nocapture`
-Expected: `legibility` PASSES already (it calls `labels::plan` itself; read its table — at 1280 × 800 Fit: 0 overlaps and 0 covered everywhere, tight 1 on Liverpool Street B and 1 on Drain Waterloo, nothing hidden in box views). `the_diagram_never_draws_text_over_text` FAILS with overlaps such as `("2", "2"), ("LA61", "BISHOPSGATE TUNNEL")`: the screen does not place yet. If `legibility` fails after the tutorial merge, stop and report the table rather than loosening a threshold.
+Expected: `legibility` PASSES already (it calls `labels::plan` itself; read its table — at 1280 × 800 Fit: 0 overlaps and 0 covered everywhere, tight 1 on Liverpool Street B and 1 on Drain Waterloo, nothing hidden in box views; checked again on the scratch copy of `0c0ea67`). `the_diagram_never_draws_text_over_text` FAILS with overlaps such as `("2", "2"), ("LA61", "BISHOPSGATE TUNNEL")`: the screen does not place yet. If `legibility` fails after the tutorial merge, stop and report the table rather than loosening a threshold.
 
 - [ ] **Step 3: Apply the plan in `UiApp`**
 
@@ -1248,1771 +1270,9 @@ git commit -m "feat(client-ui): place the diagram's texts on screen, cached per 
 
 ---
 
-### Task 4a: The robot may wait at an automatic signal on plain line (spec P22)
-
-Replaces the repeat timetable's Task 4 (spec P7/P8 withdrawn). The real WTT (Tasks 4b, 4c) gridlocks under today's
-robot at 06:52 (spec §4.6); this is the one core change it needs.
-
-**Files:**
-- Modify: `crates/core/src/robot.rs` (`plan`, `shared_sections` → `route_users`, new `may_stand`), `CLAUDE.md`
-- Test: `crates/ts2-import/tests/soak.rs`
-
-**Interfaces:**
-- Consumes: `robot::{commands, ROBOT_EVERY_TICKS}`, Drain (`crates/ts2-import/tests/data/drain.json`): signals 72/82 (Bank
-  platforms 7/8) both route to automatic signal 73 over plain section T19 (`L1000003`); platform 26 is `L1000009`.
-- Produces: no new public items; `robot::commands` sets routes to an automatic signal on plain line even where
-  routes from several signals (all ending at it) use the sections the train would stand on.
-
-- [ ] **Step 1: Write the failing test**
-
-In `crates/ts2-import/tests/soak.rs` the `use` line becomes
-`use signalbox_core::robot::{self, ROBOT_EVERY_TICKS, SoakReport, soak};`, and before the doc comment of
-`liverpool_street_runs_three_hours` (`/// Three sim-hours from 05:00:15.`) add:
-
-```rust
-/// The robot lets a train wait at an automatic signal on plain line where
-/// routes from two platforms meet before it (polish spec §4.6): a westbound
-/// train leaves Bank for signal 73 while platform 26 is still occupied,
-/// instead of waiting at Bank until it clears.
-#[test]
-fn drain_trains_wait_at_automatic_signal_73() {
-    let dir = env!("CARGO_MANIFEST_DIR");
-    let mut w = ts2_import::convert(&std::fs::read_to_string(format!("{dir}/tests/data/drain.json")).unwrap()).unwrap().world;
-    // A runs from Bank platform 8 into platform 26 and stands there; B leaves platform 7 behind it.
-    let (services, entries) = (
-        r#"[{"headcode": "A", "train_type": "UT", "calls": [{"place": "BNK", "platform": "8", "dep": "06:00:00"},
-                {"place": "WTL", "platform": "26", "arr": "06:03:00", "dep": "23:00:00"}], "end": {"kind": "stable"}},
-            {"headcode": "B", "train_type": "UT", "calls": [{"place": "BNK", "platform": "7", "dep": "06:04:00"},
-                {"place": "WTL", "platform": "26", "arr": "06:08:00"}], "end": {"kind": "stable"}}]"#,
-        r#"[{"service": "A", "at": {"segment": "L8", "offset_m": 79.0, "direction": "up"}, "time": "06:00:00"},
-            {"service": "B", "at": {"segment": "L7", "offset_m": 79.0, "direction": "up"}, "time": "06:00:00"}]"#,
-    );
-    w.services = serde_json::from_str(services).unwrap();
-    w.entries = serde_json::from_str(entries).unwrap();
-    let mut sim = Sim::new(World::from_file(w).unwrap(), 7);
-    for i in 0..(8 * 600) {
-        if i % ROBOT_EVERY_TICKS == 0 {
-            for c in robot::commands(&sim) {
-                sim.submit(c);
-            }
-        }
-        sim.step();
-    }
-    let b = sim.trains().iter().find(|t| t.headcode == "B").unwrap();
-    let net = &sim.world().net;
-    assert_eq!(net.segments[b.head().0.idx()].name, "L1000003", "B waits on the plain line at 73");
-    assert_eq!(b.speed, 0.0);
-    let a = sim.trains().iter().find(|t| t.headcode == "A").unwrap();
-    assert_eq!(net.segments[a.head().0.idx()].name, "L1000009", "A still in platform 26");
-}
-```
-
-- [ ] **Step 2: Run it to see it fail**
-
-Run: `scripts/cargo test -p ts2-import --test soak drain_trains_wait_at_automatic_signal_73`
-Expected: FAIL, `B waits on the plain line at 73` with `left: "L7"` (B is still at Bank).
-
-- [ ] **Step 3: Implement**
-
-In `crates/core/src/robot.rs`, replace `plan` and `shared_sections` (from the doc comment of `plan` up to the doc
-comment of `commands`, `/// Route requests for trains facing a red signal…`) with:
-
-```rust
-/// The routes from `entrance` the train should have set together: up to its
-/// next stopping call or its exit, or to the first signal before that where
-/// it could stand without fouling track that routes from other signals use
-/// (`may_stand`).
-fn plan(w: &World, t: &Train, entrance: SignalId, users: &[Vec<(SignalId, Exit)>]) -> Option<Vec<RouteId>> {
-    let next = t.next_call + usize::from(t.dwell.is_some());
-    let (full, _) = itinerary(w, t, entrance, next, None)?;
-    let mut chain = Vec::new();
-    for (r, ends_leg) in full {
-        chain.push(r);
-        let exit = w.routes[r.idx()].exit;
-        let clear = matches!(exit, Exit::Signal(_))
-            && footprint(w, &chain, t.length_m).iter().all(|&s| may_stand(w, users, s, exit));
-        if ends_leg || clear {
-            break;
-        }
-    }
-    (!chain.is_empty()).then_some(chain)
-}
-
-/// For each section, the entrance and exit of every route whose path uses it.
-fn route_users(w: &World) -> Vec<Vec<(SignalId, Exit)>> {
-    let mut users: Vec<Vec<(SignalId, Exit)>> = vec![Vec::new(); w.net.sections.len()];
-    for def in &w.routes {
-        for &s in &def.path {
-            if !users[s.idx()].contains(&(def.entrance, def.exit)) {
-                users[s.idx()].push((def.entrance, def.exit));
-            }
-        }
-    }
-    users
-}
-
-/// Whether a train may stand on section `s` waiting at `exit`: no route
-/// from another signal uses `s`, or `s` is plain line (no points) whose
-/// routes all end at `exit` and `exit` is an automatic signal (polish spec
-/// §4.6). There the train blocks nothing that could go anywhere else: it is
-/// waiting in a block section, as on any plain line.
-fn may_stand(w: &World, users: &[Vec<(SignalId, Exit)>], s: SectionId, exit: Exit) -> bool {
-    let here = &users[s.idx()];
-    if here.iter().all(|u| u.0 == here[0].0) {
-        return true;
-    }
-    let automatic = match exit {
-        Exit::Signal(x) => {
-            let onward = &w.routes_from[x.idx()];
-            !onward.is_empty() && onward.iter().all(|&o| w.routes[o.idx()].automatic)
-        }
-        Exit::Node(_) => false,
-    };
-    let plain = w.net.sections[s.idx()].segments.iter().all(|g| {
-        let sg = &w.net.segments[g.idx()];
-        [sg.a, sg.b].iter().all(|n| !matches!(w.net.nodes[n.idx()].kind, NodeKind::Points { .. }))
-    });
-    automatic && plain && here.iter().all(|u| u.1 == exit)
-}
-```
-
-and in `commands`: `let shared = shared_sections(w);` becomes `let users = route_users(w);`, and
-`let Some(chain) = plan(w, t, entrance, &shared) else { continue };` becomes
-`let Some(chain) = plan(w, t, entrance, &users) else { continue };`. (`NodeKind`, `Exit`, `SectionId` and
-`SignalId` are already in scope.)
-
-- [ ] **Step 4: Run the tests to see them pass, and the soaks**
-
-Run: `scripts/cargo test -p ts2-import --test soak` → PASS (3 passed, 1 ignored).
-Run: `scripts/cargo test -p signalbox-core` → PASS.
-Run: `scripts/cargo test --release -p ts2-import --test soak -- --ignored` → PASS (Liverpool Street, 3 h).
-Run: `scripts/cargo test --release -p signalbox-bot --test soak -- --ignored` → PASS.
-Run: `scripts/cargo test -p signalbox-game` → PASS.
-For the branch report: `scripts/cargo run -q -p ts2-import -- crates/ts2-import/tests/data/liverpool-st.json -o /w/target/lst.json`
-then `scripts/cargo run -q --release -p sim-cli -- run /w/target/lst.json --robot --hours 3` (scratch, on `0c0ea67`:
-entered 76, exited 60, no stuck, `max_fringe_wait_s` 997; before this task 71, 58, none, 686).
-
-- [ ] **Step 5: Document**
-
-`CLAUDE.md`, "Trains and the robot", after `…violations or stuck trains).` add: "The robot sets a train's routes
-only all the way to its next stop, or to a signal where it fouls no route from another signal, or
-(`robot::may_stand`, polish spec P22) to an automatic signal on plain line whose routes all end there."
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add crates/core/src/robot.rs crates/ts2-import/tests/soak.rs CLAUDE.md
-git commit -m "feat(core): the robot may hold a train at an automatic signal on plain line"
-```
-
 ---
 
-### Task 4b: Read the WTT and put it into Drain (`ts2-import --wtt`)
-
-**Files:**
-- Create: `crates/ts2-import/src/wtt.rs`, `crates/ts2-import/tests/wtt.rs`,
-  `crates/ts2-import/tests/data/wtt-synthetic.py`, `crates/ts2-import/tests/data/wtt-synthetic.bbox.html` (generated)
-- Modify: `crates/ts2-import/src/lib.rs`, `crates/ts2-import/src/main.rs`, `crates/ts2-import/tests/cli.rs`, `CLAUDE.md`
-
-**Interfaces:**
-- Consumes: `signalbox_core::world::file::{CallFile, EndFile, EntryFile, PositionFile, ServiceFile, WorldFile}`,
-  `signalbox_core::time::fmt_hms`, `Sim::new` + `Network::first_signal_ahead` (to stand entering trains facing their
-  starting signal), Drain's places `BNK` 7/8, `WTL` 25/26, `DPT` 5/6/7.
-- Produces (Task 4c relies on these): `ts2_import::wtt::{parse(&str) -> Result<Vec<Trip>, WttError>, on_day(&[Trip], Day)
-  -> Result<Vec<Trip>, WttError>, DAY, check(&[Trip], &Checks) -> Result<CheckReport, WttError>, Checks::waterloo_city(),
-  apply(&mut WorldFile, &[Trip]) -> Result<ApplyReport, WttError>, headcode(&Trip) -> String, Trip, Bound, Day,
-  WttError}`; CLI flag `--wtt <wtt.bbox.html>` (after `--areas` and `--lines`; exit 1 and nothing written if the
-  WTT does not read or fails the checks).
-- **Licence (spec §4.1):** nothing made from TfL's WTT is committed in this task or any other. The tests use only the
-  synthetic fixture (fictional trains 301–303).
-
-- [ ] **Step 1: The synthetic fixture**
-
-Create `crates/ts2-import/tests/data/wtt-synthetic.py`:
-
-```python
-#!/usr/bin/env python3
-# Writes wtt-synthetic.bbox.html: a made-up Working Timetable in the form
-# `pdftotext -bbox` gives for LU WTTs (words with their boxes), for the tests
-# of ts2_import::wtt. Fictional trains 301-303 and times; nothing in it comes
-# from TfL's timetable. Rerun after editing:
-#   python3 crates/ts2-import/tests/data/wtt-synthetic.py > crates/ts2-import/tests/data/wtt-synthetic.bbox.html
-out = []
-def word(x0, y0, w, h, t):
-    t = t.replace('&', '&amp;')
-    out.append(f'    <word xMin="{x0:.6f}" yMin="{y0:.6f}" xMax="{x0+w:.6f}" yMax="{y0+h:.6f}">{t}</word>')
-def text(x, y, s, h=6.07, cw=3.6):
-    for part in s.split():
-        w = cw * len(part)
-        word(x, y, w, h, part); x += w + 1.8
-def centred(c, y, s, h=4.55):
-    width = sum(3.0 * len(p) for p in s.split()) + 1.8 * (len(s.split()) - 1)
-    text(c - width / 2, y, s, h, 3.0)
-def time(c, y, hh, mm, frac=None, stacked=None, wash=False):
-    if wash:
-        word(c - 9.87, y, 18.16, 5.99, f'{hh}z{mm}'); x1 = c + 8.29
-    else:
-        word(c - 9.87, y, 7.18, 5.99, hh); word(c + 1.11, y, 7.18, 5.99, mm); x1 = c + 8.29
-    if frac: word(x1, y + 0.17, 1.82, 5.89, frac)
-    if stacked:
-        n, d = stacked
-        word(x1, y + 0.12, 1.63, 3.04, n); word(x1 + 0.2, y + 3.02, 1.63, 3.04, d)
-def page(direction, rows, cols):
-    out.append('  <page width="595.220000" height="842.000000">')
-    text(42.83, 54.31, 'MONDAYS TO FRIDAYS', 8.4)
-    text(466.45 if direction == 'WESTBOUND' else 42.83, 54.31 if direction == 'WESTBOUND' else 62.0, direction, 8.4)
-    labels = {'train': 'Train No.', 'trip': 'Trip No.', 'crew': 'Crew Running No.', 'notes': 'Notes', 'pf': 'Platform No.',
-              'bank': 'BANK', 'arr': 'arr.', 'dep': 'dep.', 'siding': 'Waterloo Siding', 'depot': 'Waterloo Depot',
-              'toform': 'To form', 'by': 'By Crew Running No.'}
-    for key, y in rows:
-        x = 96.14 if key in ('arr', 'dep') else 49.45 if key == 'pf' else 38.2
-        text(x, y, labels[key])
-        for dots in (118.08,):
-            text(dots, y, '.')
-        if key == 'arr':
-            text(38.2, y + 3.12, 'WATERLOO')
-    y = dict(rows)
-    for c, col in cols:
-        for key, v in col.items():
-            if key == 'extra':
-                for dy, s in v:
-                    centred(c, y['notes'] + dy, s)
-            elif isinstance(v, tuple):
-                time(c, y[key] + 0.08, *v[:2], **(v[2] if len(v) > 2 else {}))
-            else:
-                centred(c, y[key] + 0.08, v)
-    out.append('  </page>')
-
-out.append('<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml">')
-out.append('<head>\n<title>Synthetic working timetable (test data)</title>\n</head>\n<body>\n<doc>')
-# Page 1: a contents page (no train service).
-out.append('  <page width="595.220000" height="842.000000">')
-text(200, 100, 'SYNTHETIC LINE WORKING TIMETABLE')
-text(200, 120, 'Train Service MONDAYS TO FRIDAYS')
-out.append('  </page>')
-W = [('train', 73.21), ('trip', 85.71), ('crew', 98.20), ('notes', 116.95), ('pf', 129.54), ('bank', 135.70),
-     ('arr', 141.95), ('dep', 148.20), ('siding', 154.53), ('depot', 160.70), ('toform', 173.20), ('by', 179.45)]
-page('WESTBOUND', W, [
-    (142.0, {'train': '303', 'trip': '1', 'crew': '9', 'notes': 'Ety', 'extra': [(-6.16, 'Start')],
-             'arr': 'Pfm 26', 'dep': ('05', '50'), 'depot': ('05', '52'), 'toform': 'Stop'}),
-    (185.2, {'train': '302', 'trip': '1', 'crew': '2', 'notes': 'TThX', 'extra': [(-6.16, 'Start')], 'pf': '8',
-             'bank': ('06', '05'), 'arr': ('06', '09'), 'dep': ('06', '10'), 'siding': ('06', '11'), 'toform': ('06', '12')}),
-    (206.8, {'train': '302', 'trip': '2', 'crew': '2', 'notes': 'TThO', 'extra': [(-6.16, 'Start')], 'pf': '7',
-             'bank': ('06', '05'), 'arr': ('06', '08', {'frac': '12'}), 'dep': ('06', '10'), 'siding': ('06', '11'), 'toform': ('06', '12')}),
-    (250.0, {'train': '301', 'trip': '2', 'crew': '1', 'pf': '7', 'bank': ('06', '09'), 'arr': ('06', '12', {'frac': '12'}),
-             'dep': ('06', '13', {'frac': '12'}), 'siding': ('06', '14', {'frac': '12'}), 'toform': ('06', '16'), 'by': '2'}),
-    (336.5, {'train': '302', 'trip': '5', 'crew': '2', 'notes': 'WO', 'pf': '8', 'bank': ('06', '34', {'frac': '14'}),
-             'arr': ('06', '38', {'stacked': ('1', '4')}), 'toform': 'Stop'}),
-    (293.3, {'train': '301', 'trip': '4', 'crew': '1', 'pf': '7', 'bank': ('06', '24'), 'arr': ('06', '27', {'frac': '12'}),
-             'dep': ('06', '28', {'frac': '12'}), 'depot': ('06', '30', {'frac': '12', 'wash': True}),
-             'extra': [(49.0, 'Shed Rd')], 'toform': 'Stop'}),
-])
-E = [('train', 73.21), ('trip', 85.71), ('crew', 98.20), ('notes', 116.95), ('depot', 123.20), ('siding', 129.45),
-     ('arr', 135.70), ('dep', 141.95), ('bank', 148.20), ('pf', 154.45), ('toform', 166.95), ('by', 173.20)]
-page('EASTBOUND', E, [
-    (142.0, {'train': '301', 'trip': '1', 'crew': '1', 'extra': [(-6.16, 'Start')], 'depot': ('06', '00'),
-             'arr': ('06', '01', {'frac': '12'}), 'dep': ('06', '03'), 'bank': ('06', '07', {'frac': '14'}), 'pf': '7', 'toform': ('06', '09')}),
-    (185.2, {'train': '302', 'trip': '3', 'crew': '2', 'siding': ('06', '12'), 'arr': ('06', '12', {'frac': '34'}),
-             'dep': ('06', '13', {'frac': '12'}), 'bank': ('06', '17', {'frac': '12'}), 'pf': '8', 'toform': ('06', '34', {'stacked': ('1', '4')})}),
-    (228.4, {'train': '301', 'trip': '3', 'crew': '1', 'siding': ('06', '16'), 'arr': ('06', '16', {'frac': '34'}),
-             'dep': ('06', '18'), 'bank': ('06', '22', {'frac': '14'}), 'pf': '7', 'toform': ('06', '24')}),
-])
-# A Saturday page: never read.
-out.append('  <page width="595.220000" height="842.000000">')
-text(42.83, 54.31, 'SATURDAYS WESTBOUND', 8.4)
-text(38.2, 73.21, 'Train No.'); text(140, 73.29, '309', 4.55)
-out.append('  </page>')
-out.append('</doc>\n</body>\n</html>')
-print('\n'.join(out))
-```
-
-Run: `python3 crates/ts2-import/tests/data/wtt-synthetic.py > crates/ts2-import/tests/data/wtt-synthetic.bbox.html`
-then `sha256sum crates/ts2-import/tests/data/wtt-synthetic.bbox.html`
-Expected: `0d8e2207fe1d872ed5bab8b6ac58c612f9436b9bccaaa16b33094a9fec8e87bb` (256 lines).
-
-- [ ] **Step 2: Write the failing tests**
-
-Create `crates/ts2-import/tests/wtt.rs`:
-
-```rust
-//! Reading a Working Timetable (polish spec §4) from `pdftotext -bbox` text,
-//! on a hand-made synthetic WTT (`tests/data/wtt-synthetic.bbox.html`,
-//! written by `wtt-synthetic.py`: fictional trains 301–303 in the real WTT's
-//! layout and notation), and putting it into Drain.
-
-use signalbox_core::robot::soak;
-use signalbox_core::sim::Sim;
-use signalbox_core::time::parse_hms;
-use signalbox_core::world::World;
-use signalbox_core::world::file::{EndFile, WorldFile};
-use ts2_import::wtt::{self, Bound, Checks, Day, Trip, WttError};
-
-const SYNTHETIC: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/wtt-synthetic.bbox.html");
-const DRAIN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/drain.json");
-
-fn trips() -> Vec<Trip> {
-    wtt::parse(&std::fs::read_to_string(SYNTHETIC).unwrap()).unwrap()
-}
-
-fn find(ts: &[Trip], train: u16, trip: u16) -> &Trip {
-    ts.iter().find(|t| t.train == train && t.trip == trip).unwrap_or_else(|| panic!("no {train}/{trip}"))
-}
-
-fn at(s: &str) -> Option<u32> {
-    parse_hms(s)
-}
-
-/// What the synthetic WTT says about itself.
-fn checks() -> Checks {
-    Checks {
-        running: vec![("7", Bound::West, 210), ("8", Bound::West, 240), ("7", Bound::East, 255), ("8", Bound::East, 240)],
-        snapshots: vec![(at("05:51").unwrap(), 0), (at("06:10").unwrap(), 2), (at("06:36").unwrap(), 1)],
-        intervals: vec![(at("06:00").unwrap(), at("06:40").unwrap(), 585)],
-    }
-}
-
-fn drain() -> WorldFile {
-    ts2_import::convert(&std::fs::read_to_string(DRAIN).unwrap()).unwrap().world
-}
-
-#[test]
-fn every_monday_to_friday_column_is_read() {
-    let ts = trips();
-    // Six westbound columns, three eastbound; the contents and Saturday pages are not timetables.
-    assert_eq!(ts.len(), 9);
-    assert!(ts.iter().all(|t| t.train != 309));
-    let t = find(&ts, 301, 2);
-    assert_eq!(t.bound, Bound::West);
-    assert_eq!(t.platform.as_deref(), Some("7"));
-    assert_eq!((t.bank, t.arr, t.dep, t.siding, t.to_form), (at("06:09"), at("06:12:30"), at("06:13:30"), at("06:14:30"), at("06:16")));
-    // Fractions: `12` = ½, `14` = ¼, `34` = ¾, and a numerator stacked on its denominator.
-    assert_eq!(find(&ts, 302, 3).arr, at("06:12:45"));
-    assert_eq!(find(&ts, 302, 5).bank, at("06:34:15"));
-    assert_eq!(find(&ts, 302, 5).arr, at("06:38:15"));
-    assert_eq!(find(&ts, 302, 3).to_form, at("06:34:15"));
-    // `06z30` is 06:30 with the train-wash mark; `Stop` ends a working.
-    let t = find(&ts, 301, 4);
-    assert_eq!((t.depot, t.wash, t.to_form), (at("06:30:30"), true, None));
-    assert!(t.has("Shed") && t.has("Rd"));
-    // `Pfm 26`: a move that starts standing in a Waterloo platform.
-    let t = find(&ts, 303, 1);
-    assert_eq!((t.starts_in.as_deref(), t.dep, t.depot), (Some("26"), at("05:50"), at("05:52")));
-    assert!(t.has("Start") && t.has("Ety"));
-    let t = find(&ts, 301, 1);
-    assert_eq!((t.bound, t.depot, t.arr, t.dep, t.bank), (Bound::East, at("06:00"), at("06:01:30"), at("06:03"), at("06:07:15")));
-}
-
-#[test]
-fn day_codes_pick_one_weekday() {
-    let ts = trips();
-    let wed: Vec<(u16, u16)> = wtt::on_day(&ts, Day::Wed).unwrap().iter().map(|t| (t.train, t.trip)).collect();
-    assert!(wed.contains(&(302, 1)) && wed.contains(&(302, 5)) && !wed.contains(&(302, 2)), "{wed:?}");
-    let tue: Vec<(u16, u16)> = wtt::on_day(&ts, Day::Tue).unwrap().iter().map(|t| (t.train, t.trip)).collect();
-    assert!(tue.contains(&(302, 2)) && !tue.contains(&(302, 1)) && !tue.contains(&(302, 5)), "{tue:?}");
-    let mut odd = ts.clone();
-    odd[0].notes.push("QO".into());
-    assert_eq!(wtt::on_day(&odd, Day::Wed), Err(WttError::DayCode("QO".into(), odd[0].train, odd[0].trip)));
-}
-
-#[test]
-fn a_day_is_checked_against_what_the_wtt_says() {
-    let day = wtt::on_day(&trips(), Day::Wed).unwrap();
-    let r = wtt::check(&day, &checks()).unwrap();
-    assert_eq!((r.trips, r.trains, r.running_exact, r.running_longer, r.links), (8, 3, 7, 0, 5));
-    assert_eq!(r.intervals, vec![(at("06:00").unwrap(), at("06:40").unwrap(), 585)]);
-    let mut c = checks();
-    c.snapshots[1].1 = 3;
-    assert!(matches!(wtt::check(&day, &c), Err(WttError::Check(m)) if m.contains("2 trains in service at 06:10:00")));
-    let mut fast = day.clone();
-    fast.iter_mut().find(|t| (t.train, t.trip) == (301, 2)).unwrap().arr = at("06:12");
-    assert!(matches!(wtt::check(&fast, &checks()), Err(WttError::Check(m)) if m.contains("under the published")));
-    let mut broken = day.clone();
-    broken.iter_mut().find(|t| (t.train, t.trip) == (301, 2)).unwrap().to_form = at("06:17");
-    assert!(matches!(wtt::check(&broken, &checks()), Err(WttError::Check(m)) if m.contains("301 trip 2 forms")));
-}
-
-#[test]
-fn a_day_goes_into_drain() {
-    let day = wtt::on_day(&trips(), Day::Wed).unwrap();
-    let mut w = drain();
-    let r = wtt::apply(&mut w, &day).unwrap();
-    assert_eq!((r.services, r.entries, r.start_time.as_str()), (7, 2, "05:50:00"));
-    assert_eq!((r.dropped_empty, r.dropped_trains), (vec!["303/1".to_string()], vec![303]));
-    let heads: Vec<&str> = w.services.iter().map(|s| s.headcode.as_str()).collect();
-    assert_eq!(heads, ["301/1", "301/2", "301/3", "301/4", "302/1", "302/3", "302/5"]);
-    let svc = |h: &str| w.services.iter().find(|s| s.headcode == h).unwrap();
-    let calls = |h: &str| svc(h).calls.iter().map(|c| format!("{} {}", c.place, c.platform.clone().unwrap_or_default())).collect::<Vec<_>>();
-    assert_eq!(calls("302/1"), ["BNK 8", "WTL 26", "DPT 6"]);
-    assert_eq!(calls("302/3"), ["DPT 6", "WTL 25", "BNK 8"]);
-    assert_eq!(calls("301/1"), ["DPT 5", "WTL 25", "BNK 7"]);
-    assert_eq!(calls("301/4"), ["BNK 7", "WTL 26", "DPT 5"]);
-    assert!(matches!(&svc("301/1").end, EndFile::Form { service } if service == "301/2"));
-    assert!(matches!(svc("301/4").end, EndFile::Stable), "to the depot for the night");
-    let last = svc("302/5").calls.last().unwrap();
-    assert_eq!((last.place.as_str(), last.stop, last.arr.as_deref()), ("WTL", false, Some("06:38:15")));
-    assert!(matches!(svc("302/5").end, EndFile::Stable), "the last train in stables in platform 26");
-    assert_eq!(w.options.start_time, "05:50:00");
-    let entry = |h: &str| w.entries.iter().find(|e| e.service == h).unwrap();
-    assert_eq!((entry("301/1").time.as_str(), entry("301/1").at.as_ref().unwrap().segment.as_str()), ("05:50:00", "L1000021"));
-    assert_eq!((entry("302/1").time.as_str(), entry("302/1").at.as_ref().unwrap().segment.as_str()), ("05:50:00", "L8"));
-    let again = {
-        let mut w2 = drain();
-        wtt::apply(&mut w2, &day).unwrap();
-        serde_json::to_string(&w2).unwrap()
-    };
-    assert_eq!(serde_json::to_string(&w).unwrap(), again, "byte-identical");
-    World::from_file(w).unwrap();
-}
-
-#[test]
-fn the_synthetic_day_runs_under_the_robot() {
-    let mut w = drain();
-    wtt::apply(&mut w, &wtt::on_day(&trips(), Day::Wed).unwrap()).unwrap();
-    let mut sim = Sim::new(World::from_file(w).unwrap(), 7);
-    let r = soak(&mut sim, 3600.0);
-    assert_eq!((r.spads, r.collisions, r.invariant_violations), (0, 0, 0), "{r:?}");
-    assert!(r.stuck.is_empty() && r.still_running.is_empty(), "{r:?}");
-    assert_eq!((r.entered, r.stabled), (2, 2), "{r:?}");
-}
-
-#[test]
-fn a_wrong_file_is_refused() {
-    assert_eq!(wtt::parse("<html><body>not a timetable</body></html>"), Err(WttError::NoPages));
-    let text = std::fs::read_to_string(SYNTHETIC).unwrap().replacen(">06</word>", ">6a</word>", 1);
-    assert!(matches!(wtt::parse(&text), Err(WttError::Format(..))), "a garbled time");
-}
-```
-
-In `crates/ts2-import/tests/cli.rs`: the first doc line becomes ``//! The converter CLI's `--areas`, `--lines` and `--wtt` flags.``;
-after `DRAIN_LINES` add
-
-```rust
-const SYNTHETIC_WTT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/wtt-synthetic.bbox.html");
-```
-
-and append:
-
-```rust
-/// `--wtt` checks the WTT against the Waterloo & City figures before it
-/// writes anything: the synthetic test WTT is read but fails them, and the
-/// image build stops rather than shipping a timetable that is not the real one.
-#[test]
-fn wtt_flag_checks_the_timetable_and_writes_nothing_when_it_fails() {
-    let dir = temp_dir("wtt");
-    let out = dir.join("drain.json");
-    let o = cli(&[DRAIN, "-o", out.to_str().unwrap(), "--wtt", SYNTHETIC_WTT]);
-    assert_eq!(o.status.code(), Some(1), "{}", stderr(&o));
-    assert!(stderr(&o).contains("check failed: 0 trains in service at 09:00:00, the WTT says 5"), "{}", stderr(&o));
-    assert!(!out.exists());
-    let o = cli(&[DRAIN, "-o", out.to_str().unwrap(), "--wtt", dir.join("missing.html").to_str().unwrap()]);
-    assert_eq!(o.status.code(), Some(1), "{}", stderr(&o));
-    assert!(!out.exists());
-    let o = cli(&[DRAIN, "-o", out.to_str().unwrap(), "--wtt"]);
-    assert_eq!(o.status.code(), Some(2), "--wtt needs a value");
-    let _ = std::fs::remove_dir_all(&dir);
-}
-```
-
-- [ ] **Step 3: Run them to see them fail**
-
-Run: `scripts/cargo test -p ts2-import --test wtt --test cli`
-Expected: compile errors (`could not find wtt in ts2_import`).
-
-- [ ] **Step 4: Implement**
-
-Create `crates/ts2-import/src/wtt.rs`:
-
-```rust
-//! The Waterloo & City line's Working Timetable (polish spec §4): read from
-//! `pdftotext -bbox` output of the owner's own copy of LU WTT No. 7, checked
-//! against the figures the WTT itself publishes, and put into the Drain world
-//! as its timetable. Only this code is in the repository: the PDF and anything
-//! made from it stay outside it (`external/wtt/`, git-ignored).
-//!
-//! The WTT's train-service pages are tables, one column per trip, one row per
-//! timing point. `pdftotext -bbox` gives every word with its box, so rows and
-//! columns are found by position, never by counting spaces: fractions of a
-//! minute are small words abutting the minutes (`12` = ½, `14` = ¼, `34` = ¾,
-//! or a numerator and denominator stacked), and `23z57` is 23:57 with the
-//! train-wash mark. Deterministic: same input, same output.
-
-use std::collections::BTreeMap;
-
-use signalbox_core::network::Dir;
-use signalbox_core::sim::Sim;
-use signalbox_core::time::fmt_hms;
-use signalbox_core::world::World;
-use signalbox_core::world::file::{CallFile, EndFile, EntryFile, PositionFile, ServiceFile, WorldFile};
-
-/// Row labels sit left of this (PDF points).
-const LABEL_X: f64 = 100.0;
-/// Table cells sit right of this.
-const DATA_X: f64 = 128.0;
-/// A word belongs to the row whose label is at most this far above or below.
-const ROW_TOL: f64 = 4.0;
-/// A cell belongs to the column whose train number is centred at most this far away.
-const COL_TOL: f64 = 10.0;
-/// Stacked fraction digits are shorter than this; every other word is taller.
-const STACK_H: f64 = 4.0;
-/// WTT times before this hour are after midnight (the line is shut 01:00–05:00).
-const NIGHT_H: u32 = 4;
-
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum WttError {
-    #[error("page {0}: {1}")]
-    Format(usize, String),
-    #[error("no Monday to Friday train service pages found")]
-    NoPages,
-    #[error("unknown day code `{0}` on train {1} trip {2}")]
-    DayCode(String, u16, u16),
-    #[error("check failed: {0}")]
-    Check(String),
-    #[error("cannot put into the world: {0}")]
-    Apply(String),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Bound {
-    /// Bank → Waterloo.
-    West,
-    /// Waterloo → Bank.
-    East,
-}
-
-/// One column of the train service pages. Times are seconds since the
-/// midnight before the service day (so 00:30 is 24:30).
-#[derive(Debug, Clone, PartialEq)]
-pub struct Trip {
-    pub train: u16,
-    pub trip: u16,
-    pub bound: Bound,
-    /// Words in the notes rows: day codes, `Start`, `Ety`, `YW`, `Shed`, `Rd`.
-    pub notes: Vec<String>,
-    /// Bank platform.
-    pub platform: Option<String>,
-    pub bank: Option<u32>,
-    /// Waterloo arrival (westbound: platform 26; eastbound: platform 25).
-    pub arr: Option<u32>,
-    /// `Pfm 25`/`Pfm 26` in the arrival row: the move starts standing in that platform.
-    pub starts_in: Option<String>,
-    pub dep: Option<u32>,
-    pub siding: Option<u32>,
-    pub depot: Option<u32>,
-    /// A time with the train-wash mark `z`.
-    pub wash: bool,
-    /// The next trip's start; `None` for `Stop`.
-    pub to_form: Option<u32>,
-}
-
-impl Trip {
-    pub fn has(&self, note: &str) -> bool {
-        self.notes.iter().any(|n| n == note)
-    }
-
-    fn times(&self) -> impl Iterator<Item = u32> + '_ {
-        [self.bank, self.arr, self.dep, self.siding, self.depot].into_iter().flatten()
-    }
-
-    pub fn first(&self) -> u32 {
-        self.times().min().unwrap_or(0)
-    }
-
-    pub fn last(&self) -> u32 {
-        self.times().max().unwrap_or(0)
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Word {
-    x0: f64,
-    y0: f64,
-    x1: f64,
-    y1: f64,
-    text: String,
-}
-
-fn attr(tag: &str, name: &str) -> Option<f64> {
-    let at = tag.find(&format!("{name}=\""))? + name.len() + 2;
-    let end = tag[at..].find('"')? + at;
-    tag[at..end].parse().ok()
-}
-
-fn decode(s: &str) -> String {
-    s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
-}
-
-/// The words of each page of `pdftotext -bbox` output.
-fn pages(xhtml: &str) -> Vec<Vec<Word>> {
-    let mut out = Vec::new();
-    for page in xhtml.split("<page ").skip(1) {
-        let mut words = Vec::new();
-        let mut rest = page;
-        while let Some(at) = rest.find("<word ") {
-            rest = &rest[at..];
-            let (Some(close), Some(end)) = (rest.find('>'), rest.find("</word>")) else { break };
-            let tag = &rest[..close];
-            if let (Some(x0), Some(y0), Some(x1), Some(y1)) = (attr(tag, "xMin"), attr(tag, "yMin"), attr(tag, "xMax"), attr(tag, "yMax")) {
-                words.push(Word { x0, y0, x1, y1, text: decode(&rest[close + 1..end]) });
-            }
-            rest = &rest[end..];
-        }
-        out.push(words);
-    }
-    out
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Row {
-    Train,
-    Trip,
-    Crew,
-    Notes,
-    Platform,
-    Bank,
-    Arr,
-    Dep,
-    Siding,
-    Depot,
-    ToForm,
-    ByCrew,
-}
-
-/// Row labels (left of `LABEL_X`) by height.
-fn anchors(words: &[Word]) -> Vec<(f64, Row)> {
-    let mut out = Vec::new();
-    for w in words.iter().filter(|w| w.x0 < LABEL_X) {
-        let next = words
-            .iter()
-            .filter(|v| (v.y0 - w.y0).abs() < 0.5 && v.x0 > w.x1 && v.x0 < w.x1 + 5.0)
-            .map(|v| v.text.as_str())
-            .next();
-        let row = match (w.text.as_str(), next) {
-            ("Train", Some("No.")) => Row::Train,
-            ("Trip", _) => Row::Trip,
-            ("Crew", _) => Row::Crew,
-            ("Notes", _) => Row::Notes,
-            ("Platform", _) => Row::Platform,
-            ("BANK", _) => Row::Bank,
-            ("arr.", _) => Row::Arr,
-            ("dep.", _) => Row::Dep,
-            ("Waterloo", Some("Siding")) => Row::Siding,
-            ("Waterloo", Some("Depot")) => Row::Depot,
-            ("To", Some("form")) => Row::ToForm,
-            ("By", _) => Row::ByCrew,
-            _ => continue,
-        };
-        out.push((w.y0, row));
-    }
-    out.sort_by(|a, b| a.0.total_cmp(&b.0));
-    out
-}
-
-#[derive(Debug, Clone)]
-enum Tok {
-    /// Hours, minutes (once read), seconds of fraction, wash mark.
-    Time { h: u32, m: Option<u32>, frac: u32, wash: bool, x0: f64, x1: f64, y0: f64 },
-    Text { text: String, x0: f64, x1: f64 },
-}
-
-impl Tok {
-    fn centre(&self) -> f64 {
-        match self {
-            Tok::Time { x0, x1, .. } | Tok::Text { x0, x1, .. } => (x0 + x1) / 2.0,
-        }
-    }
-}
-
-fn two_digits(s: &str) -> Option<u32> {
-    (s.len() == 2 && s.bytes().all(|b| b.is_ascii_digit())).then(|| s.parse().ok()).flatten()
-}
-
-/// One row's words (sorted by x) as times and texts.
-fn tokens(row: Row, words: &[&Word], stacked: &[&Word], page: usize) -> Result<Vec<Tok>, WttError> {
-    let timed = matches!(row, Row::Bank | Row::Arr | Row::Dep | Row::Siding | Row::Depot | Row::ToForm);
-    let mut out: Vec<Tok> = Vec::new();
-    for w in words {
-        let t = w.text.as_str();
-        if let Some(Tok::Time { m, frac, x1, .. }) = out.last_mut() {
-            if m.is_none() && (2.0..5.0).contains(&(w.x0 - *x1)) {
-                if let Some(v) = two_digits(t) {
-                    *m = Some(v);
-                    *x1 = w.x1;
-                    continue;
-                }
-            }
-            if m.is_some() && *frac == 0 && (w.x0 - *x1).abs() < 0.4 {
-                let f = match t {
-                    "14" => Some(15),
-                    "12" => Some(30),
-                    "34" => Some(45),
-                    _ => None,
-                };
-                if let Some(f) = f {
-                    *frac = f;
-                    *x1 = w.x1;
-                    continue;
-                }
-            }
-        }
-        if timed {
-            let b = t.as_bytes();
-            if b.len() == 5 && b[2] == b'z' {
-                if let (Some(h), Some(m)) = (two_digits(&t[..2]), two_digits(&t[3..])) {
-                    out.push(Tok::Time { h, m: Some(m), frac: 0, wash: true, x0: w.x0, x1: w.x1, y0: w.y0 });
-                    continue;
-                }
-            }
-            let after_pfm = matches!(out.last(), Some(Tok::Text { text, .. }) if text == "Pfm");
-            if let (Some(h), false) = (two_digits(t), after_pfm) {
-                out.push(Tok::Time { h, m: None, frac: 0, wash: false, x0: w.x0, x1: w.x1, y0: w.y0 });
-                continue;
-            }
-        }
-        out.push(Tok::Text { text: w.text.clone(), x0: w.x0, x1: w.x1 });
-    }
-    for tok in &mut out {
-        if let Tok::Time { h, m, frac, x1, y0, .. } = tok {
-            if m.is_none() {
-                return Err(WttError::Format(page, format!("hours {h:02} without minutes")));
-            }
-            let mut st: Vec<&&Word> =
-                stacked.iter().filter(|s| (s.x0 - *x1).abs() < 0.6 && (-1.0..5.0).contains(&(s.y0 - *y0))).collect();
-            if !st.is_empty() {
-                st.sort_by(|a, b| a.y0.total_cmp(&b.y0));
-                let digits: Vec<u32> = st.iter().filter_map(|s| s.text.parse().ok()).collect();
-                *frac = match digits.as_slice() {
-                    [1, 4] => 15,
-                    [1, 2] => 30,
-                    [3, 4] => 45,
-                    _ => return Err(WttError::Format(page, format!("odd stacked fraction {digits:?}"))),
-                };
-            }
-        }
-    }
-    Ok(out)
-}
-
-fn seconds(h: u32, m: u32, frac: u32) -> u32 {
-    let h = if h < NIGHT_H { h + 24 } else { h };
-    h * 3600 + m * 60 + frac
-}
-
-/// Every Monday-to-Friday trip, in page and column order.
-pub fn parse(xhtml: &str) -> Result<Vec<Trip>, WttError> {
-    let mut trips = Vec::new();
-    for (pi, words) in pages(xhtml).into_iter().enumerate() {
-        let page = pi + 1;
-        let texts: Vec<&str> = words.iter().map(|w| w.text.as_str()).collect();
-        let mf = texts.windows(3).any(|w| w == ["MONDAYS", "TO", "FRIDAYS"]) && !texts.contains(&"SATURDAYS");
-        let bound = match (texts.contains(&"WESTBOUND"), texts.contains(&"EASTBOUND")) {
-            (true, false) => Bound::West,
-            (false, true) => Bound::East,
-            _ => continue,
-        };
-        if !mf {
-            continue;
-        }
-        let words: Vec<Word> = words.into_iter().filter(|w| !w.text.chars().all(|c| c == '.')).collect();
-        let an = anchors(&words);
-        let starts: Vec<f64> = an.iter().filter(|a| a.1 == Row::Train).map(|a| a.0).collect();
-        for (bi, &y0) in starts.iter().enumerate() {
-            let y1 = starts.get(bi + 1).copied().unwrap_or(f64::INFINITY);
-            let rows: Vec<(f64, Row)> = an.iter().copied().filter(|a| a.0 >= y0 - 1.0 && a.0 < y1 - 1.0).collect();
-            let data: Vec<&Word> = words.iter().filter(|w| w.x0 >= DATA_X && w.y0 >= y0 - 1.0 && w.y0 < y1 - 1.0).collect();
-            let mut cols: Vec<(f64, u16)> = Vec::new();
-            for w in data.iter().filter(|w| (w.y0 - y0).abs() < 1.0) {
-                let n = w.text.parse().map_err(|_| WttError::Format(page, format!("train number `{}`", w.text)))?;
-                cols.push(((w.x0 + w.x1) / 2.0, n));
-            }
-            cols.sort_by(|a, b| a.0.total_cmp(&b.0));
-            let (stacked, plain): (Vec<&Word>, Vec<&Word>) = data
-                .iter()
-                .copied()
-                .partition(|w| w.y1 - w.y0 < STACK_H && w.text.len() == 1 && w.text.as_bytes()[0].is_ascii_digit());
-            // Each word to its row (or an unlabelled notes line).
-            let mut by_row: BTreeMap<(Option<Row>, i64), Vec<&Word>> = BTreeMap::new();
-            for w in plain {
-                let near = rows.iter().min_by(|a, b| (a.0 - w.y0).abs().total_cmp(&(b.0 - w.y0).abs()));
-                let key = match near {
-                    Some(&(y, r)) if (y - w.y0).abs() <= ROW_TOL => (Some(r), 0),
-                    _ => (None, w.y0.round() as i64),
-                };
-                by_row.entry(key).or_default().push(w);
-            }
-            let mut cells: Vec<BTreeMap<Row, Vec<Tok>>> = vec![BTreeMap::new(); cols.len()];
-            let mut extra: Vec<Vec<String>> = vec![Vec::new(); cols.len()];
-            for ((row, _), mut ws) in by_row {
-                ws.sort_by(|a, b| a.x0.total_cmp(&b.x0));
-                for tok in tokens(row.unwrap_or(Row::Notes), &ws, &stacked, page)? {
-                    let c = cols
-                        .iter()
-                        .enumerate()
-                        .min_by(|a, b| (a.1.0 - tok.centre()).abs().total_cmp(&(b.1.0 - tok.centre()).abs()))
-                        .filter(|(_, c)| (c.0 - tok.centre()).abs() <= COL_TOL)
-                        .map(|(i, _)| i)
-                        .ok_or_else(|| WttError::Format(page, format!("a cell in no column: {tok:?}")))?;
-                    match row {
-                        Some(r) => cells[c].entry(r).or_default().push(tok),
-                        None => {
-                            if let Tok::Text { text, .. } = tok {
-                                extra[c].push(text);
-                            }
-                        }
-                    }
-                }
-            }
-            for (c, (cell, extra)) in cells.into_iter().zip(extra).enumerate() {
-                trips.push(trip(page, bound, cols[c].1, cell, extra)?);
-            }
-        }
-    }
-    if trips.is_empty() {
-        return Err(WttError::NoPages);
-    }
-    Ok(trips)
-}
-
-fn trip(page: usize, bound: Bound, train: u16, mut cell: BTreeMap<Row, Vec<Tok>>, extra: Vec<String>) -> Result<Trip, WttError> {
-    let err = |what: String| WttError::Format(page, format!("train {train}: {what}"));
-    let mut take = |r: Row| cell.remove(&r).unwrap_or_default();
-    let text = |toks: &[Tok]| -> Vec<String> {
-        toks.iter().filter_map(|t| if let Tok::Text { text, .. } = t { Some(text.clone()) } else { None }).collect()
-    };
-    let mut wash = false;
-    let mut time = |r: Row, toks: Vec<Tok>| -> Result<Option<u32>, WttError> {
-        let ts: Vec<u32> = toks
-            .iter()
-            .filter_map(|t| match t {
-                Tok::Time { h, m: Some(m), frac, wash: z, .. } => {
-                    wash |= *z;
-                    Some(seconds(*h, *m, *frac))
-                }
-                _ => None,
-            })
-            .collect();
-        match ts.as_slice() {
-            [] => Ok(None),
-            [t] => Ok(Some(*t)),
-            _ => Err(err(format!("{} times in row {r:?}", ts.len()))),
-        }
-    };
-    let number = |toks: &[Tok], r: Row| -> Result<u16, WttError> {
-        match text(toks).as_slice() {
-            [n] => n.parse().map_err(|_| err(format!("{r:?} `{n}`"))),
-            other => Err(err(format!("{r:?} {other:?}"))),
-        }
-    };
-    let trip_no = number(&take(Row::Trip), Row::Trip)?;
-    let mut notes = text(&take(Row::Notes));
-    notes.extend(extra);
-    let platform = text(&take(Row::Platform)).first().cloned();
-    let arr_toks = take(Row::Arr);
-    let starts_in = match text(&arr_toks).as_slice() {
-        [] => None,
-        [p] if p.starts_with("Pfm") => p.strip_prefix("Pfm").map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
-        [p, n] if p == "Pfm" => Some(n.clone()),
-        other => return Err(err(format!("arrival {other:?}"))),
-    };
-    let to_form_toks = take(Row::ToForm);
-    let stop = text(&to_form_toks) == ["Stop"];
-    let bank = time(Row::Bank, take(Row::Bank))?;
-    let arr = time(Row::Arr, arr_toks)?;
-    let dep = time(Row::Dep, take(Row::Dep))?;
-    let siding = time(Row::Siding, take(Row::Siding))?;
-    let depot = time(Row::Depot, take(Row::Depot))?;
-    let to_form = time(Row::ToForm, to_form_toks)?;
-    if stop == to_form.is_some() {
-        return Err(err(format!("trip {trip_no}: `To form` must be a time or `Stop`")));
-    }
-    Ok(Trip { train, trip: trip_no, bound, notes, platform, bank, arr, starts_in, dep, siding, depot, wash, to_form })
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Day {
-    Mon,
-    Tue,
-    Wed,
-    Thu,
-    Fri,
-}
-
-/// The weekday Drain runs (spec P15): Wednesday, the plain midweek day.
-pub const DAY: Day = Day::Wed;
-
-/// The days a note like `MO`, `TThX` or `MWO` names, and whether they are
-/// the only days (`O`) or the excepted ones (`X`); `None` if it is not a day code.
-fn day_code(note: &str) -> Option<(Vec<Day>, bool)> {
-    let (body, only) = match note.as_bytes().last()? {
-        b'O' => (&note[..note.len() - 1], true),
-        b'X' => (&note[..note.len() - 1], false),
-        _ => return None,
-    };
-    let mut days = Vec::new();
-    let mut rest = body;
-    while !rest.is_empty() {
-        let (d, n) = if rest.starts_with("Th") {
-            (Day::Thu, 2)
-        } else {
-            match rest.as_bytes()[0] {
-                b'M' => (Day::Mon, 1),
-                b'T' => (Day::Tue, 1),
-                b'W' => (Day::Wed, 1),
-                b'F' => (Day::Fri, 1),
-                _ => return None,
-            }
-        };
-        days.push(d);
-        rest = &rest[n..];
-    }
-    (!days.is_empty()).then_some((days, only))
-}
-
-/// Notes that are neither day codes nor one of these are an error, so a
-/// different WTT cannot slip an unknown restriction past the importer.
-const PLAIN_NOTES: [&str; 6] = ["Start", "Ety", "YW", "Shed", "Rd", "RR"];
-
-/// The trips that run on `day`.
-pub fn on_day(trips: &[Trip], day: Day) -> Result<Vec<Trip>, WttError> {
-    let mut out = Vec::new();
-    for t in trips {
-        let mut runs = true;
-        for n in &t.notes {
-            match day_code(n) {
-                Some((days, only)) => runs &= days.contains(&day) == only,
-                None if PLAIN_NOTES.contains(&n.as_str()) => {}
-                None => return Err(WttError::DayCode(n.clone(), t.train, t.trip)),
-            }
-        }
-        if runs {
-            out.push(t.clone());
-        }
-    }
-    Ok(out)
-}
-
-/// What the WTT says about itself, to check a parse against.
-#[derive(Debug, Clone)]
-pub struct Checks {
-    /// Bank platform, bound, published running time in seconds (Waterloo ⇄ that platform).
-    pub running: Vec<(&'static str, Bound, u32)>,
-    /// Time, trains in service.
-    pub snapshots: Vec<(u32, usize)>,
-    /// From, to, mean interval between Bank departures (seconds).
-    pub intervals: Vec<(u32, u32, u32)>,
-}
-
-const fn hm(h: u32, m: u32) -> u32 {
-    h * 3600 + m * 60
-}
-
-impl Checks {
-    /// WTT No. 7, page 2. The snapshot table prints 3 trains at 21:00, but its
-    /// own workings (page 5: 201 finishes at 21:37) give 4, and so does every
-    /// trip; the table is taken to predate the revision that lengthened the
-    /// evening peak.
-    pub fn waterloo_city() -> Checks {
-        Checks {
-            running: vec![("7", Bound::West, 210), ("8", Bound::West, 240), ("7", Bound::East, 255), ("8", Bound::East, 240)],
-            snapshots: vec![
-                (hm(6, 0), 1),
-                (hm(9, 0), 5),
-                (hm(12, 0), 3),
-                (hm(15, 0), 3),
-                (hm(18, 0), 5),
-                (hm(21, 0), 4),
-                (hm(24, 0), 2),
-            ],
-            intervals: vec![
-                (hm(7, 30), hm(9, 30), 165),
-                (hm(11, 0), hm(15, 30), 300),
-                (hm(16, 30), hm(19, 45), 165),
-                (hm(19, 45), hm(21, 30), 210),
-                (hm(21, 30), hm(23, 30), 360),
-                (hm(23, 30), hm(26, 0), 600),
-            ],
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct CheckReport {
-    pub trips: usize,
-    pub trains: usize,
-    /// Trips run in exactly the published time, and trips given longer.
-    pub running_exact: usize,
-    pub running_longer: usize,
-    pub links: usize,
-    pub snapshots: Vec<(u32, usize)>,
-    /// From, to, mean interval in seconds (rounded).
-    pub intervals: Vec<(u32, u32, u32)>,
-}
-
-/// Each train's trips in running order.
-fn by_train(trips: &[Trip]) -> BTreeMap<u16, Vec<&Trip>> {
-    let mut out: BTreeMap<u16, Vec<&Trip>> = BTreeMap::new();
-    for t in trips {
-        out.entry(t.train).or_default().push(t);
-    }
-    for v in out.values_mut() {
-        v.sort_by_key(|t| (t.first(), t.trip));
-    }
-    out
-}
-
-fn running(t: &Trip) -> Option<u32> {
-    match t.bound {
-        Bound::West => Some(t.arr?.checked_sub(t.bank?)?),
-        Bound::East => Some(t.bank?.checked_sub(t.dep?)?),
-    }
-}
-
-/// Check one day's trips against the WTT's own figures (spec §4.3).
-pub fn check(trips: &[Trip], c: &Checks) -> Result<CheckReport, WttError> {
-    let mut r = CheckReport { trips: trips.len(), ..Default::default() };
-    let fail = |s: String| Err(WttError::Check(s));
-    for t in trips {
-        let (Some(rt), Some(p)) = (running(t), t.platform.as_deref()) else { continue };
-        let Some(&(_, _, want)) = c.running.iter().find(|x| x.0 == p && x.1 == t.bound) else {
-            return fail(format!("train {} trip {}: no running time for platform {p}", t.train, t.trip));
-        };
-        match rt.cmp(&want) {
-            std::cmp::Ordering::Less => {
-                return fail(format!("train {} trip {} runs in {rt} s, under the published {want} s", t.train, t.trip));
-            }
-            std::cmp::Ordering::Equal => r.running_exact += 1,
-            std::cmp::Ordering::Greater => r.running_longer += 1,
-        }
-    }
-    let trains = by_train(trips);
-    r.trains = trains.len();
-    // Service periods: runs of trips linked by `To form`, with whether any carries passengers.
-    let mut periods: Vec<(u32, u32, bool)> = Vec::new();
-    for (n, ts) in &trains {
-        let mut cur: Option<(u32, u32, bool)> = None;
-        for (i, t) in ts.iter().enumerate() {
-            let p = cur.get_or_insert((t.first(), t.last(), false));
-            p.1 = t.last();
-            p.2 |= !t.has("Ety");
-            match (t.to_form, ts.get(i + 1)) {
-                (Some(f), Some(next)) => {
-                    if next.first() != f || next.bound == t.bound || t.last() > f {
-                        return fail(format!("train {n} trip {} forms {} at {}, not trip {}", t.trip, fmt_hms(f.into()), fmt_hms(next.first().into()), next.trip));
-                    }
-                    r.links += 1;
-                }
-                (Some(f), None) => return fail(format!("train {n} trip {} forms a trip at {} that is not there", t.trip, fmt_hms(f.into()))),
-                (None, next) => {
-                    if let Some(next) = next {
-                        if !next.has("Start") || next.first() < t.last() {
-                            return fail(format!("train {n} trip {} stops but trip {} does not start", t.trip, next.trip));
-                        }
-                    }
-                    periods.extend(cur.take());
-                }
-            }
-        }
-        periods.extend(cur);
-    }
-    for &(at, want) in &c.snapshots {
-        let n = periods.iter().filter(|p| p.2 && p.0 <= at && at < p.1).count();
-        r.snapshots.push((at, n));
-        if n != want {
-            return fail(format!("{} trains in service at {}, the WTT says {want}", n, fmt_hms(at.into())));
-        }
-    }
-    let mut deps: Vec<u32> = trips.iter().filter(|t| t.bound == Bound::West).filter_map(|t| t.bank).collect();
-    deps.sort();
-    for &(from, to, want) in &c.intervals {
-        let xs: Vec<u32> = deps.iter().copied().filter(|d| (from..=to).contains(d)).collect();
-        if xs.len() < 2 {
-            return fail(format!("fewer than two Bank departures {}–{}", fmt_hms(from.into()), fmt_hms(to.into())));
-        }
-        let mean = f64::from(xs[xs.len() - 1] - xs[0]) / (xs.len() - 1) as f64;
-        r.intervals.push((from, to, mean.round() as u32));
-        if (mean - f64::from(want)).abs() > 6.0 {
-            return fail(format!("Bank departures {}–{} every {mean:.0} s, the WTT says {want} s", fmt_hms(from.into()), fmt_hms(to.into())));
-        }
-    }
-    Ok(r)
-}
-
-/// Where the WTT's places are on Drain (spec §4.4).
-pub const BANK: &str = "BNK";
-pub const WATERLOO: &str = "WTL";
-pub const ARRIVAL: &str = "26";
-pub const DEPARTURE: &str = "25";
-/// Waterloo roads 5, 6 and 7 behind the platforms: both the reversing siding and the depot.
-pub const ROADS: (&str, [&str; 3]) = ("DPT", ["5", "6", "7"]);
-/// Minimum time between one train leaving a road and the next arriving in it.
-const ROAD_GAP_S: u32 = 60;
-/// A train coming out of the depot appears this long before it leaves.
-const APPEAR_S: u32 = 600;
-
-/// The headcode of a trip (spec P18): train number and trip number.
-pub fn headcode(t: &Trip) -> String {
-    format!("{}/{}", t.train, t.trip)
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct ApplyReport {
-    pub services: usize,
-    pub entries: usize,
-    /// Empty moves left out (train/trip).
-    pub dropped_empty: Vec<String>,
-    /// Trains left out because they only run empty.
-    pub dropped_trains: Vec<u16>,
-    /// Trains ended early to free a road for the night, and where they stable.
-    pub shortened: Vec<String>,
-    /// Stays in Waterloo roads, by road.
-    pub road_use: Vec<(String, usize)>,
-    pub start_time: String,
-}
-
-/// A stay in a Waterloo road: (train index in `chains`, trip index of the trip that arrives, or
-/// `None` for a train that appears there), from, to (`None`: to the end of the day).
-#[derive(Debug, Clone, Copy)]
-struct Stay {
-    chain: usize,
-    arrives: Option<usize>,
-    from: u32,
-    to: Option<u32>,
-}
-
-/// Put one day's trips into `w` (Drain) in place of its timetable (spec §4.4).
-pub fn apply(w: &mut WorldFile, day: &[Trip]) -> Result<ApplyReport, WttError> {
-    let mut rep = ApplyReport::default();
-    let fail = |s: String| WttError::Apply(s);
-    let mut chains: Vec<Vec<Trip>> = Vec::new();
-    for (n, ts) in by_train(day) {
-        let kept: Vec<Trip> = ts.iter().filter(|t| !t.has("Ety")).map(|t| (*t).clone()).collect();
-        rep.dropped_empty.extend(ts.iter().filter(|t| t.has("Ety")).map(|t| headcode(t)));
-        if kept.is_empty() {
-            rep.dropped_trains.push(n);
-        } else {
-            chains.push(kept);
-        }
-    }
-    for ch in &chains {
-        if let Some(w) = ch.windows(2).find(|w| w[0].bound == w[1].bound) {
-            return Err(fail(format!("{} and {} run the same way one after the other", headcode(&w[0]), headcode(&w[1]))));
-        }
-        for t in ch {
-            let ok = match t.bound {
-                Bound::West => t.bank.is_some() && t.arr.is_some() && t.platform.is_some() && t.starts_in.is_none(),
-                Bound::East => t.bank.is_some() && t.dep.is_some() && t.platform.is_some() && (t.siding.is_some() || t.depot.is_some()),
-            };
-            if !ok {
-                return Err(fail(format!("trip {} is not a Bank–Waterloo run", headcode(t))));
-            }
-        }
-    }
-    let first_dep = chains.iter().map(|c| c[0].first()).min().ok_or_else(|| fail("no trips".into()))?;
-    let start = (first_dep.saturating_sub(APPEAR_S)) / 300 * 300;
-    // Allocate roads; a train whose last stay leaves no road for later ones ends at Bank instead.
-    let roads = loop {
-        let stays = stays(&chains, start);
-        match allocate(&stays) {
-            Ok(r) => break r.into_iter().zip(stays).collect::<Vec<_>>(),
-            Err(blocked_at) => {
-                let open: Vec<&Stay> = stays.iter().filter(|s| s.to.is_none() && s.from <= blocked_at).collect();
-                let Some(&&last) = open.iter().max_by_key(|s| s.from) else {
-                    return Err(fail(format!("no Waterloo road free at {}", fmt_hms(blocked_at.into()))));
-                };
-                rep.shortened.push(shorten(&mut chains, last.chain)?);
-            }
-        }
-    };
-    let mut road_of: BTreeMap<(usize, Option<usize>), &str> = BTreeMap::new();
-    let mut use_count: BTreeMap<&str, usize> = BTreeMap::new();
-    for (r, s) in &roads {
-        road_of.insert((s.chain, s.arrives), ROADS.1[*r]);
-        *use_count.entry(ROADS.1[*r]).or_default() += 1;
-    }
-    rep.road_use = use_count.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
-    let fmt = |t: Option<u32>| t.map(|v| fmt_hms(v.into()));
-    let call = |place: &str, pf: &str, arr: Option<u32>, dep: Option<u32>| CallFile {
-        place: place.into(),
-        platform: Some(pf.into()),
-        arr: fmt(arr),
-        dep: fmt(dep),
-        stop: true,
-    };
-    let train_type = w.train_types.first().map(|t| t.code.clone()).ok_or_else(|| fail("no train type".into()))?;
-    let mut services = Vec::new();
-    let mut entries = Vec::new();
-    for (ci, ch) in chains.iter().enumerate() {
-        for (i, t) in ch.iter().enumerate() {
-            let bank_pf = t.platform.as_deref().expect("checked above");
-            let calls = match t.bound {
-                Bound::West => {
-                    let mut c = vec![call(BANK, bank_pf, None, t.bank), call(WATERLOO, ARRIVAL, t.arr, t.dep)];
-                    if let Some(at) = t.siding.or(t.depot) {
-                        let road = road_of.get(&(ci, Some(i))).ok_or_else(|| fail(format!("{}: no road", headcode(t))))?;
-                        c.push(call(ROADS.0, road, Some(at), None));
-                    } else {
-                        // Its last call: run into platform 26 and stand at its starting
-                        // signal. A booked stop there would wait for that signal to clear
-                        // before the train could stable; a timed pass does not.
-                        c[1].dep = None;
-                        c[1].stop = false;
-                    }
-                    c
-                }
-                Bound::East => {
-                    let road = match i {
-                        0 => road_of.get(&(ci, None)),
-                        _ => road_of.get(&(ci, Some(i - 1))),
-                    }
-                    .ok_or_else(|| fail(format!("{}: no road", headcode(t))))?;
-                    vec![call(ROADS.0, road, None, t.siding.or(t.depot)), call(WATERLOO, DEPARTURE, t.arr, t.dep), call(BANK, bank_pf, t.bank, None)]
-                }
-            };
-            let end = match ch.get(i + 1) {
-                Some(n) => EndFile::Form { service: headcode(n) },
-                None => EndFile::Stable,
-            };
-            services.push(ServiceFile { headcode: headcode(t), train_type: train_type.clone(), calls, end });
-        }
-        let first = &services[services.len() - ch.len()];
-        let (place, pf, time) = match ch[0].bound {
-            Bound::West => (BANK, ch[0].platform.clone().unwrap_or_default(), start),
-            Bound::East => {
-                let road = road_of[&(ci, None)];
-                (ROADS.0, road.to_string(), ch[0].first().saturating_sub(APPEAR_S).max(start))
-            }
-        };
-        entries.push(EntryFile {
-            service: first.headcode.clone(),
-            boundary: None,
-            at: Some(stand(w, place, &pf)?),
-            time: fmt_hms(time.into()),
-            speed_kmh: 0.0,
-            on_demand: false,
-        });
-    }
-    entries.sort_by(|a, b| a.time.cmp(&b.time).then(a.service.cmp(&b.service)));
-    rep.services = services.len();
-    rep.entries = entries.len();
-    rep.start_time = fmt_hms(start.into());
-    w.services = services;
-    w.entries = entries;
-    w.options.start_time = rep.start_time.clone();
-    w.options.min_dwell_s = [20, 30];
-    World::from_file(w.clone()).map_err(|e| fail(format!("the world no longer loads: {e}")))?;
-    Ok(rep)
-}
-
-/// Every stay in a Waterloo road, in time order.
-fn stays(chains: &[Vec<Trip>], start: u32) -> Vec<Stay> {
-    let mut out = Vec::new();
-    for (ci, ch) in chains.iter().enumerate() {
-        if ch[0].bound == Bound::East {
-            let leave = ch[0].first();
-            out.push(Stay { chain: ci, arrives: None, from: leave.saturating_sub(APPEAR_S).max(start), to: Some(leave) });
-        }
-        for (i, t) in ch.iter().enumerate() {
-            if let (Bound::West, Some(at)) = (t.bound, t.siding.or(t.depot)) {
-                out.push(Stay { chain: ci, arrives: Some(i), from: at, to: ch.get(i + 1).map(|n| n.first()) });
-            }
-        }
-    }
-    out.sort_by_key(|s| (s.from, s.chain));
-    out
-}
-
-/// The road (index into `ROADS`) for each stay: the one free longest. `Err`
-/// is the time a stay found none.
-fn allocate(stays: &[Stay]) -> Result<Vec<usize>, u32> {
-    let mut free_from: [Option<u32>; 3] = [Some(0); 3];
-    let mut out = Vec::new();
-    for s in stays {
-        // The road free longest, so a late train is least likely to find its road still taken.
-        let r = (0..3).filter(|&r| free_from[r].is_some_and(|f| f <= s.from)).min_by_key(|&r| (free_from[r], r)).ok_or(s.from)?;
-        free_from[r] = s.to.map(|t| t + ROAD_GAP_S);
-        out.push(r);
-    }
-    Ok(out)
-}
-
-/// End chain `ci` at its last Bank arrival instead, in a Bank platform no
-/// later trip uses, so its last road stay is no longer needed.
-fn shorten(chains: &mut [Vec<Trip>], ci: usize) -> Result<String, WttError> {
-    let ch = &chains[ci];
-    let Some(k) = ch.iter().rposition(|t| t.bound == Bound::East) else {
-        return Err(WttError::Apply(format!("train {} never reaches Bank", ch[0].train)));
-    };
-    let arrive = ch[k].bank.unwrap_or(0);
-    let used_later = |pf: &str| {
-        chains.iter().enumerate().filter(|(i, _)| *i != ci).flat_map(|(_, c)| c).any(|t| t.platform.as_deref() == Some(pf) && t.bank.is_some_and(|b| b >= arrive))
-    };
-    let pf = ["7", "8"].into_iter().find(|p| !used_later(p)).ok_or_else(|| {
-        WttError::Apply(format!("train {}: no Bank platform free from {}", chains[ci][0].train, fmt_hms(arrive.into())))
-    })?;
-    let ch = &mut chains[ci];
-    ch.truncate(k + 1);
-    ch[k].platform = Some(pf.to_string());
-    ch[k].to_form = None;
-    Ok(format!("{} stables at Bank platform {pf} at {}", headcode(&ch[k]), fmt_hms(arrive.into())))
-}
-
-/// A train standing in `place` platform `pf`, its head 1 m short of the end
-/// that faces the platform's starting signal.
-fn stand(w: &WorldFile, place: &str, pf: &str) -> Result<PositionFile, WttError> {
-    let p = w
-        .platforms
-        .iter()
-        .find(|p| p.place == place && p.platform == pf)
-        .ok_or_else(|| WttError::Apply(format!("Drain has no platform {place} {pf}")))?;
-    let mut probe = w.clone();
-    probe.services.clear();
-    probe.entries.clear();
-    let world = World::from_file(probe).map_err(|e| WttError::Apply(e.to_string()))?;
-    let sim = Sim::new(world, 0);
-    let net = &sim.world().net;
-    let seg = net.segments.iter().position(|s| s.name == p.segment).expect("platform segments exist");
-    let sg = &net.segments[seg];
-    let mut found = Vec::new();
-    for (dir, offset) in [(Dir::Up, p.to_m - 1.0), (Dir::Down, p.from_m + 1.0)] {
-        let id = signalbox_core::ids::SegmentId::from_idx(seg);
-        if let Some((_, d)) = net.first_signal_ahead(id, dir, sg.along(offset, dir), 30.0, sim.points()) {
-            found.push((d, dir, offset));
-        }
-    }
-    found.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let &(_, dir, offset_m) = found.first().ok_or_else(|| WttError::Apply(format!("no starting signal for {place} {pf}")))?;
-    Ok(PositionFile { segment: p.segment.clone(), offset_m, direction: dir })
-}
-```
-
-In `crates/ts2-import/src/lib.rs`, after `pub mod ts2;` add `pub mod wtt;`.
-
-`crates/ts2-import/src/main.rs`:
-- `use ts2_import::{areas, convert, lines, report, wtt};`
-- `USAGE` ends `[--lines <lines.json>] [--wtt <wtt.bbox.html>]";`
-- after the `let (mut input, …) = …;` line: `let mut wtt_path = None;`
-- a match arm before `"--strict"`:
-
-```rust
-            "--wtt" => {
-                i += 1;
-                match args.get(i) {
-                    Some(t) => wtt_path = Some(t.clone()),
-                    None => return usage(),
-                }
-            }
-```
-
-- before `let text = match std::fs::read_to_string(&input) {`:
-
-```rust
-    let day = match &wtt_path {
-        Some(p) => match read_wtt(p) {
-            Ok(d) => Some((p.clone(), d)),
-            Err(e) => {
-                eprintln!("{p}: {e}");
-                return ExitCode::FAILURE;
-            }
-        },
-        None => None,
-    };
-```
-
-- before `let json = serde_json::to_string_pretty(&c.world)…` (after the `--lines` block):
-
-```rust
-            if let Some((p, (trips, checked))) = &day {
-                match wtt::apply(&mut c.world, trips) {
-                    Ok(r) => {
-                        eprintln!(
-                            "{p}: Wednesday, {} trips of {} trains; {} trips at the published running time, {} longer; snapshots {}",
-                            checked.trips,
-                            checked.trains,
-                            checked.running_exact,
-                            checked.running_longer,
-                            checked.snapshots.iter().map(|(t, n)| format!("{}={n}", &signalbox_core::time::fmt_hms((*t).into())[..5])).collect::<Vec<_>>().join(" ")
-                        );
-                        eprintln!(
-                            "{p}: {} services, {} entries from {}; left out {} empty moves and trains {:?}; roads {:?}",
-                            r.services,
-                            r.entries,
-                            r.start_time,
-                            r.dropped_empty.len(),
-                            r.dropped_trains,
-                            r.road_use
-                        );
-                        for s in &r.shortened {
-                            eprintln!("{p}: {s}");
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("{p}: {e}");
-                        return ExitCode::FAILURE;
-                    }
-                }
-            }
-```
-
-- before `fn usage() -> ExitCode {`:
-
-```rust
-/// The WTT's Wednesday trips, checked against its own figures.
-fn read_wtt(path: &str) -> Result<(Vec<wtt::Trip>, wtt::CheckReport), String> {
-    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let all = wtt::parse(&text).map_err(|e| e.to_string())?;
-    let day = wtt::on_day(&all, wtt::DAY).map_err(|e| e.to_string())?;
-    let checked = wtt::check(&day, &wtt::Checks::waterloo_city()).map_err(|e| e.to_string())?;
-    Ok((day, checked))
-}
-```
-
-- [ ] **Step 5: Run the tests to see them pass**
-
-Run: `scripts/cargo test -p ts2-import`
-Expected: PASS (wtt 6, cli 6, soak 3 + 1 ignored; the convert snapshots unchanged: `convert` is untouched).
-Then the CI build: `docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/w" -w /w -e CARGO_HOME=/w/.cargo-home -e RUSTFLAGS="-D warnings" rust:1.98-slim-bookworm cargo build -p ts2-import --all-targets --locked`
-Expected: no warnings.
-
-- [ ] **Step 6: Document**
-
-`CLAUDE.md`:
-- Commands block, after the Liverpool Street `ts2-import` line:
-  `scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/drain.json -o /w/target/drain.json --areas /w/layouts/drain.areas.json --lines /w/layouts/drain.lines.json --wtt /w/external/wtt/wtt.bbox.html   # the real WTT: external/wtt/README.md`
-- "Multiplayer", after the lines-file sentence: "Drain's timetable can be the real Waterloo & City WTT
-  (`ts2-import --wtt`, `ts2_import::wtt`, polish spec §4): it reads `pdftotext -bbox` output of the owner's PDF,
-  checks it against the WTT's own figures (running times, workings, trains in service, intervals) and replaces
-  Drain's services, entries and start time (Wednesday; headcodes `<train>/<trip>`; the depot and siding are roads
-  5–7). The PDF and anything made from it are never committed (`external/wtt/`, git-ignored); CI tests only the
-  synthetic `tests/data/wtt-synthetic.bbox.html` (written by `wtt-synthetic.py`)."
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add crates/ts2-import CLAUDE.md
-git commit -m "feat(ts2-import): read a Waterloo & City WTT (pdftotext -bbox), check it, and make it Drain's timetable"
-```
-
----
-
-### Task 4c: The image gets the owner's WTT; the whole-day soak
-
-**Files:**
-- Create: `external/wtt/README.md`, `external/wtt/.gitignore`, `crates/ts2-import/tests/wtt_day.rs`
-- Modify: `deploy/Dockerfile`, `deploy/README.md`, `CLAUDE.md`
-
-**Interfaces:**
-- Consumes: Task 4b's `wtt::{parse, on_day, DAY, check, Checks::waterloo_city, apply}` and `--wtt`; Task 4a's robot.
-- Produces: the `wtt` Docker stage (`/out/wtt.bbox.html` when `external/wtt/` holds exactly one PDF); the image's
-  `drain.json` from the WTT when present; `scripts/cargo test --release -p ts2-import --test wtt_day -- --ignored --nocapture`
-  (skips without `external/wtt/wtt.bbox.html`).
-
-- [ ] **Step 1: The ignored directory**
-
-Create `external/wtt/.gitignore`:
-
-```text
-# The owner's WTT and everything made from it stay out of the repository.
-*
-!.gitignore
-!README.md
-```
-
-Create `external/wtt/README.md`:
-
-```markdown
-# The Waterloo & City Working Timetable (not in this repository)
-
-Drain can run the real London Underground Waterloo & City line timetable:
-WTT No. 7, Mondays to Fridays, from 9 October 2017 (a TfL document). Only the
-code that reads it is in this repository (`crates/ts2-import/src/wtt.rs`);
-the PDF, its text and anything made from them are never committed (this
-directory ignores everything but this file and its `.gitignore`).
-
-To build an image with it, put your copy here as the only PDF:
-
-    external/wtt/wtt-7-waterloo-and-city-2017-10-09.pdf
-
-(any name ending `.pdf`; sha256
-`7709d5b56564dd5b0d9acd7d27cb2668fc5a88407d6dae6f389a8e6fb592475b` for the
-copy this was written against). `deploy/Dockerfile` turns it into
-`pdftotext -bbox` text and converts Drain with `ts2-import --wtt`, which
-checks the timetable against the WTT's own figures (running times, train
-workings, trains in service, service intervals) and stops the build if they
-do not match. Without a PDF the image's Drain keeps its TS2 timetable.
-
-The image then holds a timetable made from TfL's document: keep it on ra,
-never push it to a public registry.
-
-To try it outside Docker (poppler-utils installed):
-
-    pdftotext -bbox external/wtt/*.pdf external/wtt/wtt.bbox.html
-    scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/drain.json -o /w/target/drain.json \
-      --areas /w/layouts/drain.areas.json --lines /w/layouts/drain.lines.json --wtt /w/external/wtt/wtt.bbox.html
-    scripts/cargo test --release -p ts2-import --test wtt_day -- --ignored --nocapture
-```
-
-Run: `git status --short --ignored external/`
-Expected: only `?? external/` (or the two files once added); a PDF dropped there shows as `!!`.
-
-- [ ] **Step 2: The whole-day soak (owner-run)**
-
-Create `crates/ts2-import/tests/wtt_day.rs`:
-
-```rust
-//! The owner's real WTT as Drain's timetable (polish spec §4), run for a
-//! whole day under the robot. Needs the git-ignored
-//! `external/wtt/wtt.bbox.html` (deploy/README.md says how to make it) and
-//! is skipped without it; slow in debug builds:
-//! `scripts/cargo test --release -p ts2-import --test wtt_day -- --ignored --nocapture`
-
-use std::collections::BTreeMap;
-
-use signalbox_core::events::Event;
-use signalbox_core::robot::{self, ROBOT_EVERY_TICKS, STUCK_S};
-use signalbox_core::sim::{Sim, TICK_S};
-use signalbox_core::time::fmt_hms;
-use signalbox_core::world::World;
-use signalbox_core::world::file::WorldFile;
-use ts2_import::wtt;
-
-const WTT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../external/wtt/wtt.bbox.html");
-
-fn drain_with_wtt() -> Option<WorldFile> {
-    let text = std::fs::read_to_string(WTT).ok()?;
-    let dir = env!("CARGO_MANIFEST_DIR");
-    let mut w = ts2_import::convert(&std::fs::read_to_string(format!("{dir}/tests/data/drain.json")).unwrap()).unwrap().world;
-    let areas = ts2_import::areas::parse(&std::fs::read_to_string(format!("{dir}/../../layouts/drain.areas.json")).unwrap()).unwrap();
-    ts2_import::areas::apply(&mut w, &areas).unwrap();
-    let day = wtt::on_day(&wtt::parse(&text).unwrap(), wtt::DAY).unwrap();
-    wtt::check(&day, &wtt::Checks::waterloo_city()).unwrap();
-    wtt::apply(&mut w, &day).unwrap();
-    Some(w)
-}
-
-#[derive(Debug, Default)]
-struct Day {
-    spads: usize,
-    collisions: usize,
-    violations: usize,
-    wrong_platform: usize,
-    stuck: Vec<String>,
-    running: Vec<String>,
-    stabled: usize,
-    /// Lateness in seconds at each booked stop and each departure, with headcode and time.
-    arrivals: Vec<(i64, String, f64)>,
-    departures: Vec<(i64, String, f64)>,
-}
-
-/// Until 01:00, as `robot::soak` runs a world, also timing every call.
-fn run_day(w: WorldFile, seed: u64) -> Day {
-    let mut sim = Sim::new(World::from_file(w).unwrap(), seed);
-    let ticks = ((25.0 * 3600.0 - sim.now_s()) / TICK_S).round() as u64;
-    let mut d = Day::default();
-    let mut still: BTreeMap<u32, (usize, f64, f64)> = BTreeMap::new();
-    for i in 0..ticks {
-        if i % ROBOT_EVERY_TICKS == 0 {
-            for c in robot::commands(&sim) {
-                sim.submit(c);
-            }
-            let now = sim.now_s();
-            for t in sim.trains() {
-                let here = (t.head().0.idx(), t.head_m);
-                if still.get(&t.id.0).is_none_or(|s| (s.0, s.1) != here) {
-                    still.insert(t.id.0, (here.0, here.1, now));
-                }
-            }
-        }
-        let now = sim.now_s();
-        for e in sim.step() {
-            match e {
-                Event::SignalPassedAtDanger { .. } => d.spads += 1,
-                Event::Collision { .. } => d.collisions += 1,
-                Event::InvariantViolated { .. } => d.violations += 1,
-                Event::WrongPlatform { .. } => d.wrong_platform += 1,
-                Event::TrainArrived { train, late_s, .. } | Event::TrainPassed { train, late_s, .. } => {
-                    let h = sim.trains().iter().find(|t| t.id == train).map(|t| t.headcode.clone()).unwrap_or_default();
-                    d.arrivals.push((late_s, h, now));
-                }
-                Event::TrainDeparted { train, .. } => {
-                    // (A train that formed its next service in the same tick has next_call 0.)
-                    if let Some(t) = sim.trains().iter().find(|t| t.id == train && t.next_call > 0) {
-                        if let Some(dep) = sim.world().services[t.service.idx()].calls[t.next_call - 1].dep_s {
-                            d.departures.push(((now - dep).round() as i64, t.headcode.clone(), now));
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    let now = sim.now_s();
-    let standing = |t: &&signalbox_core::trains::Train| still.get(&t.id.0).is_some_and(|s| now - s.2 >= STUCK_S);
-    d.stuck = sim.trains().iter().filter(|t| !t.stabled && t.dwell.is_none()).filter(standing).map(|t| t.headcode.clone()).collect();
-    d.running = sim.trains().iter().filter(|t| !t.stabled).map(|t| t.headcode.clone()).collect();
-    d.stabled = sim.trains().iter().filter(|t| t.stabled).count();
-    d
-}
-
-fn worst(v: &[(i64, String, f64)]) -> (i64, String) {
-    v.iter().max_by_key(|x| x.0).map(|x| (x.0, format!("{} at {}", x.1, fmt_hms(x.2)))).unwrap_or_default()
-}
-
-/// No SPADs, collisions or stuck trains; every train stabled by 01:00; no
-/// stop more than 3 minutes late, over five seeds (the dwell times differ).
-#[test]
-#[ignore]
-fn the_real_wtt_runs_a_whole_day() {
-    let Some(w) = drain_with_wtt() else {
-        eprintln!("no {WTT}: skipped");
-        return;
-    };
-    for seed in [1, 2, 3, 7, 42] {
-        let d = run_day(w.clone(), seed);
-        let mut hourly: BTreeMap<u32, (i64, usize, usize)> = BTreeMap::new();
-        for (late, _, at) in &d.arrivals {
-            let e = hourly.entry((*at / 3600.0) as u32).or_default();
-            e.0 = e.0.max(*late);
-            e.1 += usize::from(*late > 60);
-            e.2 += 1;
-        }
-        eprintln!(
-            "seed {seed}: spads {} collisions {} violations {} wrong platform {} stuck {:?} running {:?} stabled {}; {} stops, {} over 1 min late, worst {:?}; {} departures, {} over 1 min late, worst {:?}",
-            d.spads,
-            d.collisions,
-            d.violations,
-            d.wrong_platform,
-            d.stuck,
-            d.running,
-            d.stabled,
-            d.arrivals.len(),
-            d.arrivals.iter().filter(|x| x.0 > 60).count(),
-            worst(&d.arrivals),
-            d.departures.len(),
-            d.departures.iter().filter(|x| x.0 > 60).count(),
-            worst(&d.departures),
-        );
-        eprintln!(
-            "  by hour (worst s / stops over 1 min late / stops): {}",
-            hourly.iter().map(|(h, (m, l, n))| format!("{h:02}h {m}/{l}/{n}")).collect::<Vec<_>>().join(", ")
-        );
-        assert_eq!((d.spads, d.collisions, d.violations), (0, 0, 0), "seed {seed}");
-        assert!(d.stuck.is_empty() && d.running.is_empty(), "seed {seed}: {:?} {:?}", d.stuck, d.running);
-        assert_eq!(d.stabled, 5, "seed {seed}");
-        assert!(worst(&d.arrivals).0 <= 180 && worst(&d.departures).0 <= 180, "seed {seed}");
-    }
-}
-```
-
-Run: `scripts/cargo test -p ts2-import --test wtt_day`
-Expected: PASS (0 run, 1 ignored). Without the PDF, `-- --ignored` prints `no …wtt.bbox.html: skipped` and passes.
-
-- [ ] **Step 3: The image**
-
-`deploy/Dockerfile`:
-
-```diff
-diff --git a/deploy/Dockerfile b/deploy/Dockerfile
-index 2b7153c..b33c921 100644
---- a/deploy/Dockerfile
-+++ b/deploy/Dockerfile
-@@ -1,8 +1,9 @@
- # syntax=docker/dockerfile:1
- # signalbox: the front (signalbox-server), the game process (signalbox-game),
- # the browser client, the three converted TS2 layouts (with their areas, box
--# prefixes and line names) and the tutorial lessons. Release build: no
--# dev login.
-+# prefixes and line names; Drain with the real Waterloo & City timetable when
-+# external/wtt/ holds the owner's WTT) and the tutorial lessons. Release
-+# build: no dev login.
- # Build from the repository root:
- #   docker build -f deploy/Dockerfile -t local/signalbox:$(git rev-parse --short HEAD) .
- 
-@@ -22,17 +23,34 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
-     --mount=type=cache,target=/src/target \
-     scripts/build-web.sh /out/web
- 
-+# The owner's copy of the Waterloo & City line's Working Timetable, if
-+# external/wtt/ holds one (git-ignored: TfL's document and anything made from
-+# it never go into the repository; see external/wtt/README.md). ts2-import
-+# --wtt reads its words and their positions. Without it Drain keeps its TS2
-+# timetable.
-+FROM debian:bookworm-slim AS wtt
-+RUN apt-get update \
-+ && apt-get install -y --no-install-recommends poppler-utils \
-+ && rm -rf /var/lib/apt/lists/*
-+COPY external/wtt/ /wtt/
-+RUN set -eu; mkdir -p /out; set -- /wtt/*.pdf; \
-+    if [ "$#" -gt 1 ]; then echo "external/wtt: more than one PDF" >&2; exit 1; fi; \
-+    if [ -f "$1" ]; then sha256sum "$1"; pdftotext -bbox "$1" /out/wtt.bbox.html; \
-+    else echo "external/wtt: no WTT; Drain keeps its TS2 timetable"; fi
-+
- FROM rust:1.98-slim-bookworm AS build
- WORKDIR /src
- COPY . .
-+COPY --from=wtt /out/ /wtt/
- RUN --mount=type=cache,target=/usr/local/cargo/registry \
-     --mount=type=cache,target=/src/target \
-     cargo build --release --locked -p signalbox-server -p ts2-import --bins \
-  && mkdir -p /out/bin /out/layouts \
-  && cp target/release/signalbox-server target/release/signalbox-game /out/bin/ \
-  && for n in liverpool-st drain gretz-armainvilliers; do \
-+      wtt=""; if [ "$n" = drain ] && [ -f /wtt/wtt.bbox.html ]; then wtt="--wtt /wtt/wtt.bbox.html"; fi; \
-       target/release/ts2-import "crates/ts2-import/tests/data/$n.json" -o "/out/layouts/$n.json" \
--        --areas "layouts/$n.areas.json" --lines "layouts/$n.lines.json" || exit 1; \
-+        --areas "layouts/$n.areas.json" --lines "layouts/$n.lines.json" $wtt || exit 1; \
-     done \
-  && cp -r lessons /out/lessons \
-  && chmod -R a+rX /out/lessons
-```
-
-Check the stage alone (no PDF in the checkout):
-`docker build --progress=plain -f deploy/Dockerfile --target wtt -t local/sbx-wtt-probe:check . 2>&1 | grep external/wtt`
-Expected: `external/wtt: no WTT; Drain keeps its TS2 timetable`. Then `docker rmi local/sbx-wtt-probe:check`.
-(Scratch, `0c0ea67`: with the owner's PDF the stage wrote the same `wtt.bbox.html` as poppler 25.03 on ra, byte
-for byte; with two PDFs it stopped with `external/wtt: more than one PDF`; the build stage's loop, run by hand with
-and without the text, wrote Drain with 574 and 16 services.)
-
-- [ ] **Step 4: Document**
-
-`deploy/README.md`:
-- the `Dockerfile` row ends "… line names from `layouts/`, and Drain with the real Waterloo & City timetable when
-  `external/wtt/` holds the owner's WTT (its `wtt` stage runs `pdftotext -bbox`; without one, Drain's TS2
-  timetable) (no dev login)"; the `Dockerfile.dockerignore` row adds "(`external/wtt/` stays in, for that stage)".
-- a section after "Build and run":
-
-```markdown
-## The Waterloo & City timetable (optional)
-
-Before `docker build`, copy the owner's WTT PDF into `external/wtt/` of the checkout being built (the only PDF
-there; `external/wtt/README.md`). The build log shows its sha256 and the converter's summary (`Wednesday, 585
-trips of 7 trains; …`, `574 services, 5 entries from 05:40:00; …`); a WTT that fails the checks fails the build.
-Without a PDF the log says `Drain keeps its TS2 timetable`. An image built with it holds a timetable made from
-TfL's document: it stays on ra and is never pushed to a public registry. Old Drain saves keep the timetable they
-were created with.
-```
-
-`CLAUDE.md` Commands block, after the `--wtt` line from Task 4b:
-`scripts/cargo test --release -p ts2-import --test wtt_day -- --ignored --nocapture   # the real WTT, a whole day under the robot (skips without it)`
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add external/wtt/README.md external/wtt/.gitignore crates/ts2-import/tests/wtt_day.rs deploy/Dockerfile deploy/README.md CLAUDE.md
-git status --short   # nothing from external/wtt/ but those two files
-git commit -m "feat(deploy): the image converts Drain with the owner's WTT when external/wtt/ has it"
-```
-
-- [ ] **Step 6 (controller, with the owner's PDF; not for subagents)**
-
-Copy the PDF into `external/wtt/` of the worktree, `pdftotext -bbox external/wtt/*.pdf external/wtt/wtt.bbox.html`
-(poppler-utils on ra), then `scripts/cargo test --release -p ts2-import --test wtt_day -- --ignored --nocapture`.
-Expected (scratch, `0c0ea67`): for seeds 1, 2, 3, 7, 42: `spads 0 collisions 0 violations 0 wrong platform 0 stuck []
-running [] stabled 5; 1721 stops, 137 over 1 min late, worst (103, "204/73 at 19:45:42")`, departures worst 109 s.
-Copy the two lines of one seed into the branch report. `git status` must still show nothing from `external/wtt/`
-but the README and `.gitignore`.
-
----
-
-### Task 5: The simplifier opens at "now"
+### Task 4: The simplifier opens at "now"
 
 **Files:**
 - Modify: `crates/client-core/src/simplifier.rs`, `crates/client-ui/src/screens.rs`
@@ -3126,7 +1386,7 @@ pub fn now_line(rows: &[&SimplifierRow], now_s: f64) -> usize {
             self.simplifier_scroll = g.view().map(|v| simplifier::now_line(&rows, v.sim_time));
             let lines = rows
                 .into_iter()
-                .flat_map(|r| simplifier::lines(r).into_iter().enumerate().map(|(i, line)| (line, i == 0)))
+                .flat_map(|r| simplifier::lines(l, r).into_iter().enumerate().map(|(i, line)| (line, i == 0)))
                 .collect();
             self.simplifier_lines = Some((key, lines));
         }
@@ -3158,14 +1418,16 @@ git commit -m "feat(client): the simplifier opens at the first train not yet fin
 
 ---
 
-### Task 6: Resume with today's display data
+---
+
+### Task 5: Resume with today's display data
 
 **Files:**
 - Modify: `crates/game/src/save.rs`, `crates/game/src/game.rs`, `crates/game/src/lib.rs`, `CLAUDE.md`
 - Test: `crates/game/tests/refresh.rs` (new)
 
 **Interfaces:**
-- Produces: `game::save::{NETWORK_KEYS: [&str; 8], refresh_display(saved: &str, current: &str) -> Result<String, String>}`; `game::Refresh { NotAsked, Refreshed, Kept(String) }` (re-exported from `game`); `Game::resume_with_layout(path: &Path, current: Option<&str>) -> Result<(Game, Refresh), GameError>`; `Game::resume(path)` unchanged in signature (passes `None`). Task 7 uses `resume_with_layout` and `Refresh`.
+- Produces: `game::save::{NETWORK_KEYS: [&str; 8], refresh_display(saved: &str, current: &str) -> Result<String, String>}`; `game::Refresh { NotAsked, Refreshed, Kept(String) }` (re-exported from `game`); `Game::resume_with_layout(path: &Path, current: Option<&str>) -> Result<(Game, Refresh), GameError>`; `Game::resume(path)` unchanged in signature (passes `None`). Task 6 uses `resume_with_layout` and `Refresh`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3415,14 +1677,16 @@ git commit -m "feat(game): resume with the layout file's display data when the s
 
 ---
 
-### Task 7: The front passes the current layout on resume
+---
+
+### Task 6: The front passes the current layout on resume
 
 **Files:**
 - Modify: `crates/server/src/process.rs`, `crates/server/src/supervisor.rs`, `CLAUDE.md`
 - Test: `crates/server/tests/process.rs`, `crates/server/tests/supervisor.rs`
 
 **Interfaces:**
-- Consumes: Task 6's `Game::resume_with_layout`, `Refresh`.
+- Consumes: Task 5's `Game::resume_with_layout`, `Refresh`.
 - Produces: `process::Args.current_layout: Option<PathBuf>`; `signalbox-game --current-layout <world.json>` (refused with `--create`); `Start::Resume { current: Option<PathBuf> }` in the supervisor.
 
 - [ ] **Step 1: Write the failing tests**
@@ -3556,7 +1820,7 @@ Expected: PASS (process 17, supervisor 31, the rest unchanged).
 
 - [ ] **Step 5: Document**
 
-`CLAUDE.md`, "Server", first bullet, after "…the crash reason the lobby shows).": "On a resume the front passes `--current-layout <world.json>` when it still lists the save's layout; the process logs whether it took that file's display data (Task 6's rule)."
+`CLAUDE.md`, "Server", first bullet, after "…the crash reason the lobby shows).": "On a resume the front passes `--current-layout <world.json>` when it still lists the save's layout; the process logs whether it took that file's display data (Task 5's rule)."
 
 - [ ] **Step 6: Commit**
 
@@ -3567,14 +1831,16 @@ git commit -m "feat(server): a resumed game gets the listed layout file for toda
 
 ---
 
-### Task 8: The real-browser renderer check
+---
+
+### Task 7: The real-browser renderer check
 
 **Files:**
 - Create: `deploy/browser-check.sh` (executable), `deploy/browser-check.py`
 - Modify: `deploy/README.md`, `CLAUDE.md`
 
 **Interfaces:**
-- Consumes: `scripts/wasm-build`, the dev-auth front, Drain's committed TS2 timetable (the check converts Drain with its areas and lines only, never the WTT: three trains stand in the platforms at 06:00), the client's console line `signalbox: drawing with <backend>` (already in `crates/client-web/src/lib.rs`).
+- Consumes: `scripts/wasm-build`, the dev-auth front, Drain's committed TS2 timetable (the check converts Drain with its areas and lines only, never the WTT: three trains stand in the platforms at 06:00, their headcodes as they are), the client's console line `signalbox: drawing with <backend>` (already in `crates/client-web/src/lib.rs`).
 - Produces: `deploy/browser-check.sh [--no-build]` → one `ok`/`FAIL` line per case (`webgl2`, `webgpu`, `none`), exit 0/1 (2 for missing build outputs with `--no-build`); outputs in `target/browser-check/`.
 
 - [ ] **Step 1: Write the check**
@@ -3826,7 +2092,6163 @@ git commit -m "feat(deploy): real-browser check of the WebGL2 fallback, WebGPU a
 
 ---
 
-### Task 9: Final verification
+---
+
+### Task 8: Points, berths, track and places by their display names (UI review M1, M2)
+
+Spec §10 M1, M2 (U7, U8). Converter ids never reach the player: points as `<box><workstation>P<number>`, berths by
+their signal, track by the platform on it; place codes read as TS2's place names, which the converter now writes into
+the layout and the game passes on.
+
+**Files:**
+- Modify: `crates/client-core/src/names.rs`
+- Modify: `crates/client-core/src/select.rs`
+- Modify: `crates/client-core/src/text.rs`
+- Modify: `crates/client-ui/src/screens.rs`
+- Modify: `crates/game/src/display.rs`
+- Modify: `crates/game/src/layout.rs`
+- Modify: `crates/protocol/src/view.rs`
+- Modify: `crates/ts2-import/src/layout.rs`
+- Modify: `lessons/01-reading-the-panel/lesson.json`
+- Modify: `lessons/02-setting-routes/lesson.json`
+- Modify: `CLAUDE.md`
+- Test: `crates/client-core/tests/app.rs`
+- Test: `crates/client-core/tests/input.rs`
+- Test: `crates/client-core/tests/names.rs`
+- Test: `crates/client-ui/tests/screens.rs`
+- Test: `crates/game/tests/display.rs`
+- Test: `crates/ts2-import/tests/convert.rs`
+
+**Interfaces:**
+- Consumes: `Names::new(&Layout)` (realism pass), the drain-wtt plan's `Layout.headcodes` and `Layout: Default`.
+- Produces: `protocol::Layout.places: BTreeMap<String, String>`; `game::display::places(&World)`, `Display.places`;
+  `client_core::names::points_number(&str) -> String`; `Names::{points(&str) -> String, berth(&str) -> String,
+  track(&str) -> String, place(&str) -> &str}`; the converted world's `layout.places`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Apply (written and run on the scratch copy; re-check the context on the base, keep the intent):
+
+```diff
+diff --git a/crates/client-core/tests/app.rs b/crates/client-core/tests/app.rs
+index d2320ea..4d03556 100644
+--- a/crates/client-core/tests/app.rs
++++ b/crates/client-core/tests/app.rs
+@@ -327,12 +327,12 @@ fn notices_are_logged_with_alarms_and_the_log_is_bounded() {
+         ]
+     );
+     for i in 0..(LOG_CAP + 50) {
+-        h.push(notice(Notice::Collision { section: format!("T{i}") }));
++        h.push(notice(Notice::Error { code: s("x"), message: format!("e{i}") }));
+     }
+     app.tick(3.0);
+     let log = app.game().unwrap().log();
+     assert_eq!(log.len(), LOG_CAP);
+-    assert_eq!(log.entries().last().unwrap().text, format!("COLLISION on T{}", LOG_CAP + 49));
++    assert_eq!(log.entries().last().unwrap().text, format!("Error: e{}", LOG_CAP + 49));
+ }
+ 
+ #[test]
+diff --git a/crates/client-core/tests/input.rs b/crates/client-core/tests/input.rs
+index 7b10f70..f690732 100644
+--- a/crates/client-core/tests/input.rs
++++ b/crates/client-core/tests/input.rs
+@@ -75,7 +75,7 @@ fn fringe_and_spectators_get_hover_only() {
+     t.app.click(&sig("C"));
+     assert_eq!(t.app.game().unwrap().selected(), None, "C is East's, seen on West's fringe");
+     assert!(t.app.menu(&Target::Points(s("P"))).is_empty());
+-    assert_eq!(t.app.describe(&Target::Points(s("P"))), "Points P (East): normal");
++    assert_eq!(t.app.describe(&Target::Points(s("P"))), "Points TBP (East): normal");
+     let mut spec = Table::new("sam", None);
+     spec.app.click(&sig("W1"));
+     assert_eq!(spec.app.game().unwrap().selected(), None);
+@@ -93,7 +93,7 @@ fn right_click_cancels_a_route_and_swings_points() {
+     let mut t = Table::new("eve", Some("East"));
+     assert_eq!(
+         t.app.menu(&Target::Points(s("P"))),
+-        [MenuItem { label: s("Swing P reverse"), cmd: PlayerCommand::SwingPoints { points: s("P"), to: PointsPos::Reverse } }]
++        [MenuItem { label: s("Swing TBP reverse"), cmd: PlayerCommand::SwingPoints { points: s("P"), to: PointsPos::Reverse } }]
+     );
+     assert!(t.app.menu(&sig("C")).is_empty(), "no route set from C");
+     t.app.click(&sig("C"));
+@@ -149,7 +149,7 @@ fn berths_interpose_a_typed_headcode_and_cancel_it() {
+     t.pump();
+     t.run(0.5);
+     assert_eq!(t.view().berths.get("BA").map(String::as_str), Some("2Z99"));
+-    assert_eq!(t.app.describe(&Target::Berth(s("BA"))), "Berth BA: 2Z99");
++    assert_eq!(t.app.describe(&Target::Berth(s("BA"))), "Berth TAA: 2Z99");
+     assert_eq!(
+         t.app.menu(&Target::Berth(s("BA"))),
+         [MenuItem { label: s("Cancel 2Z99"), cmd: PlayerCommand::CancelBerth { berth: s("BA") } }]
+@@ -358,8 +358,8 @@ fn the_train_list_puts_platforms_first_then_by_booked_time() {
+ #[test]
+ fn hover_describes_track_and_names_other_areas() {
+     let t = Table::new("ann", Some("West"));
+-    assert_eq!(t.app.describe(&Target::Section(s("TW1"))), "Track TW1: clear");
+-    assert_eq!(t.app.describe(&Target::Section(s("TP"))), "Track TP (East): clear");
++    assert_eq!(t.app.describe(&Target::Section(s("TW1"))), "Track: clear");
++    assert_eq!(t.app.describe(&Target::Section(s("TP"))), "Track (East): clear");
+     assert_eq!(t.app.describe(&Target::Exit(s("W"))), "Exit W");
+     assert_eq!(t.app.describe(&sig("nowhere")), "Signal nowhere");
+ }
+diff --git a/crates/client-core/tests/names.rs b/crates/client-core/tests/names.rs
+index 442348b..7526e3d 100644
+--- a/crates/client-core/tests/names.rs
++++ b/crates/client-core/tests/names.rs
+@@ -91,3 +91,27 @@ fn headcodes_are_shown_as_the_layout_says() {
+     let late = Notice::Late { train: s("201/7"), place: s("BNK"), platform: s("7"), late_s: 120 };
+     assert_eq!(notice_text(&late, &n).0, "201 at BNK 7, 2 min late");
+ }
++
++/// Polish spec M1, M2: points, berths and track are never shown by their
++/// converter ids, and place codes read as their names.
++#[test]
++fn points_berths_track_and_places_have_display_names() {
++    use client_core::names::points_number;
++    assert_eq!((points_number("N153"), points_number("P1"), points_number("P"), points_number("X9")), (s("P153"), s("P1"), s("P"), s("X9")));
++    let mut l = one_box("L", &[]);
++    l.points.push(PointsInfo { name: s("N153"), section: s("T7"), area: s("A"), operable: true });
++    l.berths.push(BerthInfo { name: s("B121"), signal: Some(s("121")), boundary: None, area: s("A"), operable: true });
++    l.berths.push(BerthInfo { name: s("BX"), signal: None, boundary: Some(s("N9")), area: s("A"), operable: true });
++    l.segments.push(SegmentInfo { name: s("L5"), from: s("N1"), to: s("N2"), length_m: 100.0, section: s("T7") });
++    l.platforms.push(PlatformInfo { place: s("LIVST"), platform: s("10"), segment: s("L5"), from_m: 0.0, to_m: 90.0 });
++    l.places.insert(s("LIVST"), s("LIVERPOOL STREET"));
++    let n = Names::new(&l);
++    assert_eq!((n.points("N153"), n.points("unknown")), (s("LP153"), s("unknown")));
++    assert_eq!((n.berth("B121"), n.berth("BX"), n.berth("B0")), (s("L121"), s("edge"), s("B0")));
++    assert_eq!((n.track("T7"), n.track("T8")), (s("Track at LIVERPOOL STREET 10"), s("Track")));
++    assert_eq!((n.place("LIVST"), n.place("BNK")), ("LIVERPOOL STREET", "BNK"));
++    let late = Notice::Late { train: s("1P02"), place: s("LIVST"), platform: s("10"), late_s: 60 };
++    assert_eq!(notice_text(&late, &n).0, "1P02 at LIVERPOOL STREET 10, 1 min late");
++    assert_eq!(command_text(&PlayerCommand::SwingPoints { points: s("N153"), to: PointsPos::Reverse }, &n), "swing LP153 reverse");
++    assert_eq!(notice_text(&Notice::Collision { section: s("T7") }, &n).0, "COLLISION: Track at LIVERPOOL STREET 10");
++}
+diff --git a/crates/client-ui/tests/screens.rs b/crates/client-ui/tests/screens.rs
+index 9ae5580..9215977 100644
+--- a/crates/client-ui/tests/screens.rs
++++ b/crates/client-ui/tests/screens.rs
+@@ -287,7 +287,7 @@ fn right_click_opens_the_menu_for_what_is_under_the_pointer() {
+     let ba = r.at(200.0, 0.0) - vec2(client_ui::scene::BERTH_BACK_PX, 0.0);
+     r.click(ba, PointerButton::Secondary);
+     let out = r.frame();
+-    assert!(has_text(&out, "Berth BA: empty"), "{:?}", texts(&out));
++    assert!(has_text(&out, "Berth TAA: empty"), "{:?}", texts(&out));
+     assert!(has_text(&out, "Interpose"));
+ }
+ 
+diff --git a/crates/game/tests/display.rs b/crates/game/tests/display.rs
+index 220ed2d..3f7f072 100644
+--- a/crates/game/tests/display.rs
++++ b/crates/game/tests/display.rs
+@@ -157,3 +157,15 @@ fn display_headcodes_reach_the_layout() {
+     assert_eq!(l.headcodes, map(&[("1E01", s("1E"))]));
+     assert_eq!(g.sim().world().services[0].headcode, "1E01", "the sim's headcode is unchanged");
+ }
++
++/// Polish spec M2: place names from the world's `layout` reach every layout.
++#[test]
++fn place_names_reach_the_layout() {
++    let w = twobox_mut(|j| j["layout"] = json!({"places": {"EST": "EASTON", "NST": 7}}));
++    assert_eq!(game::display::places(&w), map(&[("EST", s("EASTON"))]), "a name that is not text is skipped");
++    let mut g = Game::new(w, meta());
++    let outs = g.connect("ann");
++    let Some(ServerMsg::Layout(l)) = outs.iter().map(|o| &o.1).find(|m| matches!(m, ServerMsg::Layout(_))) else { panic!() };
++    assert_eq!(l.places, map(&[("EST", s("EASTON"))]));
++    assert!(game::display::places(&twobox()).is_empty());
++}
+diff --git a/crates/ts2-import/tests/convert.rs b/crates/ts2-import/tests/convert.rs
+index 9012369..945ad14 100644
+--- a/crates/ts2-import/tests/convert.rs
++++ b/crates/ts2-import/tests/convert.rs
+@@ -49,3 +49,13 @@ fn conversion_is_deterministic() {
+     let b = serde_json::to_string(&ts2_import::convert(&data("liverpool-st")).unwrap().world).unwrap();
+     assert_eq!(a, b);
+ }
++
++/// Polish spec M2: the converted layout names TS2's places by their codes.
++#[test]
++fn places_are_named_in_the_layout() {
++    let w = ts2_import::convert(&data("liverpool-st")).unwrap().world;
++    assert_eq!(w.layout["places"]["LIVST"], "LIVERPOOL STREET");
++    assert_eq!(w.layout["places"]["HAKNYNM"], "HACKNEY DOWNS");
++    let w = ts2_import::convert(&data("gretz-armainvilliers")).unwrap().world;
++    assert!(w.layout["places"].as_object().unwrap().keys().all(|k| !k.is_empty()), "places without a code are only labels");
++}
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `scripts/cargo test -p signalbox-client-core --test names --test input -p signalbox-game --test display -p ts2-import --test convert`
+Expected: compile errors (`points_number`, `places` not found). (The old expectations in `tests/input.rs` and
+`screens.rs` — `Points P`, `Berth BA`, `Track TW1` — are the ones this step updates.)
+
+- [ ] **Step 3: Implement**
+
+```diff
+diff --git a/crates/client-core/src/names.rs b/crates/client-core/src/names.rs
+index 5f0db16..d9fd858 100644
+--- a/crates/client-core/src/names.rs
++++ b/crates/client-core/src/names.rs
+@@ -1,8 +1,11 @@
+ //! Display names (realism spec §2, owner decision 11): a signal is shown as
+ //! `<box><workstation><name>` (`LA9`, `LB72`), without the workstation
+ //! letter on a single-area layout (`L9`). Display only: everything sent
+-//! keeps the plain name. Other names (berths, points, track, nodes) are
+-//! shown as they are. A headcode is shown as its service's display
++//! keeps the plain name. Points are shown the same way with a `P` before
++//! their number (`LAP153` for converted `N153`, `HP1` for a lesson's `P1`),
++//! a berth by its signal's name, track only by the platform on it, and a
++//! place code by its name where the layout gives one (polish spec M1, M2);
++//! nodes are shown as they are. A headcode is shown as its service's display
+ //! headcode when the layout gives one (polish spec P18: `201/7` is `201`).
+ 
+ use std::collections::BTreeMap;
+@@ -17,6 +20,21 @@ pub struct Names {
+     workstations: BTreeMap<String, String>,
+     /// Headcode → display headcode, where they differ.
+     headcodes: BTreeMap<String, String>,
++    /// Plain points name → displayed name.
++    points: BTreeMap<String, String>,
++    /// Berth → its signal's displayed name; `None` for a boundary berth.
++    berths: BTreeMap<String, Option<String>>,
++    /// Section → the platforms on it, as `place platform`.
++    platforms: BTreeMap<String, Vec<String>>,
++    /// Place code → name.
++    places: BTreeMap<String, String>,
++}
++
++/// A points name's number for display: the digits after a leading `N` or
++/// `P` (`N153`, `P1`), else the name itself; always with a `P` in front.
++pub fn points_number(name: &str) -> String {
++    let rest = name.strip_prefix('N').or_else(|| name.strip_prefix('P')).unwrap_or("");
++    if !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()) { format!("P{rest}") } else { name.to_string() }
+ }
+ 
+ impl Names {
+@@ -25,7 +43,21 @@ impl Names {
+         let letter = |area: &str| if single { "" } else { l.workstations.get(area).map_or("", String::as_str) };
+         let signals = l.signals.iter().map(|s| (s.name.clone(), format!("{}{}{}", l.box_prefix, letter(&s.area), s.name))).collect();
+         let workstations = if single { BTreeMap::new() } else { l.workstations.clone() };
+-        Names { signals, workstations, headcodes: l.headcodes.clone() }
++        let points = l.points.iter().map(|p| (p.name.clone(), format!("{}{}{}", l.box_prefix, letter(&p.area), points_number(&p.name)))).collect();
++        let signal = |n: &String| l.signals.iter().find(|s| s.name == *n).map(|s| format!("{}{}{}", l.box_prefix, letter(&s.area), s.name));
++        let berths = l.berths.iter().map(|b| (b.name.clone(), b.signal.as_ref().and_then(signal))).collect();
++        let place = |c: &str| l.places.get(c).map_or(c.to_string(), String::clone);
++        let mut platforms: BTreeMap<String, Vec<String>> = BTreeMap::new();
++        for p in &l.platforms {
++            if let Some(g) = l.segments.iter().find(|g| g.name == p.segment) {
++                let text = format!("{} {}", place(&p.place), p.platform);
++                let list = platforms.entry(g.section.clone()).or_default();
++                if !list.contains(&text) {
++                    list.push(text);
++                }
++            }
++        }
++        Names { signals, workstations, headcodes: l.headcodes.clone(), points, berths, platforms, places: l.places.clone() }
+     }
+ 
+     /// How a signal is shown; a name the layout does not list stays plain.
+@@ -41,6 +73,35 @@ impl Names {
+         }
+     }
+ 
++    /// How points are shown (`LAP153`); a name the layout does not list stays plain.
++    pub fn points(&self, name: &str) -> String {
++        self.points.get(name).cloned().unwrap_or_else(|| name.to_string())
++    }
++
++    /// How a berth is shown: by its signal (`LA29`), `edge` for a boundary
++    /// berth, plain for one the layout does not list.
++    pub fn berth(&self, name: &str) -> String {
++        match self.berths.get(name) {
++            Some(Some(s)) => s.clone(),
++            Some(None) => "edge".to_string(),
++            None => name.to_string(),
++        }
++    }
++
++    /// Track is never shown by its id: `Track at LIVERPOOL STREET 10`, or
++    /// just `Track` where no platform is on it.
++    pub fn track(&self, section: &str) -> String {
++        match self.platforms.get(section) {
++            Some(p) => format!("Track at {}", p.join(", ")),
++            None => "Track".to_string(),
++        }
++    }
++
++    /// A place's name (`LIVERPOOL STREET`), else its code.
++    pub fn place<'a>(&'a self, code: &'a str) -> &'a str {
++        self.places.get(code).map_or(code, String::as_str)
++    }
++
+     /// How a headcode is shown: its service's display headcode, else as it is.
+     pub fn headcode<'a>(&'a self, h: &'a str) -> &'a str {
+         self.headcodes.get(h).map_or(h, String::as_str)
+diff --git a/crates/client-core/src/select.rs b/crates/client-core/src/select.rs
+index 43f6baa..cc816f0 100644
+--- a/crates/client-core/src/select.rs
++++ b/crates/client-core/src/select.rs
+@@ -147,7 +147,8 @@ pub fn points_menu(l: &Layout, v: &View, points: &str) -> Vec<MenuItem> {
+         PointsPos::Normal => PointsPos::Reverse,
+         PointsPos::Reverse => PointsPos::Normal,
+     };
+-    vec![MenuItem { label: format!("Swing {points} {}", pos_text(to)), cmd: PlayerCommand::SwingPoints { points: points.to_string(), to } }]
++    let label = format!("Swing {} {}", Names::new(l).points(points), pos_text(to));
++    vec![MenuItem { label, cmd: PlayerCommand::SwingPoints { points: points.to_string(), to } }]
+ }
+ 
+ /// Cancelling a berth's headcode; interposing needs a headcode typed in,
+@@ -211,21 +212,26 @@ pub fn describe_signal(l: &Layout, v: &View, signal: &str) -> String {
+ 
+ pub fn describe_points(l: &Layout, v: &View, points: &str) -> String {
+     let area = l.points.iter().find(|p| p.name == points).map(|p| area_note(l, &p.area)).unwrap_or_default();
++    let shown = Names::new(l).points(points);
+     match v.points.get(points) {
+         Some(p) => format!(
+-            "Points {points}{area}: {}{}{}",
++            "Points {shown}{area}: {}{}{}",
+             pos_text(p.position),
+             if p.moving { ", moving" } else { "" },
+             if p.locked { ", locked" } else { "" }
+         ),
+-        None => format!("Points {points}{area}"),
++        None => format!("Points {shown}{area}"),
+     }
+ }
+ 
+ pub fn describe_berth(l: &Layout, v: &View, berth: &str) -> String {
+     let area = l.berths.iter().find(|b| b.name == berth).map(|b| area_note(l, &b.area)).unwrap_or_default();
+     let names = Names::new(l);
+-    format!("Berth {berth}{area}: {}", v.berths.get(berth).map_or("empty", |h| names.headcode(h)))
++    let what = match names.berth(berth).as_str() {
++        "edge" => "Edge berth".to_string(),
++        b => format!("Berth {b}"),
++    };
++    format!("{what}{area}: {}", v.berths.get(berth).map_or("empty", |h| names.headcode(h)))
+ }
+ 
+ pub fn describe_section(l: &Layout, v: &View, section: &str) -> String {
+@@ -237,5 +243,5 @@ pub fn describe_section(l: &Layout, v: &View, section: &str) -> String {
+         Some(_) => "clear",
+         None => "?",
+     };
+-    format!("Track {section}{area}: {state}")
++    format!("{}{area}: {state}", Names::new(l).track(section))
+ }
+diff --git a/crates/client-core/src/text.rs b/crates/client-core/src/text.rs
+index bf13a1e..1ed9baf 100644
+--- a/crates/client-core/src/text.rs
++++ b/crates/client-core/src/text.rs
+@@ -33,9 +33,9 @@ pub fn command_text(c: &PlayerCommand, names: &Names) -> String {
+         PlayerCommand::SetAutoWorking { entrance, on } => {
+             format!("auto-working {} at {}", if *on { "on" } else { "off" }, names.signal(entrance))
+         }
+-        PlayerCommand::SwingPoints { points, to } => format!("swing {points} {}", pos_text(*to)),
+-        PlayerCommand::Interpose { berth, headcode } => format!("interpose {headcode} in {berth}"),
+-        PlayerCommand::CancelBerth { berth } => format!("cancel berth {berth}"),
++        PlayerCommand::SwingPoints { points, to } => format!("swing {} {}", names.points(points), pos_text(*to)),
++        PlayerCommand::Interpose { berth, headcode } => format!("interpose {headcode} at {}", names.berth(berth)),
++        PlayerCommand::CancelBerth { berth } => format!("cancel the headcode at {}", names.berth(berth)),
+     }
+ }
+ 
+@@ -63,12 +63,12 @@ pub fn notice_text(n: &Notice, names: &Names) -> (String, bool) {
+         Notice::Spad { signal, train } => {
+             (format!("SPAD: {} passed {} at danger", names.headcode(train), names.signal(signal)), true)
+         }
+-        Notice::Collision { section } => (format!("COLLISION on {section}"), true),
++        Notice::Collision { section } => (format!("COLLISION: {}", names.track(section)), true),
+         Notice::Late { train, place, platform, late_s } => {
+-            (format!("{} at {place} {platform}, {} min late", names.headcode(train), late_s / 60), false)
++            (format!("{} at {} {platform}, {} min late", names.headcode(train), names.place(place), late_s / 60), false)
+         }
+         Notice::WrongPlatform { train, place, platform, expected } => {
+-            (format!("{} at {place} platform {platform}, booked {expected}", names.headcode(train)), true)
++            (format!("{} at {} platform {platform}, booked {expected}", names.headcode(train), names.place(place)), true)
+         }
+         Notice::Handover { headcode, from_area } => (format!("{} offered from {from_area}", names.headcode(headcode)), false),
+         Notice::AreaTaken { area, holder } => (format!("{area} is now {holder}'s"), false),
+diff --git a/crates/client-ui/src/screens.rs b/crates/client-ui/src/screens.rs
+index 348b037..b5de06d 100644
+--- a/crates/client-ui/src/screens.rs
++++ b/crates/client-ui/src/screens.rs
+@@ -557,7 +557,12 @@ impl UiApp {
+                         (Some(p), None) => p.clone(),
+                         (None, _) => "—".to_string(),
+                     };
+-                    ui.label(next);
++                    // Codes in the table; the place's name on hover (polish spec M2).
++                    let place = r.next_place.as_deref().map(|p| g.names().place(p).to_string());
++                    let cell = ui.label(next);
++                    if let Some(name) = place {
++                        cell.on_hover_text(name);
++                    }
+                     ui.label(r.booked.map_or(String::new(), |b| fmt_hms(b)[..5].to_string()));
+                     ui.label(if r.late_s > 0 { format!("+{}", r.late_s / 60) } else { String::new() });
+                     ui.end_row();
+@@ -631,9 +636,11 @@ impl UiApp {
+                 ui.label("Not in the simplifier for this area");
+             }
+             for r in &e.rows {
+-                ui.label(format!("{} to {}", r.origin.as_deref().unwrap_or("?"), r.destination.as_deref().unwrap_or("?")));
++                let names = g.names();
++                let place = |p: Option<&str>| p.map_or("?", |p| names.place(p)).to_string();
++                ui.label(format!("{} to {}", place(r.origin.as_deref()), place(r.destination.as_deref())));
+                 for line in simplifier::lines(l, r) {
+-                    ui.label(format!("{} {} {} {}", line.place, line.platform, line.arr, line.dep));
++                    ui.label(format!("{} {} {} {}", names.place(&line.place), line.platform, line.arr, line.dep));
+                 }
+             }
+         });
+diff --git a/crates/game/src/display.rs b/crates/game/src/display.rs
+index 3c44f50..f230f1f 100644
+--- a/crates/game/src/display.rs
++++ b/crates/game/src/display.rs
+@@ -106,6 +106,13 @@ pub fn simplifier(w: &World, area: Option<AreaId>) -> Vec<SimplifierRow> {
+     rows
+ }
+ 
++/// Place code → name, from the world's `layout` JSON (`places`, written by
++/// ts2-import); empty when missing, and entries that are not text are skipped.
++pub fn places(w: &World) -> BTreeMap<String, String> {
++    let Some(m) = w.layout.get("places").and_then(|v| v.as_object()) else { return BTreeMap::new() };
++    m.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect()
++}
++
+ /// What every layout of one game shares, per area.
+ #[derive(Clone, Debug, PartialEq)]
+ pub struct Display {
+@@ -113,6 +120,8 @@ pub struct Display {
+     pub workstations: BTreeMap<String, String>,
+     /// Headcode → display headcode, where they differ (polish spec P18).
+     pub headcodes: BTreeMap<String, String>,
++    /// Place code → name (polish spec M2).
++    pub places: BTreeMap<String, String>,
+     spectator: Vec<SimplifierRow>,
+     by_area: Vec<Vec<SimplifierRow>>,
+ }
+@@ -122,7 +131,7 @@ impl Display {
+         let (box_prefix, workstations) = prefixes(w);
+         let by_area = (0..w.net.areas.len()).map(|a| simplifier(w, Some(AreaId::from_idx(a)))).collect();
+         let headcodes = w.services.iter().filter_map(|s| Some((s.headcode.clone(), s.display.clone()?))).collect();
+-        Display { box_prefix, workstations, headcodes, spectator: simplifier(w, None), by_area }
++        Display { box_prefix, workstations, headcodes, places: places(w), spectator: simplifier(w, None), by_area }
+     }
+ 
+     /// The simplifier for `area` (a spectator's for `None`).
+@@ -138,6 +147,7 @@ impl Display {
+         l.box_prefix = self.box_prefix.clone();
+         l.workstations = self.workstations.clone();
+         l.headcodes = self.headcodes.clone();
++        l.places = self.places.clone();
+         l.simplifier = self.simplifier(area).to_vec();
+     }
+ }
+diff --git a/crates/game/src/layout.rs b/crates/game/src/layout.rs
+index 765dc24..f607f62 100644
+--- a/crates/game/src/layout.rs
++++ b/crates/game/src/layout.rs
+@@ -125,5 +125,6 @@ pub fn build_layout(w: &World, map: &AreaMap, vis: &Visibility, you: &str, geo:
+         workstations: Default::default(),
+         simplifier: vec![],
+         headcodes: Default::default(),
++        places: Default::default(),
+     }
+ }
+diff --git a/crates/protocol/src/view.rs b/crates/protocol/src/view.rs
+index 5520d73..ea50e42 100644
+--- a/crates/protocol/src/view.rs
++++ b/crates/protocol/src/view.rs
+@@ -42,6 +42,10 @@ pub struct Layout {
+     /// headcode differs (polish spec P18); every other headcode is shown as it is.
+     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+     pub headcodes: BTreeMap<String, String>,
++    /// Place code → its name (`LIVST` → `LIVERPOOL STREET`, polish spec M2),
++    /// where the world gives one.
++    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
++    pub places: BTreeMap<String, String>,
+ }
+ 
+ /// One service in the simplifier: where it runs from and to, and its calls
+diff --git a/crates/ts2-import/src/layout.rs b/crates/ts2-import/src/layout.rs
+index 04f2dde..1ccd07a 100644
+--- a/crates/ts2-import/src/layout.rs
++++ b/crates/ts2-import/src/layout.rs
+@@ -1,4 +1,5 @@
+-//! Diagram geometry for clients, in TS2 scene coordinates.
++//! Diagram geometry for clients, in TS2 scene coordinates, and the names of
++//! TS2's places (polish spec M2: `LIVST` is LIVERPOOL STREET).
+ 
+ use serde_json::{Value, json};
+ 
+@@ -7,6 +8,7 @@ use crate::ts2::{Item, Ts2};
+ 
+ pub fn build(ts2: &Ts2, g: &Graph) -> Value {
+     let (mut lines, mut points, mut signals, mut platforms, mut labels) = (vec![], vec![], vec![], vec![], vec![]);
++    let mut places = serde_json::Map::new();
+     for (id, it) in &ts2.track_items {
+         match it {
+             Item::LineItem(l) | Item::InvisibleLinkItem(l) => {
+@@ -30,6 +32,9 @@ pub fn build(ts2: &Ts2, g: &Graph) -> Value {
+             Item::Place(p) => {
+                 if let Some(name) = &p.name {
+                     labels.push(json!({"text": name, "x": p.x, "y": p.y}));
++                    if let Some(code) = p.place_code.as_ref().filter(|c| !c.is_empty()) {
++                        places.entry(code.clone()).or_insert_with(|| json!(name));
++                    }
+                 }
+             }
+             Item::TextItem(t) => {
+@@ -40,5 +45,5 @@ pub fn build(ts2: &Ts2, g: &Graph) -> Value {
+             Item::EndItem(_) => {}
+         }
+     }
+-    json!({"source": "ts2", "lines": lines, "points": points, "signals": signals, "platforms": platforms, "labels": labels})
++    json!({"source": "ts2", "lines": lines, "points": points, "signals": signals, "platforms": platforms, "labels": labels, "places": places})
+ }
+diff --git a/lessons/01-reading-the-panel/lesson.json b/lessons/01-reading-the-panel/lesson.json
+index b4cb6a2..226a381 100644
+--- a/lessons/01-reading-the-panel/lesson.json
++++ b/lessons/01-reading-the-panel/lesson.json
+@@ -19,7 +19,7 @@
+       "wait_for": {"continue": {}}
+     },
+     {
+-      "say": "The ochre block is platform 1 at Saltmarsh station; its number is written on it. You can point at any part of the track to read its name and whether a train is on it.",
++      "say": "The ochre block is platform 1 at Saltmarsh station; its number is written on it. You can point at any part of the track to read whether a train is on it, and at which platform.",
+       "highlight": [{"platform": {"place": "SLT", "platform": "1"}}],
+       "wait_for": {"continue": {}}
+     },
+diff --git a/lessons/02-setting-routes/lesson.json b/lessons/02-setting-routes/lesson.json
+index 5b8b808..5aad0cc 100644
+--- a/lessons/02-setting-routes/lesson.json
++++ b/lessons/02-setting-routes/lesson.json
+@@ -42,7 +42,7 @@
+       "wait_for": {"continue": {}}
+     },
+     {
+-      "say": "The lesson has cancelled its route. Points can also be moved by hand when no route holds them. Right-click the points P1 (where the line splits before the platforms) and choose 'Swing P1 reverse'. Reverse leads to platform 2.",
++      "say": "The lesson has cancelled its route. Points can also be moved by hand when no route holds them. Right-click the points HP1 (where the line splits before the platforms) and choose 'Swing HP1 reverse'. Reverse leads to platform 2.",
+       "highlight": [{"points": "P1"}],
+       "do": [{"cancel_route": {"entrance": "3"}}],
+       "wait_for": {"points": {"name": "P1", "position": "reverse"}}
+```
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `scripts/cargo test -p signalbox-client-core -p signalbox-client-ui -p signalbox-game -p ts2-import`
+Expected: PASS, no warnings (as on the scratch copy).
+
+- [ ] **Step 5: Document**
+
+`CLAUDE.md`, "Browser client", after the `Names` sentence ("signals are shown as …"): "Points are shown the same way
+with a `P` (`LAP153`), berths by their signal, track only by the platform on it (polish spec M1); place codes by the
+names ts2-import writes into `layout.places` (M2): tables keep codes and show names on hover."
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/client-core crates/client-core/src/names.rs crates/client-core/src/select.rs crates/client-core/src/text.rs crates/client-ui crates/client-ui/src/screens.rs crates/game crates/game/src/display.rs crates/game/src/layout.rs crates/protocol/src/view.rs crates/ts2-import crates/ts2-import/src/layout.rs lessons/01-reading-the-panel/lesson.json lessons/02-setting-routes/lesson.json CLAUDE.md
+git commit -m "feat(client): points, berths, track and places by display names, never converter ids"
+```
+
+---
+
+### Task 9: Spectating is explained (UI review H2)
+
+Spec §10 H2 (U1, U2). The New game form chooses where the creator starts; a spectator is told how to signal; a
+click that chooses nothing says why, once.
+
+**Files:**
+- Modify: `crates/client-core/src/app.rs`
+- Modify: `crates/client-core/src/input.rs`
+- Modify: `crates/client-core/src/select.rs`
+- Modify: `crates/client-ui/src/screens.rs`
+- Modify: `CLAUDE.md`
+- Test: `crates/client-core/tests/app.rs`
+- Test: `crates/client-core/tests/input.rs`
+- Test: `crates/client-ui/tests/screens.rs`
+
+**Interfaces:**
+- Consumes: Task 8's `Names`; `App::create_game`.
+- Produces: `App::create_game_in(layout, seed, start, area: Option<&str>)`; `App.claim_on_join` (claims once, on the
+  new game's first spectator layout); `select::why_not_entrance(&Layout, &str) -> String`; `InGame::log_once(String)`;
+  `UiApp`'s `NewGame.area` (0 = watch).
+
+- [ ] **Step 1: Write the failing tests**
+
+Apply (written and run on the scratch copy; re-check the context on the base, keep the intent):
+
+```diff
+diff --git a/crates/client-core/tests/app.rs b/crates/client-core/tests/app.rs
+index 4d03556..38441d1 100644
+--- a/crates/client-core/tests/app.rs
++++ b/crates/client-core/tests/app.rs
+@@ -577,3 +577,27 @@ fn an_unreadable_frame_in_the_lobby_refreshes_the_lobby() {
+     assert!(app.lobby_note().unwrap().starts_with("Unreadable message from the server"));
+     assert_eq!(h.take_sent(), [lobby(LobbyMsg::ListGames)]);
+ }
++
++/// Polish spec H2: a game created "to signal" an area claims it as soon as
++/// its first layout comes, once; a plain create stays watching.
++#[test]
++fn a_new_game_claims_the_creators_area_once_its_layout_comes() {
++    let (mut app, h) = open_app();
++    h.take_sent();
++    app.create_game_in("twobox", None, None, Some("West"));
++    assert_eq!(h.take_sent(), [lobby(LobbyMsg::CreateGame { layout: s("twobox"), seed: None, start: None })]);
++    h.push(joined("g-new"));
++    h.push(layout("ann"));
++    app.tick(1.0);
++    assert_eq!(h.take_sent(), [ClientFrame::Game(ClientMsg::Claim { area: s("West") })]);
++    h.push(layout("ann"));
++    app.tick(2.0);
++    assert!(h.take_sent().is_empty(), "only once");
++    let (mut app, h) = open_app();
++    h.take_sent();
++    app.create_game_in("twobox", None, None, None);
++    h.push(joined("g-new"));
++    h.push(layout("ann"));
++    app.tick(1.0);
++    assert_eq!(h.take_sent(), [lobby(LobbyMsg::CreateGame { layout: s("twobox"), seed: None, start: None })], "no claim");
++}
+diff --git a/crates/client-core/tests/input.rs b/crates/client-core/tests/input.rs
+index f690732..f085bb4 100644
+--- a/crates/client-core/tests/input.rs
++++ b/crates/client-core/tests/input.rs
+@@ -407,3 +407,20 @@ fn cancelling_routes_and_busy_points_offer_no_menu() {
+     v.points.insert(s("P"), PointsView { position: PointsPos::Normal, moving: false, locked: false });
+     assert_eq!(select::points_menu(&l, &v, "P").len(), 1);
+ }
++
++/// Polish spec H2: a click that chooses nothing says why, once.
++#[test]
++fn a_click_that_chooses_nothing_says_why_once() {
++    let mut spec = Table::new("sam", None);
++    spec.app.click(&sig("W1"));
++    spec.app.click(&sig("W1"));
++    spec.app.click(&Target::Auto(s("W1")));
++    assert_eq!(spec.log_lines(), [(s("You are watching: claim an area to signal"), false)]);
++    let mut t = Table::new("ann", Some("West"));
++    t.app.click(&sig("C"));
++    t.app.click(&Target::Auto(s("W1")));
++    assert_eq!(
++        t.log_lines(),
++        [(s("C is not in your area"), false), (s("Auto-working TAW1: set a route from it first"), false)]
++    );
++}
+diff --git a/crates/client-ui/tests/screens.rs b/crates/client-ui/tests/screens.rs
+index 9215977..823b350 100644
+--- a/crates/client-ui/tests/screens.rs
++++ b/crates/client-ui/tests/screens.rs
+@@ -732,3 +732,23 @@ fn the_simplifier_opens_at_now() {
+     assert!(!side.iter().any(|t| t == "BW01"), "BW01 ran at 06:00: {side:?}");
+     assert!(side.iter().any(|t| t == "BW06") && side.iter().any(|t| t == "BW07"), "06:30's trains: {side:?}");
+ }
++
++/// Polish spec H2: the lobby offers an area to signal, a spectator is told
++/// how to start signalling, and a click on a signal while watching says why
++/// nothing happened.
++#[test]
++fn a_spectator_is_told_to_claim_an_area() {
++    let r = Rig::lobby(drawn_twobox());
++    let mut r = r;
++    let out = r.frame();
++    assert!(has_text(&out, "Signal") && has_text(&out, "watch"), "{:?}", texts(&out));
++    let mut r = Rig::in_game(drawn_twobox(), None);
++    let out = r.frame();
++    assert!(has_text(&out, "You are watching. Claim an area to signal:"));
++    let w1 = r.at(100.0, 0.0);
++    r.click(w1, PointerButton::Primary);
++    let out = r.frame();
++    assert!(has_text(&out, "You are watching: claim an area to signal"), "{:?}", side_texts(&r, &out));
++    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
++    assert!(!has_text(&r.frame(), "You are watching"));
++}
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `scripts/cargo test -p signalbox-client-core --test app --test input -p signalbox-client-ui --test screens a_spectator`
+Expected: compile errors (`create_game_in` not found).
+
+- [ ] **Step 3: Implement**
+
+```diff
+diff --git a/crates/client-core/src/app.rs b/crates/client-core/src/app.rs
+index cb8fd02..6183d5e 100644
+--- a/crates/client-core/src/app.rs
++++ b/crates/client-core/src/app.rs
+@@ -139,6 +139,16 @@ impl InGame {
+     fn sim_time(&self) -> Option<f64> {
+         self.bot.view().map(|v| v.sim_time)
+     }
++
++    /// Log `text` (not an alarm) unless it is already the newest line, so a
++    /// player clicking again and again gets one line.
++    pub(crate) fn log_once(&mut self, text: String) {
++        if self.log.entries().next_back().is_some_and(|e| e.text == text) {
++            return;
++        }
++        let t = self.sim_time();
++        self.log.push(t, text, false);
++    }
+ }
+ 
+ /// A `join` or `create_game` whose `joined` has not come yet.
+@@ -174,6 +184,9 @@ pub struct App {
+     pub(crate) last_frame: f64,
+     /// The watchdog sent a join on this connection and no frame has come since.
+     pub(crate) watchdog_join_sent: bool,
++    /// The area to claim once the game just created sends its first layout
++    /// (polish spec H2: the creator signals at once instead of watching).
++    pub(crate) claim_on_join: Option<String>,
+ }
+ 
+ impl App {
+@@ -196,6 +209,7 @@ impl App {
+             me: None,
+             last_frame: now,
+             watchdog_join_sent: false,
++            claim_on_join: None,
+         }
+     }
+ 
+@@ -313,6 +327,7 @@ impl App {
+     }
+ 
+     fn to_lobby(&mut self, note: Option<String>) {
++        self.claim_on_join = None;
+         self.game = None;
+         self.rejoin = None;
+         self.joining = None;
+@@ -416,8 +431,13 @@ impl App {
+         let is_layout = matches!(m, ServerMsg::Layout(_));
+         let reply = g.bot.receive(m);
+         g.bot.take_notices();
++        let mut claim = None;
+         if let (true, Some(l)) = (is_layout, g.bot.layout()) {
+             g.names = Names::new(l);
++            // The creator's chosen area, once, if it is still a spectator's layout.
++            if let Some(a) = self.claim_on_join.take().filter(|a| l.area.is_none() && l.areas.contains(a)) {
++                claim = Some(ClientMsg::Claim { area: a });
++            }
+         }
+         if let (Some(sel), Some(l)) = (g.selected.as_deref(), g.bot.layout()) {
+             if !crate::select::can_enter(l, sel) {
+@@ -427,6 +447,9 @@ impl App {
+         if let Some(r) = reply {
+             self.send_game(r);
+         }
++        if let Some(c) = claim {
++            self.send_game(c);
++        }
+     }
+ 
+     /// A layout or view while a join waits for its `joined`: the `joined`
+@@ -482,11 +505,21 @@ impl App {
+ 
+     /// `start` is "HH:MM" or "HH:MM:SS"; the front checks it.
+     pub fn create_game(&mut self, layout: &str, seed: Option<u64>, start: Option<String>) {
++        self.claim_on_join = None;
+         if self.send(ClientFrame::Lobby(LobbyMsg::CreateGame { layout: layout.to_string(), seed, start })) {
+             self.joining = Some(Joining { game: None, rejoin: false });
+         }
+     }
+ 
++    /// `create_game`, then claim `area` as soon as the game's first layout
++    /// comes (polish spec H2); `None` watches, as `create_game` does.
++    pub fn create_game_in(&mut self, layout: &str, seed: Option<u64>, start: Option<String>, area: Option<&str>) {
++        self.create_game(layout, seed, start);
++        if self.joining.is_some() {
++            self.claim_on_join = area.map(str::to_string);
++        }
++    }
++
+     /// Delete a saved or crashed game (owner decision 13). The front checks
+     /// who may and answers with the new games list, or an error for the lobby.
+     pub fn delete_game(&mut self, game: &str) {
+@@ -494,6 +527,7 @@ impl App {
+     }
+ 
+     pub fn join(&mut self, game: &str) {
++        self.claim_on_join = None;
+         if self.send(ClientFrame::Lobby(LobbyMsg::Join { game: game.to_string() })) {
+             self.joining = Some(Joining { game: Some(game.to_string()), rejoin: false });
+         }
+@@ -501,6 +535,7 @@ impl App {
+ 
+     /// Back to the lobby (the front answers with the games list).
+     pub fn leave(&mut self) {
++        self.claim_on_join = None;
+         self.send(ClientFrame::Lobby(LobbyMsg::Leave));
+         self.game = None;
+         self.rejoin = None;
+diff --git a/crates/client-core/src/input.rs b/crates/client-core/src/input.rs
+index b5c239e..9a8e01a 100644
+--- a/crates/client-core/src/input.rs
++++ b/crates/client-core/src/input.rs
+@@ -39,7 +39,13 @@ impl App {
+                 g.selected = None;
+                 self.command(cmd);
+             }
+-            Click::Ignore => {}
++            Click::Ignore => {
++                // Say why nothing happened (polish spec H2).
++                if let Target::Signal(s) = target {
++                    let why = select::why_not_entrance(l, s);
++                    g.log_once(why);
++                }
++            }
+         }
+     }
+ 
+@@ -47,8 +53,18 @@ impl App {
+     /// one; the selection is left as it is.
+     fn toggle_auto(&mut self, signal: &str) {
+         let cmd = self.game.as_ref().and_then(|g| select::auto_toggle(g.bot.layout()?, g.bot.view()?, signal));
+-        if let Some(cmd) = cmd {
+-            self.command(cmd);
++        match cmd {
++            Some(cmd) => self.command(cmd),
++            None => {
++                let Some(g) = self.game.as_mut() else { return };
++                let Some(l) = g.bot.layout() else { return };
++                let why = if l.signals.iter().any(|s| s.name == signal && s.operable) {
++                    format!("Auto-working {}: set a route from it first", g.names.signal(signal))
++                } else {
++                    select::why_not_entrance(l, signal)
++                };
++                g.log_once(why);
++            }
+         }
+     }
+ 
+diff --git a/crates/client-core/src/select.rs b/crates/client-core/src/select.rs
+index cc816f0..dd08877 100644
+--- a/crates/client-core/src/select.rs
++++ b/crates/client-core/src/select.rs
+@@ -65,6 +65,19 @@ pub fn click(l: &Layout, selected: Option<&str>, target: &ExitName) -> Click {
+     }
+ }
+ 
++/// Why a click on `signal` chose nothing (polish spec H2): you are
++/// watching, it is another area's, or no route of yours starts there.
++pub fn why_not_entrance(l: &Layout, signal: &str) -> String {
++    let names = Names::new(l);
++    let shown = names.signal(signal);
++    match (l.area.as_deref(), l.signals.iter().find(|s| s.name == signal)) {
++        (None, _) => "You are watching: claim an area to signal".to_string(),
++        (Some(mine), Some(s)) if s.area != mine => format!("{shown} is worked from {}, not your area", s.area),
++        (Some(_), None) => format!("{shown} is not in your area"),
++        _ => format!("No route of yours starts at {shown}"),
++    }
++}
++
+ /// Routes from `entrance` that are set (not idle) in the view.
+ fn active_from<'a>(l: &'a Layout, v: &'a View, entrance: &'a str) -> impl Iterator<Item = &'a RouteInfo> + 'a {
+     l.routes.iter().filter(move |r| r.entrance == entrance && v.routes.contains_key(&r.name))
+diff --git a/crates/client-ui/src/screens.rs b/crates/client-ui/src/screens.rs
+index b5de06d..120f256 100644
+--- a/crates/client-ui/src/screens.rs
++++ b/crates/client-ui/src/screens.rs
+@@ -63,6 +63,8 @@ pub enum SideTab {
+ #[derive(Default)]
+ struct NewGame {
+     layout: usize,
++    /// 0: watch; `i + 1`: claim the layout's area `i` (polish spec H2).
++    area: usize,
+     seed: String,
+     start: String,
+ }
+@@ -249,6 +251,7 @@ impl UiApp {
+             ui.separator();
+             ui.label(RichText::new("New game").strong());
+             let layouts: Vec<String> = self.core.layouts().iter().map(|l| l.name.clone()).collect();
++            let areas: Vec<Vec<String>> = self.core.layouts().iter().map(|l| l.areas.clone()).collect();
+             if layouts.is_empty() {
+                 ui.label("No layouts yet.");
+             } else {
+@@ -259,6 +262,16 @@ impl UiApp {
+                             ui.selectable_value(&mut self.new_game.layout, i, name.as_str());
+                         }
+                     });
++                    // Where the creator starts (polish spec H2): an area to signal, or watching.
++                    let mine = &areas[self.new_game.layout];
++                    self.new_game.area = self.new_game.area.min(mine.len());
++                    let shown = |i: usize| if i == 0 { "watch".to_string() } else { mine[i - 1].clone() };
++                    ui.label("Signal");
++                    egui::ComboBox::from_id_salt("new_game_area").selected_text(shown(self.new_game.area)).show_ui(ui, |ui| {
++                        for i in 0..=mine.len() {
++                            ui.selectable_value(&mut self.new_game.area, i, shown(i));
++                        }
++                    });
+                     ui.label("Seed");
+                     ui.add(egui::TextEdit::singleline(&mut self.new_game.seed).desired_width(90.0).hint_text("random"));
+                     ui.label("Start");
+@@ -266,7 +279,8 @@ impl UiApp {
+                     if ui.button("Create").clicked() {
+                         let seed = self.new_game.seed.trim().parse().ok();
+                         let start = Some(self.new_game.start.trim().to_string()).filter(|s| !s.is_empty());
+-                        self.core.create_game(&layouts[self.new_game.layout], seed, start);
++                        let area = self.new_game.area.checked_sub(1).map(|i| mine[i].clone());
++                        self.core.create_game_in(&layouts[self.new_game.layout], seed, start, area.as_deref());
+                     }
+                 });
+             }
+@@ -442,6 +456,10 @@ impl UiApp {
+                 }
+             });
+             ui.horizontal_wrapped(|ui| {
++                // Polish spec H2: a spectator's clicks do nothing; say so where they look.
++                if !holding && !lesson {
++                    ui.label(RichText::new("You are watching. Claim an area to signal:").color(paint::YELLOW));
++                }
+                 ui.label("Players:");
+                 for area in &areas {
+                     let holder = view.as_ref().and_then(|v| v.holders.get(area)).map_or("robot", String::as_str);
+```
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `scripts/cargo test -p signalbox-client-core -p signalbox-client-ui`
+Expected: PASS, no warnings (as on the scratch copy).
+
+- [ ] **Step 5: Document**
+
+`CLAUDE.md`, "Browser client": "A new game's creator may choose an area in the lobby; the client claims it when the
+game's first layout comes (`App::create_game_in`, polish spec H2). A click that chooses nothing logs why, once."
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/client-core crates/client-core/src/app.rs crates/client-core/src/input.rs crates/client-core/src/select.rs crates/client-ui crates/client-ui/src/screens.rs CLAUDE.md
+git commit -m "feat(client): choose an area when creating a game; spectators and dead clicks are told why"
+```
+
+---
+
+### Task 10: What is clickable says so (UI review M3)
+
+Spec §10 M3 (U9). A pointing hand over what you can work, hover text ending with what a click does, and a left
+click on your points opens their menu.
+
+**Files:**
+- Modify: `crates/client-core/src/input.rs`
+- Modify: `crates/client-ui/src/screens.rs`
+- Modify: `CLAUDE.md`
+- Test: `crates/client-core/tests/input.rs`
+- Test: `crates/client-ui/tests/screens.rs`
+
+**Interfaces:**
+- Consumes: `Hit::clickable` (already computed), `select::{exits_from, can_enter, signal_menu, points_menu, operable_berth, auto_toggle}`.
+- Produces: `App::hint(&Target) -> Option<&'static str>`; the diagram opens its menu with `egui::Popup::menu(..).open_memory(..)`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Apply (written and run on the scratch copy; re-check the context on the base, keep the intent):
+
+```diff
+diff --git a/crates/client-core/tests/input.rs b/crates/client-core/tests/input.rs
+index f085bb4..8457609 100644
+--- a/crates/client-core/tests/input.rs
++++ b/crates/client-core/tests/input.rs
+@@ -424,3 +424,21 @@ fn a_click_that_chooses_nothing_says_why_once() {
+         [(s("C is not in your area"), false), (s("Auto-working TAW1: set a route from it first"), false)]
+     );
+ }
++
++/// Polish spec M3: hover text ends with what a click would do, and says
++/// nothing where clicks do nothing for you.
++#[test]
++fn hints_say_what_a_click_does() {
++    let mut t = Table::new("ann", Some("West"));
++    assert_eq!(t.app.hint(&sig("W1")), Some("click: choose as entrance"));
++    t.app.click(&sig("W1"));
++    assert_eq!(t.app.hint(&sig("A")), Some("click: set the route to here"));
++    assert_eq!(t.app.hint(&sig("W1")), Some("click again or Esc: forget the entrance"));
++    assert_eq!(t.app.hint(&Target::Berth(s("BA"))), Some("right-click: interpose or cancel a headcode"));
++    assert_eq!(t.app.hint(&Target::Section(s("TW1"))), None);
++    assert_eq!(t.app.hint(&Target::Points(s("P"))), None, "East's points");
++    let e = Table::new("eve", Some("East"));
++    assert_eq!(e.app.hint(&Target::Points(s("P"))), Some("click: swing them"));
++    let spec = Table::new("sam", None);
++    assert_eq!(spec.app.hint(&sig("W1")), None);
++}
+diff --git a/crates/client-ui/tests/screens.rs b/crates/client-ui/tests/screens.rs
+index 823b350..9deede6 100644
+--- a/crates/client-ui/tests/screens.rs
++++ b/crates/client-ui/tests/screens.rs
+@@ -752,3 +752,23 @@ fn a_spectator_is_told_to_claim_an_area() {
+     let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+     assert!(!has_text(&r.frame(), "You are watching"));
+ }
++
++/// Polish spec M3: what you can click shows a pointing hand and says what a
++/// click does; points you work open their menu on a left click too.
++#[test]
++fn clickable_things_say_so_and_points_open_on_a_left_click() {
++    let mut r = Rig::in_game(drawn_twobox(), Some("East"));
++    let p = r.at(207.5, 0.0);
++    r.events.push(Event::PointerMoved(p));
++    r.frame();
++    let out = r.frame();
++    assert_eq!(out.platform_output.cursor_icon, egui::CursorIcon::PointingHand);
++    r.click(p, PointerButton::Primary);
++    let out = r.frame();
++    assert!(has_text(&out, "Swing TBP reverse"), "{:?}", texts(&out));
++    // Track is hover only: no hand.
++    let mut r = Rig::in_game(drawn_twobox(), Some("East"));
++    r.events.push(Event::PointerMoved(r.at(150.0, 0.0)));
++    r.frame();
++    assert_eq!(r.frame().platform_output.cursor_icon, egui::CursorIcon::Default);
++}
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `scripts/cargo test -p signalbox-client-core --test input hints -p signalbox-client-ui --test screens clickable`
+Expected: compile error (`hint` not found).
+
+- [ ] **Step 3: Implement**
+
+```diff
+diff --git a/crates/client-core/src/input.rs b/crates/client-core/src/input.rs
+index 9a8e01a..9ed0f23 100644
+--- a/crates/client-core/src/input.rs
++++ b/crates/client-core/src/input.rs
+@@ -118,6 +118,27 @@ impl App {
+         self.game.as_ref()?.bot.view()?.berths.get(b).cloned()
+     }
+ 
++    /// What a click on `target` would do, for the end of its hover text
++    /// (polish spec M3); `None` where clicks do nothing for you.
++    pub fn hint(&self, target: &Target) -> Option<&'static str> {
++        let g = self.game.as_ref()?;
++        let (l, v) = (g.bot.layout()?, g.bot.view()?);
++        let exit = |e: ExitName| g.selected.as_deref().is_some_and(|s| select::exits_from(l, s).contains(&e));
++        match target {
++            Target::Signal(s) if exit(ExitName::Signal(s.clone())) => Some("click: set the route to here"),
++            Target::Signal(s) if g.selected.as_deref() == Some(s.as_str()) => Some("click again or Esc: forget the entrance"),
++            Target::Signal(s) if select::can_enter(l, s) && !select::signal_menu(l, v, s).is_empty() => {
++                Some("click: choose as entrance · right-click: cancel the route")
++            }
++            Target::Signal(s) if select::can_enter(l, s) => Some("click: choose as entrance"),
++            Target::Exit(n) if exit(ExitName::Node(n.clone())) => Some("click: set the route to here"),
++            Target::Points(p) if !select::points_menu(l, v, p).is_empty() => Some("click: swing them"),
++            Target::Berth(b) if select::operable_berth(l, b) => Some("right-click: interpose or cancel a headcode"),
++            Target::Auto(s) if select::auto_toggle(l, v, s).is_some() => Some("click: auto-working on or off"),
++            _ => None,
++        }
++    }
++
+     /// Hover text.
+     pub fn describe(&self, target: &Target) -> String {
+         let Some(g) = self.game.as_ref() else { return String::new() };
+diff --git a/crates/client-ui/src/screens.rs b/crates/client-ui/src/screens.rs
+index 120f256..9820825 100644
+--- a/crates/client-ui/src/screens.rs
++++ b/crates/client-ui/src/screens.rs
+@@ -709,10 +709,17 @@ impl UiApp {
+         // Every click goes on, even one on nothing or on what is not yours:
+         // a dead click clears the entrance (`App::click` decides what the
+         // rest mean, from the same operability `Hit::clickable` shows).
+-        let click = resp.clicked().then(|| hit_at(resp.interact_pointer_pos()).map(|h| h.target));
+-        if resp.secondary_clicked() {
++        let click = resp.clicked().then(|| hit_at(resp.interact_pointer_pos()));
++        // Points you can work open their menu on a left click too (polish spec M3).
++        let points_menu = matches!(&click, Some(Some(h)) if h.clickable && matches!(h.target, Target::Points(_)));
++        let click = if points_menu { None } else { click.map(|h| h.map(|h| h.target)) };
++        if resp.secondary_clicked() || points_menu {
+             self.menu_target = hit_at(resp.interact_pointer_pos()).map(|h| h.target);
+         }
++        // What can be clicked shows a pointing hand (polish spec M3).
++        if hover.as_ref().is_some_and(|h| h.clickable) {
++            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
++        }
+         let exits = self.core.valid_exits();
+         let highlight = self.highlights();
+         let Some(g) = self.core.game() else { return };
+@@ -754,10 +761,23 @@ impl UiApp {
+             self.menu_target = None;
+         }
+         let resp = match &hover {
+-            Some(h) => resp.on_hover_text_at_pointer(self.core.describe(&h.target)),
++            Some(h) => {
++                let text = match self.core.hint(&h.target) {
++                    Some(hint) => format!("{}\n{hint}", self.core.describe(&h.target)),
++                    None => self.core.describe(&h.target),
++                };
++                resp.on_hover_text_at_pointer(text)
++            }
+             None => resp,
+         };
+-        resp.context_menu(|ui| self.menu_ui(ui));
++        let open = if resp.secondary_clicked() || points_menu {
++            Some(egui::SetOpenCommand::Bool(true))
++        } else if resp.clicked() {
++            Some(egui::SetOpenCommand::Bool(false))
++        } else {
++            None
++        };
++        egui::Popup::menu(&resp).open_memory(open).at_pointer_fixed().show(|ui| self.menu_ui(ui));
+     }
+ 
+     fn menu_ui(&mut self, ui: &mut Ui) {
+```
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `scripts/cargo test -p signalbox-client-core -p signalbox-client-ui`
+Expected: PASS, no warnings (as on the scratch copy).
+
+- [ ] **Step 5: Document**
+
+`CLAUDE.md`, "Browser client", after the `hit_test` bullet: "The diagram shows a pointing hand over what you can
+work and ends hover text with what a click does (`App::hint`); a left click on your points opens their menu (polish spec M3)."
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/client-core crates/client-core/src/input.rs crates/client-ui crates/client-ui/src/screens.rs CLAUDE.md
+git commit -m "feat(client): a hand cursor and click hints; points open their menu on a left click"
+```
+
+---
+
+### Task 11: A refusal names the route in the way (UI review M4)
+
+Spec §10 M4 (U10). The game finds the route that blocked a refused command; the alarm names it and its entrance
+is outlined with yours.
+
+**Files:**
+- Modify: `crates/client-core/src/app.rs`
+- Modify: `crates/client-core/src/names.rs`
+- Modify: `crates/client-core/src/text.rs`
+- Modify: `crates/client-ui/src/paint.rs`
+- Modify: `crates/client-ui/src/screens.rs`
+- Modify: `crates/game/src/game.rs`
+- Modify: `crates/game/src/names.rs`
+- Modify: `crates/protocol/src/msg.rs`
+- Modify: `CLAUDE.md`
+- Test: `crates/client-core/tests/input.rs`
+- Test: `crates/client-core/tests/text.rs`
+- Test: `crates/client-ui/tests/labels.rs`
+- Test: `crates/client-ui/tests/layouts.rs`
+- Test: `crates/client-ui/tests/legibility.rs`
+- Test: `crates/client-ui/tests/paint.rs`
+- Test: `crates/game/tests/game.rs`
+- Test: `crates/game/tests/save.rs`
+- Test: `crates/protocol/tests/golden.rs`
+
+**Interfaces:**
+- Consumes: `Interlocking::{owner, active_route_from}`, `RouteDef::all_points`, `Network::points_section`.
+- Produces: `protocol::Notice::Rejected { cmd, reason, by: Option<String> }` (`by` omitted when none);
+  `game::names::blocker(&World, &Interlocking, &Command, Rejection) -> Option<String>`; `Names::{route(&str) -> String,
+  route_entrance(&str) -> Option<&str>}`; `InGame::blocking() -> Option<&str>`; `PaintState.blocking: Option<&str>`
+  (every `PaintState { … }` literal, including those Tasks 1–3 added in `tests/labels.rs` and `tests/legibility.rs`,
+  gains `blocking: None`).
+
+- [ ] **Step 1: Write the failing tests**
+
+Apply (written and run on the scratch copy; re-check the context on the base, keep the intent):
+
+```diff
+diff --git a/crates/client-core/tests/input.rs b/crates/client-core/tests/input.rs
+index 8457609..456d709 100644
+--- a/crates/client-core/tests/input.rs
++++ b/crates/client-core/tests/input.rs
+@@ -130,12 +130,14 @@ fn a_refused_command_outlines_its_entrance_and_raises_an_alarm() {
+     t.run(0.2);
+     let g = t.app.game().unwrap();
+     assert_eq!(g.refused(), Some("D"));
++    // Polish spec M4: the route in the way is named and outlined too.
++    assert_eq!(g.blocking(), Some("C"));
+     assert_eq!(
+         t.log_lines().last().unwrap(),
+-        &(s("Refused: set route TBD to TAW2 (conflicts with a route already set)"), true)
++        &(s("Refused: set route TBD to TAW2 (conflicts with a route already set: TBC to TAW2)"), true)
+     );
+     t.run(REFUSED_S);
+-    assert_eq!(t.app.game().unwrap().refused(), None);
++    assert_eq!((t.app.game().unwrap().refused(), t.app.game().unwrap().blocking()), (None, None));
+ }
+ 
+ #[test]
+diff --git a/crates/client-core/tests/text.rs b/crates/client-core/tests/text.rs
+index 51919f3..2f2df20 100644
+--- a/crates/client-core/tests/text.rs
++++ b/crates/client-core/tests/text.rs
+@@ -24,7 +24,7 @@ fn commands_and_refusals() {
+     let plain = Names::default();
+     assert_eq!(command_text(&c, &plain), "set route 39,1V1 to N12");
+     assert_eq!(
+-        notice_text(&Notice::Rejected { cmd: c, reason: Rejection::PointsLocked }, &plain),
++        notice_text(&Notice::Rejected { cmd: c, reason: Rejection::PointsLocked, by: None }, &plain),
+         (s("Refused: set route 39,1V1 to N12 (points locked)"), true)
+     );
+     assert_eq!(
+diff --git a/crates/client-ui/tests/labels.rs b/crates/client-ui/tests/labels.rs
+index ec88973..ea2707d 100644
+--- a/crates/client-ui/tests/labels.rs
++++ b/crates/client-ui/tests/labels.rs
+@@ -184,7 +184,7 @@ fn a_plan_depends_on_neither_pan_nor_trains() {
+     empty.berths.clear();
+     busy.berths.insert("BW1".into(), "1A01".into());
+     let plan_at = |cam: &Camera, v: &protocol::View| {
+-        let st = PaintState { view: Some(v), selected: None, exits: &[], refused: None, time: 0.0, aspects: AspectMode::RedGreen, numbers: true, names: &names, highlight: &[] };
++        let st = PaintState { view: Some(v), selected: None, exits: &[], refused: None, blocking: None, time: 0.0, aspects: AspectMode::RedGreen, numbers: true, names: &names, highlight: &[] };
+         plan(&draw(&sc, cam, screen, &st), &mut measure)
+     };
+     let cam = Camera::fit(sc.all.unwrap(), screen);
+diff --git a/crates/client-ui/tests/layouts.rs b/crates/client-ui/tests/layouts.rs
+index 8c9fd5d..8dd5b75 100644
+--- a/crates/client-ui/tests/layouts.rs
++++ b/crates/client-ui/tests/layouts.rs
+@@ -57,7 +57,7 @@ fn every_shipped_layout_draws_for_every_box() {
+             let cam = Camera::fit(sc.fit_bounds().unwrap(), screen);
+             let names = Names::new(&l);
+             for (time, aspects) in [(0.0, AspectMode::RedGreen), (0.3, AspectMode::Real)] {
+-                let st = PaintState { view: Some(&v), selected: None, exits: &[], refused: None, time, aspects, numbers: true, names: &names, highlight: &[] };
++                let st = PaintState { view: Some(&v), selected: None, exits: &[], refused: None, blocking: None, time, aspects, numbers: true, names: &names, highlight: &[] };
+                 let d = draw(&sc, &cam, screen, &st);
+                 assert!(d.shapes.iter().all(finite), "{name} {area:?}");
+                 assert!(d.texts.iter().all(|t| t.at.is_finite() && t.size.is_finite()), "{name} {area:?}: texts");
+@@ -113,7 +113,7 @@ fn every_lesson_draws_with_its_highlights() {
+             let names = Names::new(&l);
+             for step in &steps {
+                 let diagram: Vec<_> = step.highlight.iter().filter(|h| !matches!(h, protocol::Highlight::Ui(u) if !u.starts_with("auto:"))).cloned().collect();
+-                let st = |highlight| PaintState { view: Some(&v), selected: None, exits: &[], refused: None, time: 0.25, aspects: AspectMode::Real, numbers: true, names: &names, highlight };
++                let st = |highlight| PaintState { view: Some(&v), selected: None, exits: &[], refused: None, blocking: None, time: 0.25, aspects: AspectMode::Real, numbers: true, names: &names, highlight };
+                 let dr = draw(&sc, &cam, screen, &st(&diagram));
+                 assert!(dr.shapes.iter().all(finite), "{}", d.display());
+                 if who == "pat" {
+diff --git a/crates/client-ui/tests/legibility.rs b/crates/client-ui/tests/legibility.rs
+index 71f8f27..0f2e321 100644
+--- a/crates/client-ui/tests/legibility.rs
++++ b/crates/client-ui/tests/legibility.rs
+@@ -87,6 +87,7 @@ fn every_view_is_legible_at_every_zoom() {
+                         selected: None,
+                         exits: &[],
+                         refused: None,
++                        blocking: None,
+                         time: 0.0,
+                         aspects: AspectMode::RedGreen,
+                         numbers: true,
+diff --git a/crates/client-ui/tests/paint.rs b/crates/client-ui/tests/paint.rs
+index 8a8753d..e044924 100644
+--- a/crates/client-ui/tests/paint.rs
++++ b/crates/client-ui/tests/paint.rs
+@@ -79,6 +79,7 @@ impl Rig {
+             selected,
+             exits,
+             refused,
++            blocking: None,
+             time,
+             aspects: self.aspects,
+             numbers: self.numbers,
+@@ -372,6 +373,7 @@ fn no_view_yet_draws_everything_idle() {
+         selected: None,
+         exits: &[],
+         refused: None,
++        blocking: None,
+         time: 0.0,
+         aspects: AspectMode::RedGreen,
+         numbers: true,
+@@ -616,7 +618,7 @@ fn absurdly_long_runs_have_a_bounded_number_of_arrows() {
+     }];
+     sc.tracks.clear();
+     let names = Names::new(&r.layout);
+-    let st = PaintState { view: None, selected: None, exits: &[], refused: None, time: 0.0, aspects: AspectMode::RedGreen, numbers: true, names: &names, highlight: &[] };
++    let st = PaintState { view: None, selected: None, exits: &[], refused: None, blocking: None, time: 0.0, aspects: AspectMode::RedGreen, numbers: true, names: &names, highlight: &[] };
+     let cam = Camera { centre: pos2(0.0, 0.0), scale: client_ui::camera::MAX_SCALE };
+     let d = draw(&sc, &cam, screen(), &st);
+     let arrows: Vec<Pos2> = d
+@@ -644,7 +646,7 @@ fn a_backward_runs_arrow_is_on_the_right_of_its_travel() {
+         loose_end: false,
+     }];
+     let names = Names::new(&r.layout);
+-    let st = PaintState { view: None, selected: None, exits: &[], refused: None, time: 0.0, aspects: AspectMode::RedGreen, numbers: true, names: &names, highlight: &[] };
++    let st = PaintState { view: None, selected: None, exits: &[], refused: None, blocking: None, time: 0.0, aspects: AspectMode::RedGreen, numbers: true, names: &names, highlight: &[] };
+     let d = draw(&sc, &r.cam, screen(), &st);
+     let tips: Vec<Pos2> = d
+         .shapes
+@@ -701,6 +703,7 @@ fn a_lesson_highlight_outlines_what_it_names_and_pulses() {
+             selected: None,
+             exits: &[],
+             refused: None,
++            blocking: None,
+             time,
+             aspects: AspectMode::RedGreen,
+             numbers: true,
+diff --git a/crates/game/tests/game.rs b/crates/game/tests/game.rs
+index 3e56c3a..28689d9 100644
+--- a/crates/game/tests/game.rs
++++ b/crates/game/tests/game.rs
+@@ -149,10 +149,10 @@ fn unknown_names_and_non_points_are_rejected_before_the_sim() {
+     join(&mut g, "alice", Some("East"));
+     let bad = PlayerCommand::CancelRoute { entrance: s("Z9") };
+     let out = command(&mut g, "alice", bad.clone());
+-    assert_eq!(notices(&out, "alice"), vec![Notice::Rejected { cmd: bad, reason: Rejection::UnknownId }]);
++    assert_eq!(notices(&out, "alice"), vec![Notice::Rejected { cmd: bad, reason: Rejection::UnknownId, by: None }]);
+     let joint = PlayerCommand::SwingPoints { points: s("J2"), to: PointsPos::Reverse };
+     let out = command(&mut g, "alice", joint.clone());
+-    assert_eq!(notices(&out, "alice"), vec![Notice::Rejected { cmd: joint, reason: Rejection::NotPoints }]);
++    assert_eq!(notices(&out, "alice"), vec![Notice::Rejected { cmd: joint, reason: Rejection::NotPoints, by: None }]);
+     g.advance(0.1);
+     assert!(g.sim().log().is_empty());
+ }
+@@ -165,7 +165,7 @@ fn sim_rejections_go_back_to_the_sender() {
+     let cancel = PlayerCommand::CancelRoute { entrance: s("W1") };
+     assert!(command(&mut g, "alice", cancel.clone()).is_empty());
+     let out = g.advance(0.1);
+-    assert_eq!(notices(&out, "alice"), vec![Notice::Rejected { cmd: cancel, reason: Rejection::RouteNotSet }]);
++    assert_eq!(notices(&out, "alice"), vec![Notice::Rejected { cmd: cancel, reason: Rejection::RouteNotSet, by: None }]);
+     assert!(notices(&out, "bob").is_empty());
+     assert_eq!(g.stats().sim_rejections, 1);
+ }
+@@ -538,3 +538,21 @@ fn a_demonstration_acts_in_any_area_and_tells_nobody() {
+     assert!(g.sim().interlocking().active_route_from(w, w.net.signal("C").unwrap()).is_some(), "East's route, while alice holds West");
+     assert_eq!(g.stats().sim_rejections, 1);
+ }
++
++/// Polish spec M4: a refusal names the route in the way: one holding the
++/// track a route needs, or the points being swung.
++#[test]
++fn a_refusal_names_the_route_in_the_way() {
++    let mut g = game();
++    join(&mut g, "bob", Some("East"));
++    assert!(command(&mut g, "bob", set_route("C", ExitName::Signal(s("W2")))).is_empty());
++    g.advance(0.1);
++    let d = set_route("D", ExitName::Signal(s("W2")));
++    command(&mut g, "bob", d.clone());
++    let out = g.advance(0.1);
++    assert_eq!(notices(&out, "bob"), vec![Notice::Rejected { cmd: d, reason: Rejection::ConflictingRoute, by: Some(s("C-W2")) }]);
++    let swing = PlayerCommand::SwingPoints { points: s("P"), to: PointsPos::Reverse };
++    command(&mut g, "bob", swing.clone());
++    let out = g.advance(0.1);
++    assert_eq!(notices(&out, "bob"), vec![Notice::Rejected { cmd: swing, reason: Rejection::PointsLocked, by: Some(s("C-W2")) }]);
++}
+diff --git a/crates/game/tests/save.rs b/crates/game/tests/save.rs
+index 809ce53..99fdab0 100644
+--- a/crates/game/tests/save.rs
++++ b/crates/game/tests/save.rs
+@@ -327,7 +327,7 @@ fn rejections_of_commands_queued_before_a_resume_reach_their_sender() {
+     let mut resumed = Game::resume(&path).unwrap();
+     rejoin(&mut resumed);
+     let out = resumed.advance(0.1);
+-    assert_eq!(notices(&out, "alice"), vec![Notice::Rejected { cmd: cancel, reason: Rejection::RouteNotSet }]);
++    assert_eq!(notices(&out, "alice"), vec![Notice::Rejected { cmd: cancel, reason: Rejection::RouteNotSet, by: None }]);
+     assert_eq!(resumed.stats().sim_rejections, 1);
+ }
+ 
+diff --git a/crates/protocol/tests/golden.rs b/crates/protocol/tests/golden.rs
+index b100d49..05ee0d3 100644
+--- a/crates/protocol/tests/golden.rs
++++ b/crates/protocol/tests/golden.rs
+@@ -69,9 +69,17 @@ fn player_commands() {
+ fn notices() {
+     let cases = vec![
+         (
+-            Notice::Rejected { cmd: PlayerCommand::CancelRoute { entrance: s("A") }, reason: Rejection::RouteNotSet },
++            Notice::Rejected { cmd: PlayerCommand::CancelRoute { entrance: s("A") }, reason: Rejection::RouteNotSet, by: None },
+             json!({"kind": "rejected", "cmd": {"cmd": "cancel_route", "entrance": "A"}, "reason": "route_not_set"}),
+         ),
++        (
++            Notice::Rejected {
++                cmd: PlayerCommand::SwingPoints { points: s("P"), to: PointsPos::Reverse },
++                reason: Rejection::PointsLocked,
++                by: Some(s("A-E")),
++            },
++            json!({"kind": "rejected", "cmd": {"cmd": "swing_points", "points": "P", "to": "reverse"}, "reason": "points_locked", "by": "A-E"}),
++        ),
+         (Notice::NotYourArea { area: s("East") }, json!({"kind": "not_your_area", "area": "East"})),
+         (Notice::Spad { signal: s("A"), train: s("1A01") }, json!({"kind": "spad", "signal": "A", "train": "1A01"})),
+         (Notice::Collision { section: s("TP") }, json!({"kind": "collision", "section": "TP"})),
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `scripts/cargo test -p signalbox-game --test game a_refusal -p signalbox-client-core --test input a_refused`
+Expected: compile errors (no field `by`, `blocking` not found).
+
+- [ ] **Step 3: Implement**
+
+```diff
+diff --git a/crates/client-core/src/app.rs b/crates/client-core/src/app.rs
+index 6183d5e..1f87672 100644
+--- a/crates/client-core/src/app.rs
++++ b/crates/client-core/src/app.rs
+@@ -58,6 +58,8 @@ pub struct InGame {
+     pub(crate) layout_gen: u64,
+     pub(crate) selected: Option<String>,
+     pub(crate) refused: Option<(String, f64)>,
++    /// The entrance of the route in the way of that command (polish spec M4).
++    pub(crate) blocking: Option<String>,
+     pub(crate) log: Log,
+     /// Display names for the layout held (rebuilt with every layout).
+     pub(crate) names: Names,
+@@ -76,6 +78,7 @@ impl InGame {
+             layout_gen: 0,
+             selected: None,
+             refused: None,
++            blocking: None,
+             log: Log::default(),
+             names: Names::default(),
+             lesson: None,
+@@ -112,6 +115,12 @@ impl InGame {
+         self.selected.as_deref()
+     }
+ 
++    /// The entrance of the route that was in the way of the command just
++    /// refused, outlined with it (polish spec M4).
++    pub fn blocking(&self) -> Option<&str> {
++        self.refused.as_ref().and(self.blocking.as_deref())
++    }
++
+     /// The entrance of a command just refused, outlined for `REFUSED_S`.
+     pub fn refused(&self) -> Option<&str> {
+         self.refused.as_ref().map(|(s, _)| s.as_str())
+@@ -414,9 +423,12 @@ impl App {
+                 let (text, alarm) = notice_text(n, &g.names);
+                 let t = g.sim_time();
+                 g.log.push(t, text, alarm);
+-                if let Notice::Rejected { cmd, .. } = n {
+-                    if let Some(e) = entrance_of(cmd) {
+-                        g.refused = Some((e.to_string(), self.now + REFUSED_S));
++                if let Notice::Rejected { cmd, by, .. } = n {
++                    g.blocking = by.as_deref().and_then(|r| g.names.route_entrance(r)).map(str::to_string);
++                    match entrance_of(cmd) {
++                        Some(e) => g.refused = Some((e.to_string(), self.now + REFUSED_S)),
++                        // Points have no entrance: outline the blocking route alone.
++                        None => g.refused = g.blocking.clone().map(|b| (b, self.now + REFUSED_S)),
+                     }
+                 }
+             }
+diff --git a/crates/client-core/src/names.rs b/crates/client-core/src/names.rs
+index d9fd858..ef22fca 100644
+--- a/crates/client-core/src/names.rs
++++ b/crates/client-core/src/names.rs
+@@ -28,6 +28,8 @@ pub struct Names {
+     platforms: BTreeMap<String, Vec<String>>,
+     /// Place code → name.
+     places: BTreeMap<String, String>,
++    /// Route name → (entrance, `LA31 to LA29`).
++    routes: BTreeMap<String, (String, String)>,
+ }
+ 
+ /// A points name's number for display: the digits after a leading `N` or
+@@ -57,7 +59,9 @@ impl Names {
+                 }
+             }
+         }
+-        Names { signals, workstations, headcodes: l.headcodes.clone(), points, berths, platforms, places: l.places.clone() }
++        let mut n = Names { signals, workstations, headcodes: l.headcodes.clone(), points, berths, platforms, places: l.places.clone(), routes: BTreeMap::new() };
++        n.routes = l.routes.iter().map(|r| (r.name.clone(), (r.entrance.clone(), format!("{} to {}", n.signal(&r.entrance), n.exit(&r.exit))))).collect();
++        n
+     }
+ 
+     /// How a signal is shown; a name the layout does not list stays plain.
+@@ -97,6 +101,16 @@ impl Names {
+         }
+     }
+ 
++    /// A route as `LA31 to LA29`; a route the layout does not list is `another route`.
++    pub fn route(&self, name: &str) -> String {
++        self.routes.get(name).map_or_else(|| "another route".to_string(), |r| r.1.clone())
++    }
++
++    /// The entrance signal of a route the layout lists.
++    pub fn route_entrance(&self, name: &str) -> Option<&str> {
++        self.routes.get(name).map(|r| r.0.as_str())
++    }
++
+     /// A place's name (`LIVERPOOL STREET`), else its code.
+     pub fn place<'a>(&'a self, code: &'a str) -> &'a str {
+         self.places.get(code).map_or(code, String::as_str)
+diff --git a/crates/client-core/src/text.rs b/crates/client-core/src/text.rs
+index 1ed9baf..5f3e617 100644
+--- a/crates/client-core/src/text.rs
++++ b/crates/client-core/src/text.rs
+@@ -56,8 +56,9 @@ pub fn rejection_text(r: Rejection) -> &'static str {
+ /// A notice as one log line, and whether it is an alarm.
+ pub fn notice_text(n: &Notice, names: &Names) -> (String, bool) {
+     match n {
+-        Notice::Rejected { cmd, reason } => {
+-            (format!("Refused: {} ({})", command_text(cmd, names), rejection_text(*reason)), true)
++        Notice::Rejected { cmd, reason, by } => {
++            let by = by.as_ref().map(|r| format!(": {}", names.route(r))).unwrap_or_default();
++            (format!("Refused: {} ({}{by})", command_text(cmd, names), rejection_text(*reason)), true)
+         }
+         Notice::NotYourArea { area } => (format!("Not your area: that is in {area}"), true),
+         Notice::Spad { signal, train } => {
+diff --git a/crates/client-ui/src/paint.rs b/crates/client-ui/src/paint.rs
+index 21060bf..007ea33 100644
+--- a/crates/client-ui/src/paint.rs
++++ b/crates/client-ui/src/paint.rs
+@@ -181,6 +181,8 @@ pub struct PaintState<'a> {
+     pub exits: &'a [ExitName],
+     /// The signal outlined for a refused command.
+     pub refused: Option<&'a str>,
++    /// The entrance of the route in its way, outlined the same (polish spec M4).
++    pub blocking: Option<&'a str>,
+     /// Seconds, for flashing.
+     pub time: f64,
+     pub aspects: AspectMode,
+@@ -417,7 +419,7 @@ fn signal_shapes(d: &mut Drawing, s: &SignalMark, cam: &Camera, screen: Rect, st
+     if st.exits.contains(&ExitName::Signal(s.name.clone())) {
+         d.shapes.push(Shape::circle_stroke(disc, LAMP_R + 3.5, Stroke::new(2.0, SELECT)));
+     }
+-    if st.refused == Some(s.name.as_str()) {
++    if st.refused == Some(s.name.as_str()) || st.blocking == Some(s.name.as_str()) {
+         d.shapes.push(Shape::circle_stroke(disc, LAMP_R + 6.0, Stroke::new(2.0, REFUSED)));
+     }
+     d.keep.rounds.push((disc, LAMP_R));
+diff --git a/crates/client-ui/src/screens.rs b/crates/client-ui/src/screens.rs
+index 9820825..249a042 100644
+--- a/crates/client-ui/src/screens.rs
++++ b/crates/client-ui/src/screens.rs
+@@ -728,6 +728,7 @@ impl UiApp {
+             selected: g.selected(),
+             exits: &exits,
+             refused: g.refused(),
++            blocking: g.blocking(),
+             time: now,
+             aspects: self.settings.aspects,
+             numbers: self.settings.numbers,
+diff --git a/crates/game/src/game.rs b/crates/game/src/game.rs
+index b245082..3381ed2 100644
+--- a/crates/game/src/game.rs
++++ b/crates/game/src/game.rs
+@@ -18,7 +18,7 @@ use crate::clock::{GameClock, VoteError};
+ use crate::display::Display;
+ use crate::geometry::WorldGeometry;
+ use crate::layout::build_layout;
+-use crate::names::{resolve, to_player_command, valid_headcode};
++use crate::names::{blocker, resolve, to_player_command, valid_headcode};
+ use crate::notices::area_notices;
+ use crate::save::{Logged, SaveDb, SaveError, resume_sim};
+ use crate::view::{Shared, build_view};
+@@ -601,7 +601,7 @@ impl Game {
+     }
+ 
+     fn command(&mut self, player: &str, cmd: PlayerCommand) -> Vec<Out> {
+-        let reject = |reason| vec![notice(player, Notice::Rejected { cmd: cmd.clone(), reason })];
++        let reject = |reason| vec![notice(player, Notice::Rejected { cmd: cmd.clone(), reason, by: None })];
+         let Some(core) = resolve(self.sim.world(), &cmd) else { return reject(Rejection::UnknownId) };
+         if let PlayerCommand::Interpose { headcode, .. } = &cmd {
+             if !valid_headcode(headcode) {
+@@ -698,7 +698,8 @@ impl Game {
+                         let who = &queued[i].0;
+                         if self.players.get(who).is_some_and(|p| p.connected) {
+                             let named = to_player_command(self.sim.world(), cmd);
+-                            out.push(notice(who, Notice::Rejected { cmd: named, reason: *reason }));
++                            let by = blocker(self.sim.world(), self.sim.interlocking(), cmd, *reason);
++                            out.push(notice(who, Notice::Rejected { cmd: named, reason: *reason, by }));
+                         }
+                     }
+                 }
+diff --git a/crates/game/src/names.rs b/crates/game/src/names.rs
+index 33a8366..f515ffa 100644
+--- a/crates/game/src/names.rs
++++ b/crates/game/src/names.rs
+@@ -1,7 +1,8 @@
+ //! Player commands carry names; the sim wants ids.
+ 
+ use protocol::{ExitName, PlayerCommand};
+-use signalbox_core::events::Command;
++use signalbox_core::events::{Command, Rejection};
++use signalbox_core::interlocking::{Interlocking, Owner};
+ use signalbox_core::routes::Exit;
+ use signalbox_core::world::World;
+ 
+@@ -49,6 +50,42 @@ pub fn to_player_command(w: &World, cmd: &Command) -> PlayerCommand {
+     }
+ }
+ 
++/// The route in the way of a refused command (polish spec M4), by name: for
++/// a route, the route already set from its entrance or the first route
++/// holding track or points it needs (the owners `set_route` would let it
++/// share are skipped); for points, the route holding them. `None` when the
++/// reason is another, or the route has gone by the time this is asked.
++pub fn blocker(w: &World, il: &Interlocking, cmd: &Command, reason: Rejection) -> Option<String> {
++    let net = &w.net;
++    let x = match (cmd, reason) {
++        (Command::SetRoute { entrance, exit }, Rejection::ConflictingRoute | Rejection::PointsLocked) => {
++            let r = *w.routes_from[entrance.idx()].iter().find(|r| w.routes[r.idx()].exit == *exit)?;
++            let def = &w.routes[r.idx()];
++            let held = def.path.iter().chain(def.overlap.iter()).find_map(|&s| match il.owner[s.idx()] {
++                Some(Owner::Overlap(x)) if w.routes[x.idx()].exit == Exit::Signal(def.entrance) => None,
++                Some(Owner::Path(x)) if def.overlap.contains(&s) && def.exit == Exit::Signal(w.routes[x.idx()].entrance) => None,
++                Some(o) if o.route() != r => Some(o.route()),
++                _ => None,
++            });
++            let points = || {
++                def.all_points().find_map(|&(p, _)| {
++                    let sec = net.points_section(p)?;
++                    il.owner[sec.idx()].map(|o| o.route()).filter(|&o| o != r)
++                })
++            };
++            match reason {
++                Rejection::ConflictingRoute => il.active_route_from(w, *entrance).or(held),
++                _ => points(),
++            }
++        }
++        (Command::SwingPoints { points, .. }, Rejection::PointsLocked) => {
++            il.owner[net.points_section(*points)?.idx()].map(|o| o.route())
++        }
++        _ => None,
++    }?;
++    Some(w.routes[x.idx()].name.clone())
++}
++
+ /// 1 to 10 ASCII letters or digits.
+ pub fn valid_headcode(h: &str) -> bool {
+     (1..=10).contains(&h.len()) && h.bytes().all(|b| b.is_ascii_alphanumeric())
+diff --git a/crates/protocol/src/msg.rs b/crates/protocol/src/msg.rs
+index adba1ce..ec41438 100644
+--- a/crates/protocol/src/msg.rs
++++ b/crates/protocol/src/msg.rs
+@@ -81,7 +81,13 @@ pub enum ServerMsg {
+ #[serde(tag = "kind", rename_all = "snake_case")]
+ pub enum Notice {
+     /// The command was refused (unknown name, or by the interlocking).
+-    Rejected { cmd: PlayerCommand, reason: Rejection },
++    /// `by`: the route in the way, when the interlocking can say (polish spec M4).
++    Rejected {
++        cmd: PlayerCommand,
++        reason: Rejection,
++        #[serde(default, skip_serializing_if = "Option::is_none")]
++        by: Option<String>,
++    },
+     /// The command's subject lies in `area`, which is not yours.
+     NotYourArea { area: String },
+     Spad { signal: String, train: String },
+```
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `scripts/cargo test -p signalbox-protocol -p signalbox-game -p signalbox-client-core -p signalbox-client-ui`
+Expected: PASS, no warnings (as on the scratch copy).
+
+- [ ] **Step 5: Document**
+
+`CLAUDE.md`, "Multiplayer", after the `Game` bullet: "A refusal names the route in its way when the interlocking
+can say (`Notice::Rejected.by`, `game::names::blocker`, polish spec M4); the client outlines that route's entrance too."
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/client-core crates/client-core/src/app.rs crates/client-core/src/names.rs crates/client-core/src/text.rs crates/client-ui crates/client-ui/src/paint.rs crates/client-ui/src/screens.rs crates/game crates/game/src/game.rs crates/game/src/names.rs crates/protocol crates/protocol/src/msg.rs CLAUDE.md
+git commit -m "feat: a refused command names the route in its way, and the client outlines it"
+```
+
+---
+
+### Task 12: Votes: who is waited for, Agree and Decline, and how they end (UI review M8)
+
+Spec §10 M8 (U14). The vote view lists who has still to agree; Decline ends the proposal; every player hears
+the outcome; a paused clock says how to restart it.
+
+**Files:**
+- Modify: `crates/client-core/src/app.rs`
+- Modify: `crates/client-core/src/text.rs`
+- Modify: `crates/client-ui/src/screens.rs`
+- Modify: `crates/game/src/clock.rs`
+- Modify: `crates/game/src/game.rs`
+- Modify: `crates/protocol/src/lib.rs`
+- Modify: `crates/protocol/src/lobby.rs`
+- Modify: `crates/protocol/src/msg.rs`
+- Modify: `crates/protocol/src/view.rs`
+- Modify: `CLAUDE.md`
+- Test: `crates/client-core/tests/text.rs`
+- Test: `crates/client-ui/tests/screens.rs`
+- Test: `crates/game/tests/clock.rs`
+- Test: `crates/game/tests/game.rs`
+- Test: `crates/protocol/tests/diff.rs`
+- Test: `crates/protocol/tests/golden.rs`
+
+**Interfaces:**
+- Consumes: `GameClock::{vote, settle, lapse}`, `Game::voters`.
+- Produces: `VoteView.waiting: Vec<String>`; `ClientMsg::VoteDecline` (`"vote_decline"` in `CLIENT_MSG_TYPES`);
+  `Notice::VoteEnded { proposal, outcome: VoteOutcome }`, `protocol::VoteOutcome { Passed, Declined { by }, Lapsed }`;
+  `GameClock::{lapse -> Option<Proposal>, decline, vote_view(&BTreeSet<String>)}`; `Game.vote_ended` (drained by
+  `flush`); `App::decline_vote()`; `text::vote_text` says "waiting for …".
+
+- [ ] **Step 1: Write the failing tests**
+
+Apply (written and run on the scratch copy; re-check the context on the base, keep the intent):
+
+```diff
+diff --git a/crates/client-core/tests/text.rs b/crates/client-core/tests/text.rs
+index 2f2df20..17da4ad 100644
+--- a/crates/client-core/tests/text.rs
++++ b/crates/client-core/tests/text.rs
+@@ -40,7 +40,14 @@ fn commands_and_refusals() {
+ 
+ #[test]
+ fn votes() {
+-    let v = VoteView { proposal: Proposal::Speed { x: 4 }, agreed: vec![s("ann"), s("bob")], expires_in_s: 25 };
++    let mut v = VoteView { proposal: Proposal::Speed { x: 4 }, agreed: vec![s("ann"), s("bob")], waiting: vec![], expires_in_s: 25 };
+     assert_eq!(vote_text(&v), "Vote: 4× — ann, bob agreed, 25 s left");
++    v.waiting = vec![s("cat")];
++    assert_eq!(vote_text(&v), "Vote: 4× — waiting for cat, 25 s left", "polish spec M8");
++    let plain = Names::default();
++    let ended = |outcome| notice_text(&Notice::VoteEnded { proposal: Proposal::Pause, outcome }, &plain).0;
++    assert_eq!(ended(VoteOutcome::Passed), "Vote passed: pause");
++    assert_eq!(ended(VoteOutcome::Declined { by: s("bob") }), "Vote declined by bob: pause");
++    assert_eq!(ended(VoteOutcome::Lapsed), "Vote lapsed: pause");
+     assert_eq!(proposal_text(Proposal::Pause), "pause");
+ }
+diff --git a/crates/client-ui/tests/screens.rs b/crates/client-ui/tests/screens.rs
+index 9deede6..9849cea 100644
+--- a/crates/client-ui/tests/screens.rs
++++ b/crates/client-ui/tests/screens.rs
+@@ -772,3 +772,25 @@ fn clickable_things_say_so_and_points_open_on_a_left_click() {
+     r.frame();
+     assert_eq!(r.frame().platform_output.cursor_icon, egui::CursorIcon::Default);
+ }
++
++/// Polish spec M8: a vote shows who it waits for, with Agree and Decline
++/// for those who have not agreed, and its end is logged.
++#[test]
++fn a_vote_waits_for_named_players_who_agree_or_decline() {
++    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
++    r.game.connect("bob");
++    r.game.handle("bob", ClientMsg::Claim { area: s("East") });
++    r.game.handle("bob", ClientMsg::Vote { proposal: Proposal::Speed { x: 2 } });
++    for _ in 0..3 {
++        r.frame();
++    }
++    let out = r.frame();
++    assert!(has_text(&out, "waiting for ann"), "{:?}", texts(&out));
++    click_text(&mut r, &out, "Decline");
++    for _ in 0..3 {
++        r.frame();
++    }
++    let out = r.frame();
++    assert!(has_text(&out, "Vote declined by ann: 2×"), "{:?}", texts(&out));
++    assert!(!has_text(&out, "Agree"));
++}
+diff --git a/crates/game/tests/clock.rs b/crates/game/tests/clock.rs
+index 28f367e..9674fac 100644
+--- a/crates/game/tests/clock.rs
++++ b/crates/game/tests/clock.rs
+@@ -42,8 +42,9 @@ fn every_holder_must_agree() {
+     let mut c = GameClock::new(false);
+     assert_eq!(c.vote("alice", Proposal::Speed { x: 4 }, &h), Ok(None));
+     assert_eq!(c.speed, 1);
+-    let v = c.vote_view().unwrap();
++    let v = c.vote_view(&h).unwrap();
+     assert_eq!((v.proposal, v.agreed, v.expires_in_s), (Proposal::Speed { x: 4 }, vec!["alice".to_string()], 30));
++    assert_eq!(v.waiting, ["bob"], "polish spec M8: who has still to agree");
+     assert_eq!(c.vote("alice", Proposal::Speed { x: 4 }, &h), Ok(None), "agreeing twice changes nothing");
+     assert_eq!(c.vote("bob", Proposal::Speed { x: 4 }, &h), Ok(Some(Proposal::Speed { x: 4 })));
+     assert_eq!((c.speed, c.vote.is_none()), (4, true));
+@@ -69,7 +70,7 @@ fn a_different_proposal_replaces_the_open_one() {
+     c.vote("alice", Proposal::Pause, &h).unwrap();
+     c.lapse(10.0);
+     assert_eq!(c.vote("bob", Proposal::Speed { x: 2 }, &h), Ok(None));
+-    let v = c.vote_view().unwrap();
++    let v = c.vote_view(&h).unwrap();
+     assert_eq!((v.proposal, v.agreed, v.expires_in_s), (Proposal::Speed { x: 2 }, vec!["bob".to_string()], 30));
+     assert_eq!(c.vote("alice", Proposal::Speed { x: 2 }, &h), Ok(Some(Proposal::Speed { x: 2 })));
+     assert!(!c.paused);
+@@ -81,8 +82,8 @@ fn votes_lapse_after_thirty_seconds_of_real_time() {
+     let mut c = GameClock::new(false);
+     c.vote("alice", Proposal::Pause, &h).unwrap();
+     c.lapse(20.0);
+-    assert_eq!(c.vote_view().unwrap().expires_in_s, 10);
+-    c.lapse(VOTE_LAPSE_S - 20.0);
++    assert_eq!(c.vote_view(&h).unwrap().expires_in_s, 10);
++    assert_eq!(c.lapse(VOTE_LAPSE_S - 20.0), Some(Proposal::Pause), "it says what lapsed");
+     assert!(c.vote.is_none());
+     assert_eq!(c.vote("bob", Proposal::Pause, &h), Ok(None), "a lapsed vote starts again");
+ }
+@@ -103,3 +104,15 @@ fn with_no_holders_the_open_vote_is_dropped_and_the_clock_stays() {
+     assert_eq!(c.settle(&BTreeSet::new()), None);
+     assert!(c.vote.is_none() && !c.paused);
+ }
++
++/// Polish spec M8: any voter can turn a proposal down; it ends at once.
++#[test]
++fn a_voter_can_decline() {
++    let h = holders(&["alice", "bob"]);
++    let mut c = GameClock::new(false);
++    assert_eq!(c.decline("bob", &h), Ok(None), "nothing open");
++    c.vote("alice", Proposal::Pause, &h).unwrap();
++    assert_eq!(c.decline("sam", &h), Err(VoteError::NotAVoter));
++    assert_eq!(c.decline("bob", &h), Ok(Some(Proposal::Pause)));
++    assert!(c.vote.is_none() && !c.paused);
++}
+diff --git a/crates/game/tests/game.rs b/crates/game/tests/game.rs
+index 28689d9..086d546 100644
+--- a/crates/game/tests/game.rs
++++ b/crates/game/tests/game.rs
+@@ -556,3 +556,34 @@ fn a_refusal_names_the_route_in_the_way() {
+     let out = g.advance(0.1);
+     assert_eq!(notices(&out, "bob"), vec![Notice::Rejected { cmd: swing, reason: Rejection::PointsLocked, by: Some(s("C-W2")) }]);
+ }
++
++/// Polish spec M8: every player hears how a vote ended, and who has still
++/// to agree is in the view.
++#[test]
++fn every_player_hears_how_a_vote_ended() {
++    let mut g = game();
++    join(&mut g, "alice", Some("West"));
++    join(&mut g, "bob", Some("East"));
++    g.flush();
++    send(&mut g, "alice", ClientMsg::Vote { proposal: Proposal::Speed { x: 4 } });
++    let out = g.flush();
++    let waiting = out.iter().find_map(|(p, m)| match m {
++        ServerMsg::Delta(d) if p == "alice" => d.vote.clone().flatten().map(|v| v.waiting),
++        _ => None,
++    });
++    assert_eq!(waiting, Some(vec![s("bob")]));
++    send(&mut g, "bob", ClientMsg::VoteDecline);
++    let out = g.flush();
++    let ended = Notice::VoteEnded { proposal: Proposal::Speed { x: 4 }, outcome: VoteOutcome::Declined { by: s("bob") } };
++    assert_eq!((notices(&out, "alice"), notices(&out, "bob")), (vec![ended.clone()], vec![ended]));
++    send(&mut g, "alice", ClientMsg::Vote { proposal: Proposal::Pause });
++    send(&mut g, "bob", ClientMsg::Vote { proposal: Proposal::Pause });
++    let passed = Notice::VoteEnded { proposal: Proposal::Pause, outcome: VoteOutcome::Passed };
++    assert_eq!(notices(&g.flush(), "bob"), vec![passed]);
++    send(&mut g, "alice", ClientMsg::Vote { proposal: Proposal::Resume });
++    g.advance(31.0);
++    let lapsed = Notice::VoteEnded { proposal: Proposal::Resume, outcome: VoteOutcome::Lapsed };
++    assert_eq!(notices(&g.flush(), "alice"), vec![lapsed]);
++    let out = send(&mut g, "sam", ClientMsg::VoteDecline);
++    assert!(out.is_empty(), "sam is not connected");
++}
+diff --git a/crates/protocol/tests/diff.rs b/crates/protocol/tests/diff.rs
+index e1fa09a..a3b6c4f 100644
+--- a/crates/protocol/tests/diff.rs
++++ b/crates/protocol/tests/diff.rs
+@@ -14,7 +14,7 @@ fn base() -> View {
+         sim_time: 25200.0,
+         speed: 1,
+         paused: false,
+-        vote: Some(VoteView { proposal: Proposal::Pause, agreed: vec![s("alice")], expires_in_s: 12 }),
++        vote: Some(VoteView { proposal: Proposal::Pause, agreed: vec![s("alice")], waiting: vec![], expires_in_s: 12 }),
+         holders: BTreeMap::from([(s("East"), s("robot")), (s("West"), s("alice"))]),
+         score: Some(0),
+         signals: BTreeMap::from([(s("A"), Aspect::Red), (s("W1"), Aspect::Red)]),
+diff --git a/crates/protocol/tests/golden.rs b/crates/protocol/tests/golden.rs
+index 05ee0d3..dec2994 100644
+--- a/crates/protocol/tests/golden.rs
++++ b/crates/protocol/tests/golden.rs
+@@ -272,7 +272,7 @@ fn view() {
+         sim_time: 25215.5,
+         speed: 8,
+         paused: false,
+-        vote: Some(VoteView { proposal: Proposal::Pause, agreed: vec![s("alice")], expires_in_s: 30 }),
++        vote: Some(VoteView { proposal: Proposal::Pause, agreed: vec![s("alice")], waiting: vec![], expires_in_s: 30 }),
+         holders: BTreeMap::from([(s("East"), s("robot")), (s("West"), s("alice"))]),
+         score: Some(5),
+         signals: BTreeMap::from([(s("A"), Aspect::DoubleYellow)]),
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `scripts/cargo test -p signalbox-game --test clock --test game -p signalbox-client-core --test text`
+Expected: compile errors (`waiting`, `VoteDecline`, `VoteEnded`, `decline`).
+
+- [ ] **Step 3: Implement**
+
+```diff
+diff --git a/crates/client-core/src/app.rs b/crates/client-core/src/app.rs
+index 1f87672..cb65ac2 100644
+--- a/crates/client-core/src/app.rs
++++ b/crates/client-core/src/app.rs
+@@ -573,6 +573,11 @@ impl App {
+         self.send_game(ClientMsg::Vote { proposal });
+     }
+ 
++    /// Turn the open proposal down (polish spec M8).
++    pub fn decline_vote(&mut self) {
++        self.send_game(ClientMsg::VoteDecline);
++    }
++
+     pub fn command(&mut self, cmd: PlayerCommand) {
+         self.send_game(ClientMsg::Command { cmd });
+     }
+diff --git a/crates/client-core/src/text.rs b/crates/client-core/src/text.rs
+index 5f3e617..2d9fe8e 100644
+--- a/crates/client-core/src/text.rs
++++ b/crates/client-core/src/text.rs
+@@ -1,7 +1,7 @@
+ //! Words for the screen: times, commands, refusals, notices, votes.
+ //! Signals are named as the screen shows them (`Names`).
+ 
+-use protocol::{ExitName, Notice, PlayerCommand, PointsPos, Proposal, Rejection, TrainState, VoteView};
++use protocol::{ExitName, Notice, PlayerCommand, PointsPos, Proposal, Rejection, TrainState, VoteOutcome, VoteView};
+ 
+ use crate::names::Names;
+ 
+@@ -73,6 +73,15 @@ pub fn notice_text(n: &Notice, names: &Names) -> (String, bool) {
+         }
+         Notice::Handover { headcode, from_area } => (format!("{} offered from {from_area}", names.headcode(headcode)), false),
+         Notice::AreaTaken { area, holder } => (format!("{area} is now {holder}'s"), false),
++        Notice::VoteEnded { proposal, outcome } => {
++            let p = proposal_text(*proposal);
++            let text = match outcome {
++                VoteOutcome::Passed => format!("Vote passed: {p}"),
++                VoteOutcome::Declined { by } => format!("Vote declined by {by}: {p}"),
++                VoteOutcome::Lapsed => format!("Vote lapsed: {p}"),
++            };
++            (text, false)
++        }
+         Notice::Replaced => ("This login was opened somewhere else".to_string(), true),
+         Notice::GameCrashed => ("The game stopped unexpectedly".to_string(), true),
+         Notice::Error { message, .. } => (format!("Error: {message}"), true),
+@@ -97,7 +106,9 @@ pub fn proposal_text(p: Proposal) -> String {
+     }
+ }
+ 
+-/// `Vote: 4× — ann, bob agreed, 25 s left`
++/// `Vote: 4× — waiting for bob, 25 s left` (polish spec M8); a server
++/// that sends no `waiting` gets the old `ann agreed`.
+ pub fn vote_text(v: &VoteView) -> String {
+-    format!("Vote: {} — {} agreed, {} s left", proposal_text(v.proposal), v.agreed.join(", "), v.expires_in_s)
++    let who = if v.waiting.is_empty() { format!("{} agreed", v.agreed.join(", ")) } else { format!("waiting for {}", v.waiting.join(", ")) };
++    format!("Vote: {} — {who}, {} s left", proposal_text(v.proposal), v.expires_in_s)
+ }
+diff --git a/crates/client-ui/src/screens.rs b/crates/client-ui/src/screens.rs
+index 249a042..823cbed 100644
+--- a/crates/client-ui/src/screens.rs
++++ b/crates/client-ui/src/screens.rs
+@@ -404,6 +404,7 @@ impl UiApp {
+         let areas: Vec<String> = g.layout().map(|l| l.areas.clone()).unwrap_or_default();
+         let holding = g.area().is_some();
+         let can_vote = g.can_vote();
++        let me = g.you.clone();
+         let mut act: Vec<Box<dyn FnOnce(&mut App)>> = Vec::new();
+         let mut settings = self.settings;
+         egui::Panel::top("bar").show(ui, |ui| {
+@@ -412,7 +413,10 @@ impl UiApp {
+                 if let Some(v) = &view {
+                     let clock = ui.label(RichText::new(fmt_hms(v.sim_time)).monospace().size(16.0));
+                     mark(ui, &clock, marked("clock"), now);
+-                    ui.label(if v.paused { "paused".to_string() } else { format!("{}×", v.speed) });
++                    let state = ui.label(if v.paused { "paused".to_string() } else { format!("{}×", v.speed) });
++                    if v.paused && v.vote.is_none() {
++                        state.on_hover_text("The clock is paused (a resumed game starts paused). Press resume to propose running it.");
++                    }
+                     // Only voters get the buttons (owner decision 12).
+                     if can_vote {
+                         let pause = if v.paused { Proposal::Resume } else { Proposal::Pause };
+@@ -427,6 +431,17 @@ impl UiApp {
+                     }
+                     if let Some(vote) = &v.vote {
+                         ui.label(RichText::new(vote_text(vote)).color(paint::YELLOW));
++                        // Polish spec M8: say yes or no explicitly.
++                        if can_vote {
++                            let p = vote.proposal;
++                            if !vote.agreed.contains(&me) && ui.button("Agree").clicked() {
++                                act.push(Box::new(move |a| a.vote(p)));
++                            }
++                            let no = if vote.agreed.contains(&me) { "Withdraw" } else { "Decline" };
++                            if ui.button(no).clicked() {
++                                act.push(Box::new(|a| a.decline_vote()));
++                            }
++                        }
+                     }
+                     // A tutorial keeps no score (tutorial spec §3).
+                     if let Some(score) = v.score.filter(|_| !lesson) {
+diff --git a/crates/game/src/clock.rs b/crates/game/src/clock.rs
+index fac081f..6be6dd1 100644
+--- a/crates/game/src/clock.rs
++++ b/crates/game/src/clock.rs
+@@ -99,8 +99,8 @@ impl GameClock {
+         Some(p)
+     }
+ 
+-    /// Let `real_dt` seconds pass for the open proposal.
+-    pub fn lapse(&mut self, real_dt: f64) {
++    /// Let `real_dt` seconds pass for the open proposal; returns it if it lapsed.
++    pub fn lapse(&mut self, real_dt: f64) -> Option<Proposal> {
+         let lapsed = match self.vote.as_mut() {
+             Some(v) => {
+                 v.left_s -= real_dt;
+@@ -108,15 +108,25 @@ impl GameClock {
+             }
+             None => false,
+         };
+-        if lapsed {
+-            self.vote = None;
++        if lapsed { self.vote.take().map(|v| v.proposal) } else { None }
++    }
++
++    /// `voter` turns the open proposal down: it ends at once (polish spec
++    /// M8). Returns it, or `None` when none is open.
++    pub fn decline(&mut self, voter: &str, voters: &BTreeSet<String>) -> Result<Option<Proposal>, VoteError> {
++        if !voters.contains(voter) {
++            return Err(VoteError::NotAVoter);
+         }
++        Ok(self.vote.take().map(|v| v.proposal))
+     }
+ 
+-    pub fn vote_view(&self) -> Option<VoteView> {
++    /// The open proposal as players see it; `waiting` lists the `voters`
++    /// who have not agreed yet.
++    pub fn vote_view(&self, voters: &BTreeSet<String>) -> Option<VoteView> {
+         self.vote.as_ref().map(|v| VoteView {
+             proposal: v.proposal,
+             agreed: v.agreed.iter().cloned().collect(),
++            waiting: voters.iter().filter(|n| !v.agreed.contains(*n)).cloned().collect(),
+             expires_in_s: v.left_s.max(0.0).ceil() as u32,
+         })
+     }
+diff --git a/crates/game/src/game.rs b/crates/game/src/game.rs
+index 3381ed2..f05ad7c 100644
+--- a/crates/game/src/game.rs
++++ b/crates/game/src/game.rs
+@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
+ use std::path::Path;
+ use std::time::Duration;
+ 
+-use protocol::{ClientMsg, Layout, Notice, PlayerCommand, Proposal, Rejection, ServerMsg, View, codes};
++use protocol::{ClientMsg, Layout, Notice, PlayerCommand, Proposal, Rejection, ServerMsg, View, VoteOutcome, codes};
+ use signalbox_core::events::{Command, Event};
+ use signalbox_core::ids::AreaId;
+ use signalbox_core::robot;
+@@ -134,6 +134,9 @@ pub struct Game {
+     last_snapshot: Option<u64>,
+     /// Save failures not yet taken by the caller.
+     save_errors: Vec<String>,
++    /// Clock proposals that ended since the last `flush`, told to every
++    /// player there (polish spec M8).
++    vote_ended: Vec<(Proposal, VoteOutcome)>,
+ }
+ 
+ fn error(player: &str, code: &str, message: &str) -> Out {
+@@ -350,6 +353,7 @@ impl Game {
+             since_snapshot_s: 0.0,
+             last_snapshot: None,
+             save_errors: Vec::new(),
++            vote_ended: Vec::new(),
+         }
+     }
+ 
+@@ -450,6 +454,7 @@ impl Game {
+             ClientMsg::Release => self.release(player),
+             ClientMsg::Command { cmd } => self.command(player, cmd),
+             ClientMsg::Vote { proposal } => self.vote(player, proposal),
++            ClientMsg::VoteDecline => self.decline(player),
+             ClientMsg::Resync => self.resync(player),
+             // Only a tutorial (`crate::lesson::Runner`) acts on these.
+             ClientMsg::LessonNext | ClientMsg::LessonRestartStep | ClientMsg::LessonRestart | ClientMsg::LessonUi { .. } => {
+@@ -488,7 +493,9 @@ impl Game {
+     ) -> Vec<Out> {
+         let dt = if real_dt.is_finite() && real_dt > 0.0 { real_dt } else { 0.0 };
+         let mut out = Vec::new();
+-        self.clock.lapse(dt);
++        if let Some(p) = self.clock.lapse(dt) {
++            self.vote_ended.push((p, VoteOutcome::Lapsed));
++        }
+         self.expire_grace(dt);
+         let n = self.clock.ticks_for(dt).min(MAX_TICKS_PER_ADVANCE);
+         for _ in 0..n {
+@@ -509,10 +516,16 @@ impl Game {
+         out
+     }
+ 
+-    /// Deltas for every connected player whose view changed.
++    /// Deltas for every connected player whose view changed, after a notice
++    /// to each for every clock proposal that ended (polish spec M8).
+     pub fn flush(&mut self) -> Vec<Out> {
+         let shared = self.shared();
+         let mut out = Vec::new();
++        for (proposal, outcome) in std::mem::take(&mut self.vote_ended) {
++            for (name, _) in self.players.iter().filter(|(_, p)| p.connected) {
++                out.push(notice(name, Notice::VoteEnded { proposal, outcome: outcome.clone() }));
++            }
++        }
+         for (name, p) in self.players.iter_mut() {
+             if !p.connected {
+                 continue;
+@@ -533,7 +546,7 @@ impl Game {
+             sim_time: self.sim.now_s(),
+             speed: self.clock.speed,
+             paused: self.clock.paused,
+-            vote: self.clock.vote_view(),
++            vote: self.clock.vote_view(&self.voters()),
+             holders: net
+                 .areas
+                 .iter()
+@@ -562,7 +575,9 @@ impl Game {
+     /// nobody left to agree to it.
+     fn settle_vote(&mut self) {
+         let voters = self.voters();
+-        self.clock.settle(&voters);
++        if let Some(p) = self.clock.settle(&voters) {
++            self.vote_ended.push((p, VoteOutcome::Passed));
++        }
+     }
+ 
+     fn claim(&mut self, player: &str, area: &str) -> Vec<Out> {
+@@ -619,7 +634,13 @@ impl Game {
+     fn vote(&mut self, player: &str, proposal: Proposal) -> Vec<Out> {
+         let voters = self.voters();
+         match self.clock.vote(player, proposal, &voters) {
+-            Ok(_) => vec![],
++            Ok(passed) => {
++                // A lone voter's proposal applies at once: nothing to tell.
++                if voters.len() > 1 {
++                    self.vote_ended.extend(passed.map(|p| (p, VoteOutcome::Passed)));
++                }
++                vec![]
++            }
+             Err(VoteError::NotAVoter) => {
+                 vec![error(player, codes::NOT_A_HOLDER, "while anyone holds an area, only holders vote")]
+             }
+@@ -627,6 +648,16 @@ impl Game {
+         }
+     }
+ 
++    fn decline(&mut self, player: &str) -> Vec<Out> {
++        match self.clock.decline(player, &self.voters()) {
++            Ok(declined) => {
++                self.vote_ended.extend(declined.map(|p| (p, VoteOutcome::Declined { by: player.to_string() })));
++                vec![]
++            }
++            Err(_) => vec![error(player, codes::NOT_A_HOLDER, "while anyone holds an area, only holders vote")],
++        }
++    }
++
+     /// Queue a command for the next tick, logging it to the save first;
+     /// `player` is `ROBOT` for the robot.
+     fn submit(&mut self, player: &str, cmd: Command) -> Vec<Out> {
+diff --git a/crates/protocol/src/lib.rs b/crates/protocol/src/lib.rs
+index ae57390..9a298af 100644
+--- a/crates/protocol/src/lib.rs
++++ b/crates/protocol/src/lib.rs
+@@ -11,7 +11,7 @@ pub mod view;
+ pub use diff::{SeqGap, diff};
+ pub use lesson::{Highlight, LessonInfo, LessonView};
+ pub use lobby::{AreaHolder, ClientFrame, FrameError, GameInfo, GameState, LayoutInfo, LobbyMsg, LobbyReply, ServerFrame};
+-pub use msg::{ClientMsg, ExitName, Notice, PlayerCommand, Proposal, ServerMsg};
++pub use msg::{ClientMsg, ExitName, Notice, PlayerCommand, Proposal, ServerMsg, VoteOutcome};
+ pub use signalbox_core::aspect::Aspect;
+ pub use signalbox_core::events::Rejection;
+ pub use signalbox_core::network::{Dir, PointsPos};
+diff --git a/crates/protocol/src/lobby.rs b/crates/protocol/src/lobby.rs
+index 216dc90..7dc5c8f 100644
+--- a/crates/protocol/src/lobby.rs
++++ b/crates/protocol/src/lobby.rs
+@@ -98,11 +98,12 @@ pub struct LayoutInfo {
+ pub const LOBBY_MSG_TYPES: [&str; 8] =
+     ["list_games", "list_layouts", "create_game", "join", "leave", "delete_game", "list_lessons", "start_lesson"];
+ /// `"type"` tags of `ClientMsg`.
+-pub const CLIENT_MSG_TYPES: [&str; 9] = [
++pub const CLIENT_MSG_TYPES: [&str; 10] = [
+     "claim",
+     "release",
+     "command",
+     "vote",
++    "vote_decline",
+     "resync",
+     "lesson_next",
+     "lesson_restart_step",
+diff --git a/crates/protocol/src/msg.rs b/crates/protocol/src/msg.rs
+index ec41438..add5f0b 100644
+--- a/crates/protocol/src/msg.rs
++++ b/crates/protocol/src/msg.rs
+@@ -17,6 +17,8 @@ pub enum ClientMsg {
+     Command { cmd: PlayerCommand },
+     /// Propose, or agree to, a clock change.
+     Vote { proposal: Proposal },
++    /// Turn the open proposal down: it ends at once (polish spec M8).
++    VoteDecline,
+     /// Ask for the layout and a full view.
+     Resync,
+     /// In a tutorial: the step said "press Next".
+@@ -57,6 +59,15 @@ pub enum ExitName {
+     Node(String),
+ }
+ 
++/// How a clock proposal ended.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(tag = "how", rename_all = "snake_case")]
++pub enum VoteOutcome {
++    Passed,
++    Declined { by: String },
++    Lapsed,
++}
++
+ #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+ #[serde(tag = "kind", rename_all = "snake_case")]
+ pub enum Proposal {
+@@ -97,6 +108,8 @@ pub enum Notice {
+     /// A berth in your area was filled by a step from `from_area`'s berth.
+     Handover { headcode: String, from_area: String },
+     AreaTaken { area: String, holder: String },
++    /// A clock proposal ended (polish spec M8); sent to every player.
++    VoteEnded { proposal: Proposal, outcome: VoteOutcome },
+     Replaced,
+     GameCrashed,
+     Error { code: String, message: String },
+diff --git a/crates/protocol/src/view.rs b/crates/protocol/src/view.rs
+index ea50e42..9440bf3 100644
+--- a/crates/protocol/src/view.rs
++++ b/crates/protocol/src/view.rs
+@@ -262,6 +262,9 @@ pub struct TrainRow {
+ pub struct VoteView {
+     pub proposal: Proposal,
+     pub agreed: Vec<String>,
++    /// Voters who have not agreed yet (polish spec M8).
++    #[serde(default, skip_serializing_if = "Vec::is_empty")]
++    pub waiting: Vec<String>,
+     /// Whole seconds of real time before it lapses (rounded up).
+     pub expires_in_s: u32,
+ }
+```
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `scripts/cargo test -p signalbox-protocol -p signalbox-game -p signalbox-client-core -p signalbox-client-ui -p signalbox-server`
+Expected: PASS, no warnings (as on the scratch copy).
+
+- [ ] **Step 5: Document**
+
+`CLAUDE.md`, "Multiplayer", after the clock-votes bullet: "A vote lists who has still to agree (`VoteView.waiting`);
+any voter may Decline it (`vote_decline`), ending it at once; `flush` tells every player how each vote ended
+(`Notice::VoteEnded`), except a lone voter's (polish spec M8)."
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/client-core crates/client-core/src/app.rs crates/client-core/src/text.rs crates/client-ui crates/client-ui/src/screens.rs crates/game crates/game/src/clock.rs crates/game/src/game.rs crates/protocol crates/protocol/src/lib.rs crates/protocol/src/lobby.rs crates/protocol/src/msg.rs crates/protocol/src/view.rs CLAUDE.md
+git commit -m "feat: votes say who they wait for, can be declined, and tell everyone how they ended"
+```
+
+---
+
+### Task 13: A top bar that does not move; Release asks first (UI review M5, M10)
+
+Spec §10 M5, M10 (U11). Row one keeps the buttons right-aligned in a fixed order with fixed-width clock controls;
+row two carries the vote (Task 12) or the spectator's hint (Task 9); Release area needs a second click.
+
+**Files:**
+- Modify: `crates/client-ui/src/screens.rs`
+- Modify: `CLAUDE.md`
+- Test: `crates/client-ui/tests/screens.rs`
+
+**Interfaces:**
+- Consumes: Task 12's vote row, Task 9's hint.
+- Produces: `UiApp.confirm_release`; constants `CLOCK_STATE_W = 52.0`, `PAUSE_W = 64.0`, `LAYOUT_COMBO_W = 180.0`;
+  the test helper `text_at(&FullOutput, &str) -> Rect` in `tests/screens.rs`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Apply (written and run on the scratch copy; re-check the context on the base, keep the intent):
+
+```diff
+diff --git a/crates/client-ui/tests/screens.rs b/crates/client-ui/tests/screens.rs
+index 9849cea..5d30a9c 100644
+--- a/crates/client-ui/tests/screens.rs
++++ b/crates/client-ui/tests/screens.rs
+@@ -794,3 +794,55 @@ fn a_vote_waits_for_named_players_who_agree_or_decline() {
+     assert!(has_text(&out, "Vote declined by ann: 2×"), "{:?}", texts(&out));
+     assert!(!has_text(&out, "Agree"));
+ }
++
++fn text_at(out: &FullOutput, want: &str) -> Rect {
++    texts(out).into_iter().find(|(t, _)| t == want).unwrap_or_else(|| panic!("no {want:?} in {:?}", texts(out))).1
++}
++
++/// Polish spec M5: the bar's buttons stay put while a vote opens, the
++/// clock pauses and the title changes; the pause button keeps its place.
++#[test]
++fn the_top_bar_does_not_move_under_the_pointer() {
++    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
++    r.game.connect("bob");
++    r.game.handle("bob", ClientMsg::Claim { area: s("East") });
++    for _ in 0..3 {
++        r.frame();
++    }
++    let out = r.frame();
++    let (leave, fit, pause) = (text_at(&out, "Leave"), text_at(&out, "Fit"), text_at(&out, "pause"));
++    click_text(&mut r, &out, "pause");
++    for _ in 0..3 {
++        r.frame();
++    }
++    let out = r.frame();
++    assert!(has_text(&out, "waiting for bob"), "{:?}", texts(&out));
++    assert_eq!((text_at(&out, "Leave"), text_at(&out, "Fit")), (leave, fit), "a vote opened");
++    assert!(text_at(&out, "Vote: pause — waiting for bob, 30 s left").min.y > leave.max.y, "on the second row");
++    r.game.handle("bob", ClientMsg::Vote { proposal: Proposal::Pause });
++    for _ in 0..3 {
++        r.frame();
++    }
++    let out = r.frame();
++    assert_eq!((text_at(&out, "Leave"), text_at(&out, "Fit")), (leave, fit), "paused");
++    assert!((text_at(&out, "resume").center().x - pause.center().x).abs() < 1.0, "the same button, the same place");
++}
++
++/// Polish spec M10: Release area asks first.
++#[test]
++fn releasing_an_area_asks_first() {
++    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
++    let out = r.frame();
++    click_text(&mut r, &out, "Release area");
++    let out = r.frame();
++    assert!(r.ui.core.game().unwrap().area().is_some(), "not yet");
++    click_text(&mut r, &out, "Cancel");
++    let out = r.frame();
++    click_text(&mut r, &out, "Release area");
++    let out = r.frame();
++    click_text(&mut r, &out, "Yes, release");
++    for _ in 0..3 {
++        r.frame();
++    }
++    assert_eq!(r.ui.core.game().unwrap().area(), None);
++}
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `scripts/cargo test -p signalbox-client-ui --test screens top_bar releasing`
+Expected: FAIL — `Leave` moves when the vote opens; Release area releases at once.
+
+- [ ] **Step 3: Implement**
+
+```diff
+diff --git a/crates/client-ui/src/screens.rs b/crates/client-ui/src/screens.rs
+index 823cbed..c846ea3 100644
+--- a/crates/client-ui/src/screens.rs
++++ b/crates/client-ui/src/screens.rs
+@@ -47,6 +47,12 @@ const SIMPLIFIER_WIDTH: f32 = {
+ /// margins and a scroll bar, so the table never scrolls sideways (its
+ /// header would slip off its columns) and the tabs never resize the panel.
+ const SIDE_W: f32 = SIMPLIFIER_WIDTH + 24.0;
++/// The top bar's fixed widths (polish spec M5): the clock state (`paused`,
++/// `8×`) and the pause/resume button.
++const CLOCK_STATE_W: f32 = 52.0;
++/// The lobby's layout list, wide enough for every name, so Create never moves.
++const LAYOUT_COMBO_W: f32 = 180.0;
++const PAUSE_W: f32 = 64.0;
+ /// Repaint at least this often (ms): clocks, flashing, reconnect timers.
+ const REPAINT_MS: u64 = 250;
+ /// While a tutorial highlight shows: often enough for a smooth 1 Hz pulse.
+@@ -84,6 +90,8 @@ pub struct UiApp {
+     new_game: NewGame,
+     /// The game whose Delete was pressed and awaits "Yes, delete".
+     confirm_delete: Option<String>,
++    /// Release area was pressed and awaits "Yes, release" (polish spec M10).
++    confirm_release: bool,
+     settings: Settings,
+     /// Where the settings are kept between visits (none in most tests).
+     store: Option<Box<dyn SettingsStore>>,
+@@ -124,6 +132,7 @@ impl UiApp {
+             headcode: String::new(),
+             new_game: NewGame::default(),
+             confirm_delete: None,
++            confirm_release: false,
+             settings: Settings::default(),
+             store: None,
+             side_tab: SideTab::default(),
+@@ -257,7 +266,7 @@ impl UiApp {
+             } else {
+                 self.new_game.layout = self.new_game.layout.min(layouts.len() - 1);
+                 ui.horizontal(|ui| {
+-                    egui::ComboBox::from_label("Layout").selected_text(layouts[self.new_game.layout].as_str()).show_ui(ui, |ui| {
++                    egui::ComboBox::from_label("Layout").width(LAYOUT_COMBO_W).selected_text(layouts[self.new_game.layout].as_str()).show_ui(ui, |ui| {
+                         for (i, name) in layouts.iter().enumerate() {
+                             ui.selectable_value(&mut self.new_game.layout, i, name.as_str());
+                         }
+@@ -387,6 +396,11 @@ impl UiApp {
+         self.enquiry_window(ui);
+     }
+ 
++    /// The top bar (polish spec M5: nothing moves under the pointer). Row
++    /// one: the title and clock on the left, the buttons right-aligned in a
++    /// fixed order; the pause button and the speed are fixed widths. Row
++    /// two: an open vote with Agree and Decline (M8), else the spectator's
++    /// hint (H2), then the players and Claim.
+     fn top_bar(&mut self, ui: &mut Ui, now: f64) {
+         let Some(g) = self.core.game() else { return };
+         let lesson = g.lesson().is_some();
+@@ -407,20 +421,23 @@ impl UiApp {
+         let me = g.you.clone();
+         let mut act: Vec<Box<dyn FnOnce(&mut App)>> = Vec::new();
+         let mut settings = self.settings;
++        let mut confirm_release = self.confirm_release && holding;
++        let mut refit = false;
+         egui::Panel::top("bar").show(ui, |ui| {
+-            ui.horizontal_wrapped(|ui| {
++            ui.horizontal(|ui| {
+                 ui.label(RichText::new(title).strong());
+                 if let Some(v) = &view {
+                     let clock = ui.label(RichText::new(fmt_hms(v.sim_time)).monospace().size(16.0));
+                     mark(ui, &clock, marked("clock"), now);
+-                    let state = ui.label(if v.paused { "paused".to_string() } else { format!("{}×", v.speed) });
++                    let text = if v.paused { "paused".to_string() } else { format!("{}×", v.speed) };
++                    let state = ui.add_sized([CLOCK_STATE_W, 18.0], egui::Label::new(text));
+                     if v.paused && v.vote.is_none() {
+                         state.on_hover_text("The clock is paused (a resumed game starts paused). Press resume to propose running it.");
+                     }
+                     // Only voters get the buttons (owner decision 12).
+                     if can_vote {
+                         let pause = if v.paused { Proposal::Resume } else { Proposal::Pause };
+-                        if ui.button(proposal_text(pause)).clicked() {
++                        if ui.add_sized([PAUSE_W, 18.0], egui::Button::new(proposal_text(pause))).clicked() {
+                             act.push(Box::new(move |a| a.vote(pause)));
+                         }
+                         for x in [1u8, 2, 4, 8] {
+@@ -429,7 +446,47 @@ impl UiApp {
+                             }
+                         }
+                     }
+-                    if let Some(vote) = &v.vote {
++                    // A tutorial keeps no score (tutorial spec §3).
++                    if let Some(score) = v.score.filter(|_| !lesson) {
++                        ui.label(format!("Penalty {score}"));
++                    }
++                }
++                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
++                    if ui.button("Leave").clicked() {
++                        act.push(Box::new(|a| a.leave()));
++                    }
++                    // A tutorial's player keeps the lesson's area. Releasing
++                    // asks first (polish spec M10).
++                    if holding && !lesson {
++                        if confirm_release {
++                            if ui.button("Cancel").clicked() {
++                                confirm_release = false;
++                            }
++                            if ui.button(RichText::new("Yes, release").color(ALARM)).clicked() {
++                                confirm_release = false;
++                                act.push(Box::new(|a| a.release()));
++                            }
++                        } else if ui.button("Release area").clicked() {
++                            confirm_release = true;
++                        }
++                    }
++                    let menu = ui.menu_button("Settings", |ui| {
++                        ui.label(RichText::new("Signal aspects").strong());
++                        ui.radio_value(&mut settings.aspects, AspectMode::RedGreen, "Red/green (panel)");
++                        ui.radio_value(&mut settings.aspects, AspectMode::Real, "Real aspects");
++                        ui.separator();
++                        ui.checkbox(&mut settings.enquiry, "Headcode enquiry");
++                        ui.checkbox(&mut settings.numbers, "Signal numbers");
++                    });
++                    mark(ui, &menu.response, marked("settings"), now);
++                    if ui.button("Fit").clicked() {
++                        refit = true;
++                    }
++                });
++            });
++            ui.horizontal_wrapped(|ui| {
++                match view.as_ref().and_then(|v| v.vote.as_ref()) {
++                    Some(vote) => {
+                         ui.label(RichText::new(vote_text(vote)).color(paint::YELLOW));
+                         // Polish spec M8: say yes or no explicitly.
+                         if can_vote {
+@@ -443,37 +500,11 @@ impl UiApp {
+                             }
+                         }
+                     }
+-                    // A tutorial keeps no score (tutorial spec §3).
+-                    if let Some(score) = v.score.filter(|_| !lesson) {
+-                        ui.label(format!("Penalty {score}"));
++                    // Polish spec H2: a spectator's clicks do nothing; say so where they look.
++                    None if !holding && !lesson => {
++                        ui.label(RichText::new("You are watching. Claim an area to signal:").color(paint::YELLOW));
+                     }
+-                }
+-                if ui.button("Fit").clicked() {
+-                    self.fitted = None;
+-                }
+-                let menu = ui.menu_button("Settings", |ui| {
+-                    ui.label(RichText::new("Signal aspects").strong());
+-                    ui.radio_value(&mut settings.aspects, AspectMode::RedGreen, "Red/green (panel)");
+-                    ui.radio_value(&mut settings.aspects, AspectMode::Real, "Real aspects");
+-                    ui.separator();
+-                    ui.checkbox(&mut settings.enquiry, "Headcode enquiry");
+-                    ui.checkbox(&mut settings.numbers, "Signal numbers");
+-                });
+-                mark(ui, &menu.response, marked("settings"), now);
+-                // A tutorial's player keeps the lesson's area.
+-                if holding && !lesson {
+-                    if ui.button("Release area").clicked() {
+-                        act.push(Box::new(|a| a.release()));
+-                    }
+-                }
+-                if ui.button("Leave").clicked() {
+-                    act.push(Box::new(|a| a.leave()));
+-                }
+-            });
+-            ui.horizontal_wrapped(|ui| {
+-                // Polish spec H2: a spectator's clicks do nothing; say so where they look.
+-                if !holding && !lesson {
+-                    ui.label(RichText::new("You are watching. Claim an area to signal:").color(paint::YELLOW));
++                    None => {}
+                 }
+                 ui.label("Players:");
+                 for area in &areas {
+@@ -486,6 +517,10 @@ impl UiApp {
+                 }
+             });
+         });
++        self.confirm_release = confirm_release;
++        if refit {
++            self.fitted = None;
++        }
+         self.set_settings(settings);
+         for f in act {
+             f(&mut self.core);
+```
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `scripts/cargo test -p signalbox-client-core -p signalbox-client-ui`
+Expected: PASS, no warnings (as on the scratch copy).
+
+- [ ] **Step 5: Document**
+
+`CLAUDE.md`, "Browser client": "The top bar never reflows (polish spec M5): buttons right-aligned in a fixed order,
+fixed-width clock controls, the vote on the second row; Release area asks first (M10)."
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/client-ui crates/client-ui/src/screens.rs CLAUDE.md
+git commit -m "feat(client-ui): a top bar that does not move under the pointer; Release area asks first"
+```
+
+---
+
+### Task 14: Leave releases; the lobby hears changes (UI review M9)
+
+Spec §10 M9 (U15). Leave gives a held area back before leaving; the front sends the games list to players in the
+lobby whenever a game's holders or players change.
+
+**Files:**
+- Modify: `crates/client-core/src/app.rs`
+- Modify: `crates/server/src/supervisor.rs`
+- Modify: `CLAUDE.md`
+- Test: `crates/client-core/tests/app.rs`
+- Test: `crates/server/tests/supervisor.rs`
+
+**Interfaces:**
+- Consumes: `Supervisor::{list_games, for_user}`, `FromGame::Status`.
+- Produces: `Supervisor::broadcast_lobby_games()`; `App::leave` sends `Release` first when holding an area outside a
+  tutorial; the supervisor test helper `listed` drains pushed lists before asking.
+
+- [ ] **Step 1: Write the failing tests**
+
+Apply (written and run on the scratch copy; re-check the context on the base, keep the intent):
+
+```diff
+diff --git a/crates/client-core/tests/app.rs b/crates/client-core/tests/app.rs
+index 38441d1..a459acc 100644
+--- a/crates/client-core/tests/app.rs
++++ b/crates/client-core/tests/app.rs
+@@ -601,3 +601,16 @@ fn a_new_game_claims_the_creators_area_once_its_layout_comes() {
+     app.tick(1.0);
+     assert_eq!(h.take_sent(), [lobby(LobbyMsg::CreateGame { layout: s("twobox"), seed: None, start: None })], "no claim");
+ }
++
++/// Polish spec M9: Leave gives a held area back before leaving.
++#[test]
++fn leave_releases_a_held_area_first() {
++    let mut t = Table::new("ann", Some("West"));
++    t.h.take_sent();
++    t.app.leave();
++    assert_eq!(t.h.take_sent(), [ClientFrame::Game(ClientMsg::Release), lobby(LobbyMsg::Leave)]);
++    let mut spec = Table::new("sam", None);
++    spec.h.take_sent();
++    spec.app.leave();
++    assert_eq!(spec.h.take_sent(), [lobby(LobbyMsg::Leave)], "nothing to release");
++}
+diff --git a/crates/server/tests/supervisor.rs b/crates/server/tests/supervisor.rs
+index 32ce001..b53ed34 100644
+--- a/crates/server/tests/supervisor.rs
++++ b/crates/server/tests/supervisor.rs
+@@ -694,6 +694,9 @@ async fn games_list(sock: &Sock) -> Vec<GameInfo> {
+ }
+ 
+ async fn listed(rig: &Rig, sock: &Sock) -> Vec<GameInfo> {
++    // Lists the lobby was sent as holders and players changed (polish spec
++    // M9) may be waiting: drop them, so the answer read is this request's.
++    while let Ok(Some(_)) = timeout(Duration::from_millis(100), sock.me.outbox.pop()).await {}
+     rig.lobby(sock, LobbyMsg::ListGames);
+     games_list(sock).await
+ }
+@@ -1073,3 +1076,23 @@ async fn a_burst_of_lesson_starts_never_runs_more_than_the_cap() {
+     let bob = rig.attach("bob");
+     start_lesson(&rig, &bob).await;
+ }
++
++/// Polish spec M9: players in the lobby see a game's holders and players
++/// change without pressing Refresh.
++#[tokio::test]
++async fn the_lobby_hears_when_holders_change() {
++    let rig = rig("lobbypush", 600);
++    let ann = rig.attach("ann");
++    let id = create(&rig, &ann).await;
++    let cat = rig.attach("cat");
++    rig.lobby(&cat, LobbyMsg::ListGames);
++    rig.game_msg(&ann, ClientMsg::Claim { area: s("West") });
++    let held = |f: &ServerFrame| match f {
++        ServerFrame::Lobby(LobbyReply::Games { games, .. }) => games
++            .iter()
++            .any(|g| g.id == id && g.areas.iter().any(|a| a.holder.as_deref() == Some("ann"))),
++        _ => false,
++    };
++    until(&cat, held).await;
++    rig.sup.shutdown_all(Duration::from_secs(10)).await;
++}
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `scripts/cargo test -p signalbox-client-core --test app leave -p signalbox-server --test supervisor the_lobby_hears`
+Expected: FAIL — no `Release` sent; `cat` never sees ann holding West (the test times out after 10 s).
+
+- [ ] **Step 3: Implement**
+
+```diff
+diff --git a/crates/client-core/src/app.rs b/crates/client-core/src/app.rs
+index cb65ac2..9dd85b2 100644
+--- a/crates/client-core/src/app.rs
++++ b/crates/client-core/src/app.rs
+@@ -545,9 +545,14 @@ impl App {
+         }
+     }
+ 
+-    /// Back to the lobby (the front answers with the games list).
++    /// Back to the lobby (the front answers with the games list). An area you
++    /// hold is released first, so it does not wait out the disconnect grace
++    /// as yours (polish spec M9); a tutorial ends anyway.
+     pub fn leave(&mut self) {
+         self.claim_on_join = None;
++        if self.game.as_ref().is_some_and(|g| g.area().is_some() && g.lesson.is_none()) {
++            self.send(ClientFrame::Game(ClientMsg::Release));
++        }
+         self.send(ClientFrame::Lobby(LobbyMsg::Leave));
+         self.game = None;
+         self.rejoin = None;
+diff --git a/crates/server/src/supervisor.rs b/crates/server/src/supervisor.rs
+index e171ea4..d6f7672 100644
+--- a/crates/server/src/supervisor.rs
++++ b/crates/server/src/supervisor.rs
+@@ -585,6 +585,15 @@ impl Supervisor {
+         }
+     }
+ 
++    /// The games list to every client in the lobby (not in a game).
++    fn broadcast_lobby_games(&self) {
++        let games = self.list_games();
++        let st = self.lock();
++        for (user, c) in st.clients.iter().filter(|(_, c)| c.game.is_none()) {
++            push(&st, user, c, frame(LobbyReply::Games { games: self.for_user(games.clone(), user) }));
++        }
++    }
++
+     // ---- the lobby ----
+ 
+     /// The games list as `user` sees it (`can_delete` set for them).
+@@ -803,8 +812,19 @@ impl Supervisor {
+                 push(&st, &player, c, ServerFrame::Game(msg));
+             }
+             FromGame::Status(s) => {
+-                if let Some(e) = self.lock().games.get_mut(id) {
+-                    e.status = Some(s);
++                // Who holds what and who is in: the lobby hears at once
++                // (polish spec M9); a tutorial is never listed.
++                let changed = match self.lock().games.get_mut(id) {
++                    Some(e) => {
++                        let changed = e.owner.is_none()
++                            && e.status.as_ref().is_none_or(|o| o.holders != s.holders || o.players != s.players);
++                        e.status = Some(s);
++                        changed
++                    }
++                    None => false,
++                };
++                if changed {
++                    self.broadcast_lobby_games();
+                 }
+             }
+             // The save file is the record; nothing to keep.
+```
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `scripts/cargo test -p signalbox-client-core -p signalbox-server`
+Expected: PASS, no warnings (as on the scratch copy).
+
+- [ ] **Step 5: Document**
+
+`CLAUDE.md`, "Server": "The front sends the games list to every client in the lobby when a game's holders or
+connected players change (`broadcast_lobby_games`, polish spec M9)."
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/client-core crates/client-core/src/app.rs crates/server crates/server/src/supervisor.rs CLAUDE.md
+git commit -m "feat: Leave releases a held area; the lobby's list updates itself"
+```
+
+---
+
+### Task 15: The train list: headings, Arr and Dep, one lateness style (UI review M6)
+
+Spec §10 M6 (U12). The list is headed, shows the next call's booked arrival and departure, writes lateness as the
+simplifier does, and says when it is empty. The lateness value is what `robot-fixes`' H1 rule gives (`game::view::row`
+on the base): only the style changes here. Lesson 3's last step no longer says "+minutes".
+
+**Files:**
+- Modify: `crates/client-core/src/simplifier.rs`
+- Modify: `crates/client-ui/src/screens.rs`
+- Modify: `crates/game/src/view.rs`
+- Modify: `crates/protocol/src/view.rs`
+- Modify: `lessons/03-running-trains/lesson.json`
+- Modify: `CLAUDE.md`
+- Test: `crates/client-core/tests/input.rs`
+- Test: `crates/client-ui/tests/screens.rs`
+- Test: `crates/game/tests/trains.rs`
+- Test: `crates/protocol/tests/diff.rs`
+- Test: `crates/protocol/tests/golden.rs`
+
+**Interfaces:**
+- Consumes: `simplifier::fmt_wtt`; `robot-fixes`' `row` in `crates/game/src/view.rs` (keep its lateness rule, add the two fields).
+- Produces: `TrainRow.{arr, dep}: Option<f64>` (omitted when none); `pub simplifier::late_text(i64) -> String`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Apply (written and run on the scratch copy; re-check the context on the base, keep the intent):
+
+```diff
+diff --git a/crates/client-core/tests/input.rs b/crates/client-core/tests/input.rs
+index 456d709..3a99d18 100644
+--- a/crates/client-core/tests/input.rs
++++ b/crates/client-core/tests/input.rs
+@@ -345,7 +345,7 @@ fn an_auto_worked_route_stays_set_after_a_train_passes() {
+ 
+ #[test]
+ fn the_train_list_puts_platforms_first_then_by_booked_time() {
+-    let row = |state, booked: Option<f64>| TrainRow { next_place: None, next_platform: None, booked, late_s: 0, state };
++    let row = |state, booked: Option<f64>| TrainRow { next_place: None, next_platform: None, booked, arr: None, dep: None, late_s: 0, state };
+     let mut v = empty_view();
+     v.trains.insert(s("1A"), row(TrainState::Due, Some(100.0)));
+     v.trains.insert(s("1B"), row(TrainState::InArea, Some(300.0)));
+diff --git a/crates/client-ui/tests/screens.rs b/crates/client-ui/tests/screens.rs
+index 5d30a9c..1c122e7 100644
+--- a/crates/client-ui/tests/screens.rs
++++ b/crates/client-ui/tests/screens.rs
+@@ -846,3 +846,21 @@ fn releasing_an_area_asks_first() {
+     }
+     assert_eq!(r.ui.core.game().unwrap().area(), None);
+ }
++
++/// Polish spec M6: the train list has headings, the next call's Arr and
++/// Dep, the simplifier's lateness style, and says when it is empty.
++#[test]
++fn the_train_list_is_headed_and_late_as_the_simplifier_says() {
++    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
++    let out = r.frame();
++    let side = side_texts(&r, &out);
++    for want in ["Train", "State", "Next", "Arr", "Dep", "Late", "07:04", "07:05"] {
++        assert!(side.iter().any(|t| t == want), "{want} in {side:?}");
++    }
++    assert!(side.iter().any(|t| t == "OT"), "1E01 is running, on time: {side:?}");
++    let empty = drawn_twobox_with(|w| {
++        w["entries"] = serde_json::json!([]);
++    });
++    let mut r = Rig::in_game(empty, Some("West"));
++    assert!(has_text(&r.frame(), "No trains here or due in the next 30 minutes"));
++}
+diff --git a/crates/game/tests/trains.rs b/crates/game/tests/trains.rs
+index bd754e4..9e8fa93 100644
+--- a/crates/game/tests/trains.rs
++++ b/crates/game/tests/trains.rs
+@@ -43,6 +43,8 @@ fn before_anything_enters_each_area_sees_what_is_due_at_its_boundaries() {
+             next_place: Some("EST".into()),
+             next_platform: Some("1".into()),
+             booked: Some(25_440.0),
++            arr: Some(25_440.0),
++            dep: Some(25_500.0),
+             late_s: 0,
+             state: TrainState::Due,
+         }
+diff --git a/crates/protocol/tests/diff.rs b/crates/protocol/tests/diff.rs
+index a3b6c4f..0f94f6b 100644
+--- a/crates/protocol/tests/diff.rs
++++ b/crates/protocol/tests/diff.rs
+@@ -30,7 +30,7 @@ fn base() -> View {
+ }
+ 
+ fn row(state: TrainState, late_s: i64) -> TrainRow {
+-    TrainRow { next_place: Some(s("EST")), next_platform: Some(s("1")), booked: Some(25500.0), late_s, state }
++    TrainRow { next_place: Some(s("EST")), next_platform: Some(s("1")), booked: Some(25500.0), arr: None, dep: None, late_s, state }
+ }
+ 
+ fn changed() -> View {
+diff --git a/crates/protocol/tests/golden.rs b/crates/protocol/tests/golden.rs
+index dec2994..92bc47d 100644
+--- a/crates/protocol/tests/golden.rs
++++ b/crates/protocol/tests/golden.rs
+@@ -287,13 +287,15 @@ fn view() {
+                     next_place: Some(s("EST")),
+                     next_platform: Some(s("1")),
+                     booked: Some(25500.0),
++                    arr: None,
++                    dep: None,
+                     late_s: 120,
+                     state: TrainState::InArea,
+                 },
+             ),
+             (
+                 s("2W03"),
+-                TrainRow { next_place: None, next_platform: None, booked: None, late_s: 0, state: TrainState::Due },
++                TrainRow { next_place: None, next_platform: None, booked: None, arr: None, dep: None, late_s: 0, state: TrainState::Due },
+             ),
+         ]),
+     };
+@@ -333,6 +335,8 @@ fn delta_sends_only_changes_and_null_for_cleared() {
+                     next_place: Some(s("WST")),
+                     next_platform: None,
+                     booked: Some(26100.0),
++                    arr: None,
++                    dep: None,
+                     late_s: 0,
+                     state: TrainState::AtPlatform,
+                 }),
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `scripts/cargo test -p signalbox-game --test trains -p signalbox-client-ui --test screens the_train_list`
+Expected: compile errors (no fields `arr`, `dep`).
+
+- [ ] **Step 3: Implement**
+
+```diff
+diff --git a/crates/client-core/src/simplifier.rs b/crates/client-core/src/simplifier.rs
+index 8d43f58..60291da 100644
+--- a/crates/client-core/src/simplifier.rs
++++ b/crates/client-core/src/simplifier.rs
+@@ -116,7 +116,8 @@ pub fn lines(l: &Layout, r: &SimplifierRow) -> Vec<Line> {
+ }
+ 
+ /// `OT` under a minute late (or early), else whole minutes late: `3L`.
+-fn late_text(late_s: i64) -> String {
++/// The one lateness style, in the simplifier and the train list (polish spec M6).
++pub fn late_text(late_s: i64) -> String {
+     if late_s >= 60 { format!("{}L", late_s / 60) } else { "OT".to_string() }
+ }
+ 
+diff --git a/crates/client-ui/src/screens.rs b/crates/client-ui/src/screens.rs
+index c846ea3..0107ee8 100644
+--- a/crates/client-ui/src/screens.rs
++++ b/crates/client-ui/src/screens.rs
+@@ -15,7 +15,7 @@ use egui::{
+     Align, Align2, Color32, CornerRadius, FontId, Frame, Key, Layout, PointerButton, Rect, Response, RichText, Sense, Stroke,
+     StrokeKind, Ui, vec2,
+ };
+-use protocol::{GameState, Highlight, Proposal};
++use protocol::{GameState, Highlight, Proposal, TrainState};
+ 
+ use crate::camera::Camera;
+ use crate::hit::hit_test;
+@@ -602,14 +602,26 @@ impl UiApp {
+         }
+     }
+ 
++    /// The train list (polish spec M6): headed columns, the next call's
++    /// booked arrival and departure, lateness as the simplifier shows it
++    /// (`OT`, `3L`; blank while due), and a line when it is empty.
+     fn trains_ui(&mut self, ui: &mut Ui, height: f32) {
+         let Some(g) = self.core.game() else { return };
+         let enquiry = self.settings.enquiry;
+         let mut open = None;
+         egui::ScrollArea::vertical().id_salt("trains").max_height(height).show(ui, |ui| {
+             let Some(v) = g.view() else { return };
++            let rows = train_list(v);
++            if rows.is_empty() {
++                ui.label(RichText::new("No trains here or due in the next 30 minutes").color(paint::LABEL));
++                return;
++            }
+             egui::Grid::new("train_list").striped(true).show(ui, |ui| {
+-                for (h, r) in train_list(v) {
++                for h in ["Train", "State", "Next", "Arr", "Dep", "Late"] {
++                    ui.label(RichText::new(h).strong());
++                }
++                ui.end_row();
++                for (h, r) in rows {
+                     let code = RichText::new(g.names().headcode(h)).monospace().color(paint::HEADCODE);
+                     // With the enquiry on, a headcode opens its window.
+                     if enquiry {
+@@ -631,8 +643,10 @@ impl UiApp {
+                     if let Some(name) = place {
+                         cell.on_hover_text(name);
+                     }
+-                    ui.label(r.booked.map_or(String::new(), |b| fmt_hms(b)[..5].to_string()));
+-                    ui.label(if r.late_s > 0 { format!("+{}", r.late_s / 60) } else { String::new() });
++                    ui.label(r.arr.map(simplifier::fmt_wtt).unwrap_or_default());
++                    ui.label(r.dep.map(simplifier::fmt_wtt).unwrap_or_default());
++                    let late = if r.state == TrainState::Due { String::new() } else { simplifier::late_text(r.late_s) };
++                    ui.label(RichText::new(&late).color(if late == "OT" { paint::LABEL } else { ALARM }));
+                     ui.end_row();
+                 }
+             });
+diff --git a/crates/game/src/view.rs b/crates/game/src/view.rs
+index 8782583..bbddfe9 100644
+--- a/crates/game/src/view.rs
++++ b/crates/game/src/view.rs
+@@ -109,6 +109,8 @@ fn row(call: Option<&Call>, now: f64, state: TrainState) -> TrainRow {
+         next_place: call.map(|c| c.place.clone()),
+         next_platform: call.and_then(|c| c.platform.clone()),
+         booked,
++        arr: call.and_then(|c| c.arr_s),
++        dep: call.and_then(|c| c.dep_s),
+         late_s: late_s(now, booked),
+         state,
+     }
+diff --git a/crates/protocol/src/view.rs b/crates/protocol/src/view.rs
+index 9440bf3..ee2d6b4 100644
+--- a/crates/protocol/src/view.rs
++++ b/crates/protocol/src/view.rs
+@@ -253,6 +253,12 @@ pub struct TrainRow {
+     pub next_platform: Option<String>,
+     /// Booked time at the next call (arrival, else departure), seconds since midnight.
+     pub booked: Option<f64>,
++    /// The next call's booked arrival and departure (polish spec M6: the
++    /// train list's Arr and Dep columns).
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub arr: Option<f64>,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub dep: Option<f64>,
+     /// How late against `booked` right now, in whole minutes, as seconds; never negative.
+     pub late_s: i64,
+     pub state: TrainState,
+diff --git a/lessons/03-running-trains/lesson.json b/lessons/03-running-trains/lesson.json
+index 41d2ec5..5d6b2b2 100644
+--- a/lessons/03-running-trains/lesson.json
++++ b/lessons/03-running-trains/lesson.json
+@@ -50,7 +50,7 @@
+       "wait_for": {"train_left_area": {"headcode": "2H05"}}
+     },
+     {
+-      "say": "Well done. A train that runs behind its booked time is late: the train list shows +minutes and the simplifier shows how late (OT on time, 3L three minutes late). In a real game late trains cost penalty points; tutorials keep no score. Next lesson: junctions, auto-working and handing trains to the next box. Press Next to finish.",
++      "say": "Well done. A train that runs behind its booked time is late: the train list and the simplifier show how late (OT on time, 3L three minutes late). In a real game late trains cost penalty points; tutorials keep no score. Next lesson: junctions, auto-working and handing trains to the next box. Press Next to finish.",
+       "wait_for": {"continue": {}}
+     }
+   ]
+```
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `scripts/cargo test -p signalbox-protocol -p signalbox-game -p signalbox-client-core -p signalbox-client-ui && scripts/cargo test -p signalbox-game --test lessons`
+Expected: PASS, no warnings (as on the scratch copy).
+
+- [ ] **Step 5: Document**
+
+`CLAUDE.md`, "Browser client": "The train list is headed (Train, State, Next, Arr, Dep, Late) and writes lateness as
+the simplifier does, `OT`/`3L` (polish spec M6)."
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/client-core crates/client-core/src/simplifier.rs crates/client-ui crates/client-ui/src/screens.rs crates/game crates/game/src/view.rs crates/protocol crates/protocol/src/view.rs lessons/03-running-trains/lesson.json CLAUDE.md
+git commit -m "feat: the train list is headed, shows Arr and Dep, and writes lateness as the simplifier does"
+```
+
+---
+
+### Task 16: The enquiry window: beside the click, labelled (UI review M7)
+
+Spec §10 M7 (U13). It opens beside where it was asked for, with a labelled grid and what the train does next.
+
+**Files:**
+- Modify: `crates/client-core/src/simplifier.rs`
+- Modify: `crates/client-ui/src/screens.rs`
+- Test: `crates/client-core/tests/simplifier.rs`
+- Test: `crates/client-ui/tests/screens.rs`
+
+**Interfaces:**
+- Consumes: Task 15's `TrainRow.{arr, dep}`, Task 8's `Names::place`.
+- Produces: `Enquiry::next_text(&Names) -> Option<String>`; `UiApp.enquiry_at`; `ENQUIRY_OFFSET_PX = 16.0`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Apply (written and run on the scratch copy; re-check the context on the base, keep the intent):
+
+```diff
+diff --git a/crates/client-core/tests/simplifier.rs b/crates/client-core/tests/simplifier.rs
+index ae08a4f..aec5a58 100644
+--- a/crates/client-core/tests/simplifier.rs
++++ b/crates/client-core/tests/simplifier.rs
+@@ -130,3 +130,30 @@ fn display_headcodes_are_shown_and_searched() {
+     let first = &lines(&l, rows(&l, "201")[0])[0];
+     assert_eq!((first.headcode.as_str(), first.shown.as_str()), ("1E01", "201"));
+ }
++
++/// Polish spec M7: the enquiry says what the train does next.
++#[test]
++fn the_enquiry_says_what_the_train_does_next() {
++    let mut t = Table::new("eve", Some("East"));
++    let row = |state, arr, dep| TrainRow {
++        next_place: Some(s("EST")),
++        next_platform: Some(s("1")),
++        booked: arr,
++        arr,
++        dep,
++        late_s: 0,
++        state,
++    };
++    let names = client_core::Names::default();
++    let l = t.layout().clone();
++    let mut v = t.view().clone();
++    v.trains.insert(s("1E01"), row(TrainState::AtPlatform, Some(25_440.0), Some(25_500.0)));
++    assert_eq!(enquiry(&l, Some(&v), "1E01").next_text(&names).as_deref(), Some("depart EST 1 at 07:05"));
++    v.trains.insert(s("1E01"), row(TrainState::InArea, Some(25_440.0), Some(25_500.0)));
++    assert_eq!(enquiry(&l, Some(&v), "1E01").next_text(&names).as_deref(), Some("arrive EST 1 at 07:04"));
++    v.trains.insert(s("1E01"), row(TrainState::Approaching, None, Some(25_530.0)));
++    assert_eq!(enquiry(&l, Some(&v), "1E01").next_text(&names).as_deref(), Some("pass EST 1 at 07:05½"));
++    v.trains.insert(s("1E01"), row(TrainState::Due, Some(25_440.0), None));
++    assert_eq!(enquiry(&l, Some(&v), "1E01").next_text(&names), None);
++    t.run(0.1);
++}
+diff --git a/crates/client-ui/tests/screens.rs b/crates/client-ui/tests/screens.rs
+index 1c122e7..a58e2c9 100644
+--- a/crates/client-ui/tests/screens.rs
++++ b/crates/client-ui/tests/screens.rs
+@@ -510,7 +510,15 @@ fn a_headcode_in_the_train_list_opens_the_enquiry() {
+     r.click(at, PointerButton::Primary);
+     let out = r.frame();
+     assert!(has_text(&out, "Train 1E01"), "{:?}", texts(&out));
+-    assert!(has_text(&out, "EST to EST") && has_text(&out, "EST 1 07:04 07:05"), "East's simplifier row");
++    // Polish spec M7: labelled, with what the train does next, and opened
++    // beside the click, clear of the top bar's Players row.
++    for want in ["State", "Next", "arrive EST 1 at 07:04", "Runs", "EST to EST", "Place", "Plat", "07:04", "07:05"] {
++        assert!(has_text(&out, want), "{want} in {:?}", texts(&out));
++    }
++    let win = r.ctx.memory(|m| m.area_rect(egui::Id::new("enquiry"))).unwrap();
++    let players = texts(&out).into_iter().find(|(t, _)| t == "Players:").unwrap().1;
++    assert!(win.min.y > players.max.y, "{win:?} below {players:?}");
++    assert!((win.min.y - at.y).abs() < 40.0, "{win:?} level with {at:?} (kept on screen sideways)");
+ }
+ 
+ // ---- fix round 1: per-game state, the simplifier's cache and scroll, the enquiry's ways out ----
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `scripts/cargo test -p signalbox-client-core --test simplifier the_enquiry -p signalbox-client-ui --test screens a_headcode_in_the_train_list`
+Expected: compile error (`next_text` not found).
+
+- [ ] **Step 3: Implement**
+
+```diff
+diff --git a/crates/client-core/src/simplifier.rs b/crates/client-core/src/simplifier.rs
+index 60291da..635800f 100644
+--- a/crates/client-core/src/simplifier.rs
++++ b/crates/client-core/src/simplifier.rs
+@@ -149,6 +149,24 @@ pub fn enquiry<'a>(l: &'a Layout, v: Option<&'a View>, headcode: &str) -> Enquir
+ }
+ 
+ impl Enquiry<'_> {
++    /// What the train does next (polish spec M7): `depart LIVERPOOL STREET 10
++    /// at 06:00` standing at a platform, else `arrive … at …` (or `pass …
++    /// at …`); `None` when not running or its timetable is done.
++    pub fn next_text(&self, names: &crate::Names) -> Option<String> {
++        let t = self.train.filter(|t| t.state != TrainState::Due)?;
++        let place = names.place(t.next_place.as_deref()?);
++        let at = match &t.next_platform {
++            Some(pf) => format!("{place} {pf}"),
++            None => place.to_string(),
++        };
++        let time = |v: Option<f64>| v.map(|s| format!(" at {}", fmt_wtt(s))).unwrap_or_default();
++        Some(match (t.state, t.arr) {
++            (TrainState::AtPlatform, _) => format!("depart {at}{}", time(t.dep)),
++            (_, Some(_)) => format!("arrive {at}{}", time(t.arr)),
++            (_, None) => format!("pass {at}{}", time(t.dep)),
++        })
++    }
++
+     /// `in area, 3L`, `due`, or `not in your train list`.
+     pub fn live_text(&self) -> String {
+         match self.train {
+diff --git a/crates/client-ui/src/screens.rs b/crates/client-ui/src/screens.rs
+index 0107ee8..f5e40c8 100644
+--- a/crates/client-ui/src/screens.rs
++++ b/crates/client-ui/src/screens.rs
+@@ -47,6 +47,8 @@ const SIMPLIFIER_WIDTH: f32 = {
+ /// margins and a scroll bar, so the table never scrolls sideways (its
+ /// header would slip off its columns) and the tabs never resize the panel.
+ const SIDE_W: f32 = SIMPLIFIER_WIDTH + 24.0;
++/// The enquiry window opens this far right of and below where it was asked for.
++const ENQUIRY_OFFSET_PX: f32 = 16.0;
+ /// The top bar's fixed widths (polish spec M5): the clock state (`paused`,
+ /// `8×`) and the pause/resume button.
+ const CLOCK_STATE_W: f32 = 52.0;
+@@ -100,6 +102,9 @@ pub struct UiApp {
+     search: String,
+     /// The headcode whose enquiry window is open.
+     enquiry: Option<String>,
++    /// Where the pointer was when it opened: the window opens beside it
++    /// (polish spec M7).
++    enquiry_at: Option<egui::Pos2>,
+     /// The game drawn last frame; another (or the lobby) forgets the
+     /// enquiry, the search and the simplifier lines.
+     shown_game: Option<String>,
+@@ -138,6 +143,7 @@ impl UiApp {
+             side_tab: SideTab::default(),
+             search: String::new(),
+             enquiry: None,
++            enquiry_at: None,
+             shown_game: None,
+             simplifier_lines: None,
+             placement: None,
+@@ -653,6 +659,7 @@ impl UiApp {
+         });
+         if open.is_some() {
+             self.enquiry = open;
++            self.enquiry_at = ui.ctx().pointer_interact_pos();
+         }
+     }
+ 
+@@ -706,24 +713,55 @@ impl UiApp {
+         });
+     }
+ 
++    /// The headcode enquiry (realism spec §3; polish spec M7): opened beside
++    /// where it was asked for, its facts in a labelled grid, then the
++    /// timetable rows with headed columns.
+     fn enquiry_window(&mut self, ui: &mut Ui) {
+         let Some(h) = self.enquiry.clone() else { return };
+         let mut open = true;
+         let Some(g) = self.core.game() else { return };
+         let (Some(l), v) = (g.layout(), g.view()) else { return };
+         let e = simplifier::enquiry(l, v, &h);
+-        egui::Window::new(format!("Train {}", g.names().headcode(&h))).id(egui::Id::new("enquiry")).open(&mut open).resizable(false).show(ui.ctx(), |ui| {
+-            ui.label(e.live_text());
++        let names = g.names();
++        let place = |p: Option<&str>| p.map_or("?", |p| names.place(p)).to_string();
++        let mut w = egui::Window::new(format!("Train {}", names.headcode(&h))).id(egui::Id::new("enquiry")).open(&mut open).resizable(false);
++        if let Some(at) = self.enquiry_at {
++            w = w.default_pos(at + vec2(ENQUIRY_OFFSET_PX, ENQUIRY_OFFSET_PX));
++        }
++        w.show(ui.ctx(), |ui| {
++            egui::Grid::new("enquiry_facts").num_columns(2).show(ui, |ui| {
++                ui.label(RichText::new("State").strong());
++                ui.label(e.live_text());
++                ui.end_row();
++                if let Some(next) = e.next_text(names) {
++                    ui.label(RichText::new("Next").strong());
++                    ui.label(next);
++                    ui.end_row();
++                }
++                if let Some(r) = e.rows.first() {
++                    ui.label(RichText::new("Runs").strong());
++                    ui.label(format!("{} to {}", place(r.origin.as_deref()), place(r.destination.as_deref())));
++                    ui.end_row();
++                }
++            });
+             if e.rows.is_empty() {
+                 ui.label("Not in the simplifier for this area");
+             }
+-            for r in &e.rows {
+-                let names = g.names();
+-                let place = |p: Option<&str>| p.map_or("?", |p| names.place(p)).to_string();
+-                ui.label(format!("{} to {}", place(r.origin.as_deref()), place(r.destination.as_deref())));
+-                for line in simplifier::lines(l, r) {
+-                    ui.label(format!("{} {} {} {}", names.place(&line.place), line.platform, line.arr, line.dep));
+-                }
++            for (i, r) in e.rows.iter().enumerate() {
++                ui.separator();
++                egui::Grid::new(("enquiry_calls", i)).striped(true).show(ui, |ui| {
++                    for head in ["Place", "Plat", "Arr", "Dep"] {
++                        ui.label(RichText::new(head).strong());
++                    }
++                    ui.end_row();
++                    for line in simplifier::lines(l, r) {
++                        ui.label(names.place(&line.place));
++                        ui.label(&line.platform);
++                        ui.label(&line.arr);
++                        ui.label(&line.dep);
++                        ui.end_row();
++                    }
++                });
+             }
+         });
+         if !open {
+@@ -815,7 +853,10 @@ impl UiApp {
+         match click {
+             // With the enquiry on, a headcode opens its window and nothing else.
+             Some(Some(t)) => match self.core.headcode_at(&t).filter(|_| self.settings.enquiry) {
+-                Some(h) => self.enquiry = Some(h),
++                Some(h) => {
++                    self.enquiry = Some(h);
++                    self.enquiry_at = ui.ctx().pointer_interact_pos();
++                }
+                 None => self.core.click(&t),
+             },
+             Some(None) => self.core.escape(),
+```
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `scripts/cargo test -p signalbox-client-core -p signalbox-client-ui`
+Expected: PASS, no warnings (as on the scratch copy).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add crates/client-core crates/client-core/src/simplifier.rs crates/client-ui crates/client-ui/src/screens.rs
+git commit -m "feat(client): the enquiry opens beside the click, labelled, with what the train does next"
+```
+
+---
+
+### Task 17: The simplifier fits the layout's headcodes (UI review H3)
+
+Spec §10 H3 (U3). The Train column fits the longest displayed headcode, the panel starts wide enough, and every
+cell shows its whole text (places by name) on hover.
+
+**Files:**
+- Modify: `crates/client-ui/src/screens.rs`
+- Modify: `CLAUDE.md`
+- Test: `crates/client-ui/tests/screens.rs`
+
+**Interfaces:**
+- Consumes: `simplifier::shown` (drain-wtt plan), Task 8's `Names::place`.
+- Produces: `pub screens::{simplifier_columns(f32) -> [f32; 8], table_width(&[f32; 8]) -> f32}`; `UiApp.simplifier_cols`;
+  `simplifier_row(ui, row_h, cells, &cols, hovers)`; the test helper `converted(name) -> World` in `tests/screens.rs`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Apply (written and run on the scratch copy; re-check the context on the base, keep the intent):
+
+```diff
+diff --git a/crates/client-ui/tests/screens.rs b/crates/client-ui/tests/screens.rs
+index a58e2c9..eea8b53 100644
+--- a/crates/client-ui/tests/screens.rs
++++ b/crates/client-ui/tests/screens.rs
+@@ -872,3 +872,29 @@ fn the_train_list_is_headed_and_late_as_the_simplifier_says() {
+     let mut r = Rig::in_game(empty, Some("West"));
+     assert!(has_text(&r.frame(), "No trains here or due in the next 30 minutes"));
+ }
++
++fn converted(name: &str) -> signalbox_core::world::World {
++    let dir = env!("CARGO_MANIFEST_DIR");
++    let read = |p: String| std::fs::read_to_string(p).unwrap();
++    let mut w = ts2_import::convert(&read(format!("{dir}/../ts2-import/tests/data/{name}.json"))).unwrap().world;
++    ts2_import::areas::apply(&mut w, &ts2_import::areas::parse(&read(format!("{dir}/../../layouts/{name}.areas.json"))).unwrap()).unwrap();
++    signalbox_core::world::World::from_file(w).unwrap()
++}
++
++/// Polish spec H3: Gretz's headcodes (up to 8 characters) fit the simplifier's
++/// Train column (the panel starts wider for them); none is cut short.
++#[test]
++fn the_simplifier_fits_the_layouts_longest_headcode() {
++    let mut r = Rig::in_game(converted("gretz-armainvilliers"), Some("Gretz"));
++    let out = r.frame();
++    click_text(&mut r, &out, "SIMPLIFIER");
++    r.frame();
++    let out = r.frame();
++    let side = side_texts(&r, &out);
++    let l = r.ui.core.game().unwrap().layout().unwrap().clone();
++    let most = l.simplifier.iter().map(|x| x.headcode.chars().count()).max().unwrap();
++    assert_eq!(most, 8, "Gretz's longest, `W118412a`");
++    assert!(side.iter().any(|t| t.chars().count() == most && l.simplifier.iter().any(|x| x.headcode == *t)), "{side:?}");
++    assert!(side.iter().all(|t| !t.ends_with('…')), "nothing cut short: {side:?}");
++    assert!(1280.0 - r.ui.diagram_rect().unwrap().max.x > 398.0, "the panel grew");
++}
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `scripts/cargo test -p signalbox-client-ui --test screens the_simplifier_fits`
+Expected: FAIL — `W118412a` shows as `W118…`.
+
+- [ ] **Step 3: Implement**
+
+```diff
+diff --git a/crates/client-ui/src/screens.rs b/crates/client-ui/src/screens.rs
+index f5e40c8..3a37a25 100644
+--- a/crates/client-ui/src/screens.rs
++++ b/crates/client-ui/src/screens.rs
+@@ -43,10 +43,24 @@ const SIMPLIFIER_WIDTH: f32 = {
+     }
+     w
+ };
+-/// The side panel's least width: the simplifier's columns plus the panel's
+-/// margins and a scroll bar, so the table never scrolls sideways (its
+-/// header would slip off its columns) and the tabs never resize the panel.
+-const SIDE_W: f32 = SIMPLIFIER_WIDTH + 24.0;
++/// The side panel's margins and a scroll bar, beside the simplifier.
++const SIDE_PAD: f32 = 24.0;
++/// The side panel's width with the shortest headcodes: the simplifier's
++/// columns and `SIDE_PAD`, so the tabs never resize the panel.
++const SIDE_W: f32 = SIMPLIFIER_WIDTH + SIDE_PAD;
++
++/// The simplifier's columns with the Train column at least `train_w` wide
++/// (polish spec H3: Gretz's 7-character headcodes fit, not `118…`).
++pub fn simplifier_columns(train_w: f32) -> [f32; 8] {
++    let mut c = SIMPLIFIER_COLUMNS;
++    c[0] = c[0].max(train_w.ceil());
++    c
++}
++
++/// The columns and the gaps between them.
++pub fn table_width(cols: &[f32; 8]) -> f32 {
++    cols.iter().sum::<f32>() + CELL_GAP * (cols.len() - 1) as f32
++}
+ /// The enquiry window opens this far right of and below where it was asked for.
+ const ENQUIRY_OFFSET_PX: f32 = 16.0;
+ /// The top bar's fixed widths (polish spec M5): the clock state (`paused`,
+@@ -108,6 +122,8 @@ pub struct UiApp {
+     /// The game drawn last frame; another (or the lobby) forgets the
+     /// enquiry, the search and the simplifier lines.
+     shown_game: Option<String>,
++    /// The simplifier's columns for the layout shown (polish spec H3).
++    simplifier_cols: [f32; 8],
+     /// The simplifier's lines (each marked if it is its row's first) for
+     /// (layout generation, search).
+     simplifier_lines: Option<((u64, String), Vec<(Line, bool)>)>,
+@@ -145,6 +161,7 @@ impl UiApp {
+             enquiry: None,
+             enquiry_at: None,
+             shown_game: None,
++            simplifier_cols: SIMPLIFIER_COLUMNS,
+             simplifier_lines: None,
+             placement: None,
+             simplifier_scroll: None,
+@@ -391,7 +408,11 @@ impl UiApp {
+ 
+     fn game(&mut self, ui: &mut Ui, now: f64) {
+         self.top_bar(ui, now);
+-        egui::Panel::right("side").default_size(SIDE_W).min_size(SIDE_W).show(ui, |ui| self.side(ui, now));
++        // The panel fits the simplifier for the longest headcode it shows (polish
++        // spec H3); a layout that needs it wider starts it wider.
++        self.simplifier_cols = simplifier_columns(self.train_column_w(ui));
++        let side_w = table_width(&self.simplifier_cols) + SIDE_PAD;
++        egui::Panel::right(egui::Id::new(("side", side_w.round() as i32))).default_size(side_w).min_size(SIDE_W).show(ui, |ui| self.side(ui, now));
+         // After the side panel, so a tab clicked this frame is told at once.
+         let tab = match self.side_tab {
+             SideTab::Trains => "trains",
+@@ -533,6 +554,16 @@ impl UiApp {
+         }
+     }
+ 
++    /// How wide the simplifier's Train column must be for the longest
++    /// headcode the layout shows (as displayed), in the monospace font.
++    fn train_column_w(&self, ui: &Ui) -> f32 {
++        let Some(l) = self.core.game().and_then(|g| g.layout()) else { return 0.0 };
++        let longest = l.simplifier.iter().map(|r| simplifier::shown(l, &r.headcode)).max_by_key(|h| h.chars().count());
++        let Some(h) = longest else { return 0.0 };
++        let font = egui::TextStyle::Monospace.resolve(ui.style());
++        ui.fonts_mut(|f| f.layout_no_wrap(h.to_string(), font, Color32::WHITE).size().x) + 2.0
++    }
++
+     /// In a tutorial the lesson box on top; then the train list or the
+     /// simplifier; below them the alarms, always in view.
+     fn side(&mut self, ui: &mut Ui, now: f64) {
+@@ -689,7 +720,9 @@ impl UiApp {
+         let v = g.view();
+         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 4.0;
+         let header = ["Train", "Late", "From", "To", "At", "Plat", "Arr", "Dep"];
+-        simplifier_row(ui, row_h, header.map(|h| RichText::new(h).strong()));
++        let cols = self.simplifier_cols;
++        let names = g.names();
++        simplifier_row(ui, row_h, header.map(|h| RichText::new(h).strong()), &cols, [""; 8].map(String::from));
+         let mut area = egui::ScrollArea::vertical().id_salt("simplifier").max_height(height);
+         if let Some(line) = self.simplifier_scroll.take() {
+             area = area.vertical_scroll_offset(line as f32 * (row_h + ui.spacing().item_spacing.y));
+@@ -708,7 +741,19 @@ impl UiApp {
+                     RichText::new(&line.arr),
+                     RichText::new(&line.dep),
+                 ];
+-                simplifier_row(ui, row_h, cells);
++                // Every cell's whole text on hover, places by name (polish spec H3, M2).
++                let place = |p: &str| if p.is_empty() { String::new() } else { names.place(p).to_string() };
++                let hovers = [
++                    line.shown.clone(),
++                    String::new(),
++                    place(&line.from),
++                    place(&line.to),
++                    place(&line.place),
++                    line.platform.clone(),
++                    String::new(),
++                    String::new(),
++                ];
++                simplifier_row(ui, row_h, cells, &cols, hovers);
+             }
+         });
+     }
+@@ -930,14 +975,18 @@ fn mark(ui: &Ui, r: &Response, on: bool, now: f64) {
+     }
+ }
+ 
+-/// One simplifier line in fixed-width cells.
+-fn simplifier_row(ui: &mut Ui, row_h: f32, cells: [RichText; 8]) {
++/// One simplifier line in the cells `cols` give, each with its hover text
++/// (none where empty).
++fn simplifier_row(ui: &mut Ui, row_h: f32, cells: [RichText; 8], cols: &[f32; 8], hovers: [String; 8]) {
+     ui.horizontal(|ui| {
+         ui.spacing_mut().item_spacing.x = CELL_GAP;
+-        for (text, w) in cells.into_iter().zip(SIMPLIFIER_COLUMNS) {
++        for ((text, w), hover) in cells.into_iter().zip(*cols).zip(hovers) {
+             ui.allocate_ui_with_layout(vec2(w, row_h), Layout::left_to_right(Align::Center), |ui| {
+                 ui.set_min_width(w);
+-                ui.add(egui::Label::new(text).truncate());
++                let r = ui.add(egui::Label::new(text).truncate());
++                if !hover.is_empty() {
++                    r.on_hover_text(hover);
++                }
+             });
+         }
+     });
+```
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `scripts/cargo test -p signalbox-client-core -p signalbox-client-ui`
+Expected: PASS, no warnings (as on the scratch copy).
+
+- [ ] **Step 5: Document**
+
+`CLAUDE.md`, "Browser client": replace "The side panel's minimum width is 398 pt (it fits the simplifier)." with "The
+side panel starts as wide as the simplifier for the layout's longest displayed headcode (polish spec H3)."
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/client-ui crates/client-ui/src/screens.rs CLAUDE.md
+git commit -m "feat(client-ui): the simplifier fits the layout's longest headcode; cells show their whole text on hover"
+```
+
+---
+
+### Task 18: The side panel hides and narrows; Fit follows the window (UI review H7)
+
+Spec §10 H7 (U3, U6). Hide panel / Show panel, a 240 pt minimum with the simplifier scrolling sideways, and an
+untouched Fit refitted when the diagram changes size.
+
+**Files:**
+- Modify: `crates/client-ui/src/screens.rs`
+- Modify: `CLAUDE.md`
+- Test: `crates/client-ui/tests/screens.rs`
+
+**Interfaces:**
+- Consumes: Task 17's `table_width`, Task 13's right-aligned button group.
+- Produces: `UiApp.{side_open, cam_moved, fit_size}`; `SIDE_MIN_W = 240.0`; the screens `Rig.size` (window size).
+
+- [ ] **Step 1: Write the failing tests**
+
+Apply (written and run on the scratch copy; re-check the context on the base, keep the intent):
+
+```diff
+diff --git a/crates/client-ui/tests/screens.rs b/crates/client-ui/tests/screens.rs
+index eea8b53..44e18fd 100644
+--- a/crates/client-ui/tests/screens.rs
++++ b/crates/client-ui/tests/screens.rs
+@@ -19,6 +19,8 @@ struct Rig {
+     events: Vec<Event>,
+     /// Lobby frames the app sent (game frames go to the game).
+     lobby_sent: Vec<LobbyMsg>,
++    /// The window, 1280 × 800 unless a test resizes it.
++    size: egui::Vec2,
+ }
+ 
+ impl Rig {
+@@ -37,7 +39,7 @@ impl Rig {
+             Some(st) => UiApp::with_store(core, Box::new(st)),
+             None => UiApp::new(core),
+         };
+-        let mut r = Rig { ctx: egui::Context::default(), ui, h, game, t: 0.0, events: vec![], lobby_sent: vec![] };
++        let mut r = Rig { ctx: egui::Context::default(), ui, h, game, t: 0.0, events: vec![], lobby_sent: vec![], size: vec2(1280.0, 800.0) };
+         r.frame();
+         r.lobby_sent.clear();
+         r.h.push(ServerFrame::Lobby(LobbyReply::Layouts { layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")] }] }));
+@@ -70,7 +72,7 @@ impl Rig {
+     fn frame(&mut self) -> FullOutput {
+         self.t += 0.1;
+         let input = RawInput {
+-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 800.0))),
++            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)),
+             time: Some(self.t),
+             events: std::mem::take(&mut self.events),
+             ..RawInput::default()
+@@ -898,3 +900,38 @@ fn the_simplifier_fits_the_layouts_longest_headcode() {
+     assert!(side.iter().all(|t| !t.ends_with('…')), "nothing cut short: {side:?}");
+     assert!(1280.0 - r.ui.diagram_rect().unwrap().max.x > 398.0, "the panel grew");
+ }
++
++/// Polish spec H7: the side panel can be hidden and dragged narrower, and
++/// an untouched Fit follows the window's size; a view the player has moved
++/// is left alone.
++#[test]
++fn the_panel_hides_and_the_fit_follows_the_window() {
++    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
++    r.size = vec2(1024.0, 700.0);
++    r.frame();
++    r.frame();
++    let narrow = (r.ui.diagram_rect().unwrap(), r.ui.camera().unwrap());
++    let out = r.frame();
++    click_text(&mut r, &out, "Hide panel");
++    r.frame();
++    let out = r.frame();
++    let wide = r.ui.diagram_rect().unwrap();
++    assert!(wide.width() > narrow.0.width() + 200.0, "{wide:?} vs {:?}", narrow.0);
++    assert!(r.ui.camera().unwrap().scale > narrow.1.scale, "fitted again, larger");
++    assert!(side_texts(&r, &out).iter().all(|t| t != "TRAINS"));
++    click_text(&mut r, &out, "Show panel");
++    // A moved view stays where the player put it.
++    let start = r.at(150.0, 0.0);
++    r.events.push(Event::PointerMoved(start));
++    r.events.push(Event::PointerButton { pos: start, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::default() });
++    r.frame();
++    r.events.push(Event::PointerMoved(start + vec2(40.0, 0.0)));
++    r.frame();
++    r.events.push(Event::PointerButton { pos: start + vec2(40.0, 0.0), button: PointerButton::Primary, pressed: false, modifiers: Modifiers::default() });
++    r.frame();
++    let moved = r.ui.camera().unwrap();
++    r.size = vec2(1280.0, 800.0);
++    r.frame();
++    r.frame();
++    assert_eq!(r.ui.camera().unwrap(), moved, "not refitted after a pan");
++}
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `scripts/cargo test -p signalbox-client-ui --test screens the_panel_hides`
+Expected: FAIL — no `Hide panel`.
+
+- [ ] **Step 3: Implement**
+
+```diff
+diff --git a/crates/client-ui/src/screens.rs b/crates/client-ui/src/screens.rs
+index 3a37a25..7ca03c7 100644
+--- a/crates/client-ui/src/screens.rs
++++ b/crates/client-ui/src/screens.rs
+@@ -33,22 +33,11 @@ const ZOOM_PER_POINT: f32 = 1.0 / 200.0;
+ const SIMPLIFIER_COLUMNS: [f32; 8] = [38.0, 26.0, 50.0, 50.0, 56.0, 48.0, 46.0, 46.0];
+ /// Between two simplifier cells.
+ const CELL_GAP: f32 = 2.0;
+-/// The simplifier's columns and the gaps between them.
+-const SIMPLIFIER_WIDTH: f32 = {
+-    let mut w = CELL_GAP * (SIMPLIFIER_COLUMNS.len() - 1) as f32;
+-    let mut i = 0;
+-    while i < SIMPLIFIER_COLUMNS.len() {
+-        w += SIMPLIFIER_COLUMNS[i];
+-        i += 1;
+-    }
+-    w
+-};
++/// The side panel can be dragged this narrow (polish spec H7); the
++/// simplifier then scrolls sideways, its header with it.
++const SIDE_MIN_W: f32 = 240.0;
+ /// The side panel's margins and a scroll bar, beside the simplifier.
+ const SIDE_PAD: f32 = 24.0;
+-/// The side panel's width with the shortest headcodes: the simplifier's
+-/// columns and `SIDE_PAD`, so the tabs never resize the panel.
+-const SIDE_W: f32 = SIMPLIFIER_WIDTH + SIDE_PAD;
+-
+ /// The simplifier's columns with the Train column at least `train_w` wide
+ /// (polish spec H3: Gretz's 7-character headcodes fit, not `118…`).
+ pub fn simplifier_columns(train_w: f32) -> [f32; 8] {
+@@ -99,6 +88,12 @@ pub struct UiApp {
+     cam: Option<Camera>,
+     /// (game, area) the camera was fitted for; a change fits again.
+     fitted: Option<(String, Option<String>)>,
++    /// The diagram's size when it was last fitted, and whether the player has
++    /// panned or zoomed since: an untouched fit follows a resize (polish spec H7).
++    fit_size: Option<egui::Vec2>,
++    cam_moved: bool,
++    /// The side panel is shown (polish spec H7: it can be hidden).
++    side_open: bool,
+     diagram: Option<Rect>,
+     /// What the open right-click menu is about.
+     menu_target: Option<Target>,
+@@ -148,6 +143,9 @@ impl UiApp {
+             scene_key: None,
+             cam: None,
+             fitted: None,
++            fit_size: None,
++            cam_moved: false,
++            side_open: true,
+             diagram: None,
+             menu_target: None,
+             headcode: String::new(),
+@@ -412,7 +410,12 @@ impl UiApp {
+         // spec H3); a layout that needs it wider starts it wider.
+         self.simplifier_cols = simplifier_columns(self.train_column_w(ui));
+         let side_w = table_width(&self.simplifier_cols) + SIDE_PAD;
+-        egui::Panel::right(egui::Id::new(("side", side_w.round() as i32))).default_size(side_w).min_size(SIDE_W).show(ui, |ui| self.side(ui, now));
++        if self.side_open {
++            egui::Panel::right(egui::Id::new(("side", side_w.round() as i32)))
++                .default_size(side_w)
++                .min_size(SIDE_MIN_W)
++                .show(ui, |ui| self.side(ui, now));
++        }
+         // After the side panel, so a tab clicked this frame is told at once.
+         let tab = match self.side_tab {
+             SideTab::Trains => "trains",
+@@ -450,6 +453,7 @@ impl UiApp {
+         let mut settings = self.settings;
+         let mut confirm_release = self.confirm_release && holding;
+         let mut refit = false;
++        let mut side_open = self.side_open;
+         egui::Panel::top("bar").show(ui, |ui| {
+             ui.horizontal(|ui| {
+                 ui.label(RichText::new(title).strong());
+@@ -506,6 +510,10 @@ impl UiApp {
+                         ui.checkbox(&mut settings.numbers, "Signal numbers");
+                     });
+                     mark(ui, &menu.response, marked("settings"), now);
++                    // Polish spec H7: the panel can make way for the diagram.
++                    if ui.button(if side_open { "Hide panel" } else { "Show panel" }).clicked() {
++                        side_open = !side_open;
++                    }
+                     if ui.button("Fit").clicked() {
+                         refit = true;
+                     }
+@@ -545,6 +553,7 @@ impl UiApp {
+             });
+         });
+         self.confirm_release = confirm_release;
++        self.side_open = side_open;
+         if refit {
+             self.fitted = None;
+         }
+@@ -722,39 +731,42 @@ impl UiApp {
+         let header = ["Train", "Late", "From", "To", "At", "Plat", "Arr", "Dep"];
+         let cols = self.simplifier_cols;
+         let names = g.names();
+-        simplifier_row(ui, row_h, header.map(|h| RichText::new(h).strong()), &cols, [""; 8].map(String::from));
+-        let mut area = egui::ScrollArea::vertical().id_salt("simplifier").max_height(height);
+-        if let Some(line) = self.simplifier_scroll.take() {
+-            area = area.vertical_scroll_offset(line as f32 * (row_h + ui.spacing().item_spacing.y));
+-        }
+-        area.show_rows(ui, row_h, lines.len(), |ui, range| {
+-            for (line, first) in &lines[range] {
+-                let late = if *first { simplifier::lateness(v, &line.headcode) } else { None };
+-                let late = late.as_deref().unwrap_or("");
+-                let cells = [
+-                    RichText::new(&line.shown).monospace().color(paint::HEADCODE),
+-                    RichText::new(late).color(if late == "OT" { paint::LABEL } else { ALARM }),
+-                    RichText::new(&line.from),
+-                    RichText::new(&line.to),
+-                    RichText::new(&line.place),
+-                    RichText::new(&line.platform),
+-                    RichText::new(&line.arr),
+-                    RichText::new(&line.dep),
+-                ];
+-                // Every cell's whole text on hover, places by name (polish spec H3, M2).
+-                let place = |p: &str| if p.is_empty() { String::new() } else { names.place(p).to_string() };
+-                let hovers = [
+-                    line.shown.clone(),
+-                    String::new(),
+-                    place(&line.from),
+-                    place(&line.to),
+-                    place(&line.place),
+-                    line.platform.clone(),
+-                    String::new(),
+-                    String::new(),
+-                ];
+-                simplifier_row(ui, row_h, cells, &cols, hovers);
++        // Narrower than its columns, the table scrolls sideways, header and all.
++        egui::ScrollArea::horizontal().id_salt("simplifier_wide").show(ui, |ui| {
++            simplifier_row(ui, row_h, header.map(|h| RichText::new(h).strong()), &cols, [""; 8].map(String::from));
++            let mut area = egui::ScrollArea::vertical().id_salt("simplifier").max_height(height);
++            if let Some(line) = self.simplifier_scroll.take() {
++                area = area.vertical_scroll_offset(line as f32 * (row_h + ui.spacing().item_spacing.y));
+             }
++            area.show_rows(ui, row_h, lines.len(), |ui, range| {
++                for (line, first) in &lines[range] {
++                    let late = if *first { simplifier::lateness(v, &line.headcode) } else { None };
++                    let late = late.as_deref().unwrap_or("");
++                    let cells = [
++                        RichText::new(&line.shown).monospace().color(paint::HEADCODE),
++                        RichText::new(late).color(if late == "OT" { paint::LABEL } else { ALARM }),
++                        RichText::new(&line.from),
++                        RichText::new(&line.to),
++                        RichText::new(&line.place),
++                        RichText::new(&line.platform),
++                        RichText::new(&line.arr),
++                        RichText::new(&line.dep),
++                    ];
++                    // Every cell's whole text on hover, places by name (polish spec H3, M2).
++                    let place = |p: &str| if p.is_empty() { String::new() } else { names.place(p).to_string() };
++                    let hovers = [
++                        line.shown.clone(),
++                        String::new(),
++                        place(&line.from),
++                        place(&line.to),
++                        place(&line.place),
++                        line.platform.clone(),
++                        String::new(),
++                        String::new(),
++                    ];
++                    simplifier_row(ui, row_h, cells, &cols, hovers);
++                }
++            });
+         });
+     }
+ 
+@@ -832,21 +844,29 @@ impl UiApp {
+             painter.text(rect.center(), Align2::CENTER_CENTER, msg, FontId::proportional(16.0), paint::LABEL);
+             return;
+         };
+-        if self.fitted.as_ref() != Some(&fit_key) || self.cam.is_none() {
++        // Fit again for a new game or area, after Fit, and when the diagram
++        // changes size while the player has not moved the view (polish spec H7).
++        let resized = self.fit_size.is_some_and(|s| (s - rect.size()).length() > 0.5);
++        if self.fitted.as_ref() != Some(&fit_key) || self.cam.is_none() || (resized && !self.cam_moved) {
+             self.cam = Some(scene.fit_bounds().map_or(Camera { centre: rect.center(), scale: 1.0 }, |b| Camera::fit(b, rect)));
+             self.fitted = Some(fit_key);
++            self.cam_moved = false;
+         }
++        self.fit_size = Some(rect.size());
+         let Some(cam) = self.cam.as_mut() else { return };
+         if resp.dragged_by(PointerButton::Primary) {
+             cam.pan(resp.drag_delta());
++            self.cam_moved = true;
+         }
+         if let Some(p) = resp.hover_pos() {
+             let (scroll, zoom) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
+             if scroll != 0.0 {
+                 cam.zoom_at(rect, p, (scroll * ZOOM_PER_POINT).exp());
++                self.cam_moved = true;
+             }
+             if zoom != 1.0 {
+                 cam.zoom_at(rect, p, zoom);
++                self.cam_moved = true;
+             }
+         }
+         let cam = *cam;
+```
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `scripts/cargo test -p signalbox-client-core -p signalbox-client-ui`
+Expected: PASS, no warnings (as on the scratch copy).
+
+- [ ] **Step 5: Document**
+
+`CLAUDE.md`, "Browser client": "The side panel can be hidden (top bar) or dragged to 240 pt; an untouched Fit follows
+the window's size (polish spec H7)."
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/client-ui crates/client-ui/src/screens.rs CLAUDE.md
+git commit -m "feat(client-ui): hide the side panel or narrow it; an untouched Fit follows the window"
+```
+
+---
+
+### Task 19: Zoom: finer steps, buttons and keys, signals that grow (UI review M11)
+
+Spec §10 M11 (U16). Merges with the placer: the grown glyphs are kept clear as before, so the legibility
+measurement still holds at 2× and 4× Fit.
+
+**Files:**
+- Modify: `crates/client-ui/src/hit.rs`
+- Modify: `crates/client-ui/src/paint.rs`
+- Modify: `crates/client-ui/src/screens.rs`
+- Modify: `CLAUDE.md`
+- Test: `crates/client-ui/tests/hit.rs`
+- Test: `crates/client-ui/tests/paint.rs`
+- Test: `crates/client-ui/tests/screens.rs`
+
+**Interfaces:**
+- Consumes: Task 2's `number_alts` (gains a glyph argument), `number_px`, `signal_disc`, `auto_button`.
+- Produces: `paint::{glyph(f32) -> f32, GLYPH_FROM_SCALE, GLYPH_MAX}`; `number_alts(base, disc, facing, track_w, has_auto, g)`;
+  `pub screens::{ZOOM_PER_POINT = 1/600, ZOOM_STEP = 1.25, VIEW_HINT}`. The paint tests' `Rig` clamps its camera to
+  `GLYPH_FROM_SCALE` so they keep testing base-size glyphs.
+
+- [ ] **Step 1: Write the failing tests**
+
+Apply (written and run on the scratch copy; re-check the context on the base, keep the intent):
+
+```diff
+diff --git a/crates/client-ui/tests/hit.rs b/crates/client-ui/tests/hit.rs
+index ee61821..20cc727 100644
+--- a/crates/client-ui/tests/hit.rs
++++ b/crates/client-ui/tests/hit.rs
+@@ -83,7 +83,9 @@ fn the_auto_button_is_its_own_target() {
+     let (sc, cam, screen) = setup(Some("West"));
+     let w1 = sc.signals.iter().find(|s| s.name == "W1").unwrap();
+     let c = auto_button(&cam, screen, w1).expect("W1 is a controlled signal with a route");
+-    assert_eq!(c, signal_disc(&cam, screen, w1) + vec2(AUTO_AHEAD_PX, 0.0));
++    // Zoomed in past the track's widest, the button sits further out with
++    // the bigger glyphs (polish spec M11).
++    assert_eq!(c, signal_disc(&cam, screen, w1) + vec2(AUTO_AHEAD_PX * client_ui::paint::glyph(cam.scale), 0.0));
+     assert_eq!(hit_test(&sc, None, &cam, screen, c), hit(Target::Auto(s("W1")), true));
+     assert_eq!(hit_test(&sc, None, &cam, screen, signal_disc(&cam, screen, w1)), hit(Target::Signal(s("W1")), true));
+     let mut l = layout_for(Some("West"));
+diff --git a/crates/client-ui/tests/paint.rs b/crates/client-ui/tests/paint.rs
+index e044924..aeb1ba8 100644
+--- a/crates/client-ui/tests/paint.rs
++++ b/crates/client-ui/tests/paint.rs
+@@ -68,7 +68,10 @@ impl Rig {
+ 
+     fn of(layout: Layout, view: View) -> Rig {
+         let sc = Scene::build(&layout).unwrap();
+-        let cam = Camera::fit(sc.all.unwrap(), screen());
++        // Fitted, but no closer than the zoom where signal glyphs start to grow
++        // (polish spec M11): these tests check the glyphs at their base size.
++        let mut cam = Camera::fit(sc.all.unwrap(), screen());
++        cam.scale = cam.scale.min(GLYPH_FROM_SCALE);
+         let names = Names::new(&layout);
+         Rig { layout, sc, cam, view, names, aspects: AspectMode::RedGreen, numbers: true }
+     }
+@@ -787,7 +790,7 @@ fn a_numbers_other_spots_hug_the_track_then_mirror_it() {
+     // Travel to the right: left of travel is up the screen.
+     let (base, f) = (pos2(100.0, 100.0), vec2(1.0, 0.0));
+     let disc = base + vec2(0.0, -POST_PX) + f * (HOOK_PX + LAMP_R);
+-    let alts = number_alts(base, disc, f, 6.0, false);
++    let alts = number_alts(base, disc, f, 6.0, false, 1.0);
+     let side = 3.0 + NUMBER_CLEAR_PX;
+     assert_eq!(alts[0], (pos2(98.0, 100.0 - side), corner(vec2(-1.0, -1.0))), "behind the post, just clear of the track");
+     assert_eq!(alts[0].1, Align2::RIGHT_BOTTOM);
+@@ -796,7 +799,7 @@ fn a_numbers_other_spots_hug_the_track_then_mirror_it() {
+     assert_eq!(alts[4], (pos2(98.0, 100.0 + side), Align2::RIGHT_TOP), "the other side of the track");
+     assert_eq!(alts[5], (pos2(102.0, 100.0 + side), Align2::LEFT_TOP));
+     // With a ○A, the spot ahead clears the button.
+-    let with_auto = number_alts(base, disc, f, 6.0, true);
++    let with_auto = number_alts(base, disc, f, 6.0, true, 1.0);
+     assert!(with_auto[1].0.x >= disc.x + client_ui::hit::AUTO_AHEAD_PX + AUTO_R);
+ }
+ 
+@@ -829,3 +832,19 @@ fn berths_show_display_headcodes_and_fit_them() {
+     let d = r.idle();
+     assert!(d.texts.iter().any(|t| t.text == "202") && d.texts.iter().all(|t| t.text != "202/163"));
+ }
++
++/// Polish spec M11: zoomed in past the track's widest, the signal glyphs
++/// grow with the zoom, up to twice their size; numbers too.
++#[test]
++fn signal_glyphs_grow_when_zoomed_in() {
++    assert_eq!((glyph(0.5), glyph(GLYPH_FROM_SCALE)), (1.0, 1.0));
++    assert!((glyph(GLYPH_FROM_SCALE * 1.5) - 1.5).abs() < 1e-5);
++    assert_eq!((glyph(100.0), glyph(f32::NAN)), (GLYPH_MAX, 1.0));
++    assert_eq!(number_px(GLYPH_FROM_SCALE * 2.0), Some(NUMBER_MAX_PX * 2.0));
++    let mut r = Rig::new(Some("West"));
++    r.cam.scale = GLYPH_FROM_SCALE * 2.0;
++    let d = r.idle();
++    assert!(circles(&d).iter().any(|k| close(k.0, r.disc("W1")) && k.1 == LAMP_R * 2.0), "{:?}", circles(&d));
++    let n = d.texts.iter().find(|t| t.text == "TAW1").unwrap();
++    assert_eq!(n.size, NUMBER_MAX_PX * 2.0);
++}
+diff --git a/crates/client-ui/tests/screens.rs b/crates/client-ui/tests/screens.rs
+index 44e18fd..4706ada 100644
+--- a/crates/client-ui/tests/screens.rs
++++ b/crates/client-ui/tests/screens.rs
+@@ -935,3 +935,21 @@ fn the_panel_hides_and_the_fit_follows_the_window() {
+     r.frame();
+     assert_eq!(r.ui.camera().unwrap(), moved, "not refitted after a pan");
+ }
++
++/// Polish spec M11: + and - buttons and keys zoom in steps about the
++/// middle, and the diagram says how to move it until the player has.
++#[test]
++fn the_diagram_zooms_with_buttons_and_keys_and_says_how() {
++    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
++    let out = r.frame();
++    assert!(has_text(&out, client_ui::screens::VIEW_HINT));
++    let fit = r.ui.camera().unwrap().scale;
++    click_text(&mut r, &out, "+");
++    let zoomed = r.ui.camera().unwrap().scale;
++    assert!((zoomed / fit - client_ui::screens::ZOOM_STEP).abs() < 1e-4, "{fit} → {zoomed}");
++    r.events.push(Event::Key { key: Key::Minus, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::default() });
++    r.frame();
++    assert!((r.ui.camera().unwrap().scale - fit).abs() < 1e-3, "back out");
++    assert!(!has_text(&r.frame(), client_ui::screens::VIEW_HINT), "moved: the hint goes");
++    assert!((client_ui::screens::ZOOM_PER_POINT * 100.0).exp() < 1.2, "a wheel notch is a small step");
++}
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `scripts/cargo test -p signalbox-client-ui --test paint signal_glyphs -p signalbox-client-ui --test screens zooms`
+Expected: compile errors (`glyph`, `VIEW_HINT`).
+
+- [ ] **Step 3: Implement**
+
+```diff
+diff --git a/crates/client-ui/src/hit.rs b/crates/client-ui/src/hit.rs
+index 155fc27..050e923 100644
+--- a/crates/client-ui/src/hit.rs
++++ b/crates/client-ui/src/hit.rs
+@@ -8,7 +8,7 @@ use egui::{Pos2, Rect, vec2};
+ use protocol::View;
+ 
+ use crate::camera::Camera;
+-use crate::paint::{AUTO_R, HOOK_PX, LAMP_R, POST_PX, left_of, number_px};
++use crate::paint::{AUTO_R, HOOK_PX, LAMP_R, POST_PX, glyph, left_of, number_px};
+ use crate::scene::{BerthMark, Scene, SignalMark, project};
+ 
+ /// How near (pixels) the pointer must be to a signal, exit, points or track.
+@@ -31,7 +31,8 @@ pub fn signal_disc(cam: &Camera, screen: Rect, s: &SignalMark) -> Pos2 {
+     if s.facing == egui::Vec2::ZERO {
+         return cam.to_screen(screen, s.at);
+     }
+-    cam.to_screen(screen, s.base) + left_of(s.facing) * POST_PX + s.facing * (HOOK_PX + LAMP_R)
++    let g = glyph(cam.scale);
++    cam.to_screen(screen, s.base) + left_of(s.facing) * (POST_PX * g) + s.facing * ((HOOK_PX + LAMP_R) * g)
+ }
+ 
+ /// Where a controlled signal's ○A button is: `AUTO_AHEAD_PX` ahead of its
+@@ -42,7 +43,7 @@ pub fn auto_button(cam: &Camera, screen: Rect, s: &SignalMark) -> Option<Pos2> {
+         return None;
+     }
+     let ahead = if s.facing == egui::Vec2::ZERO { vec2(1.0, 0.0) } else { s.facing };
+-    Some(signal_disc(cam, screen, s) + ahead * AUTO_AHEAD_PX)
++    Some(signal_disc(cam, screen, s) + ahead * (AUTO_AHEAD_PX * glyph(cam.scale)))
+ }
+ 
+ /// How far ahead of its lamp a signal's ○A button sits.
+@@ -84,7 +85,7 @@ where
+ pub fn hit_test(scene: &Scene, view: Option<&View>, cam: &Camera, screen: Rect, p: Pos2) -> Option<Hit> {
+     let at = |q: Pos2| cam.to_screen(screen, q);
+     // The ○A buttons first: they sit just ahead of their lamps.
+-    let button = |s: &SignalMark| auto_button(cam, screen, s).map(|c| c.distance(p)).filter(|d| *d <= AUTO_R + 2.0);
++    let button = |s: &SignalMark| auto_button(cam, screen, s).map(|c| c.distance(p)).filter(|d| *d <= AUTO_R * glyph(cam.scale) + 2.0);
+     if let Some(s) = scene.signals.iter().filter_map(|s| Some((s, button(s)?))).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(s, _)| s) {
+         return Some(Hit { target: Target::Auto(s.name.clone()), clickable: s.operable });
+     }
+diff --git a/crates/client-ui/src/paint.rs b/crates/client-ui/src/paint.rs
+index 007ea33..092ead7 100644
+--- a/crates/client-ui/src/paint.rs
++++ b/crates/client-ui/src/paint.rs
+@@ -86,6 +86,18 @@ pub const NUMBER_CLEAR_PX: f32 = 1.5;
+ pub const AUTO_LETTER_PX: f32 = 9.0;
+ pub const AUTO_LETTER_GAP_PX: f32 = 1.0;
+ 
++/// Signal glyphs (lamp, post, ○A, numbers, platform text) grow with the
++/// zoom once the track is at its widest, up to `GLYPH_MAX` times their size
++/// (polish spec M11): zoomed in, a signal is no longer a speck.
++pub const GLYPH_FROM_SCALE: f32 = TRACK_MAX_PX / TRACK_UNITS;
++pub const GLYPH_MAX: f32 = 2.0;
++
++/// How much bigger than their base size the signal glyphs are at `scale`.
++pub fn glyph(scale: f32) -> f32 {
++    let g = scale / GLYPH_FROM_SCALE;
++    if g.is_finite() { g.clamp(1.0, GLYPH_MAX) } else { 1.0 }
++}
++
+ pub fn track_w(scale: f32) -> f32 {
+     let w = TRACK_UNITS * scale;
+     if w.is_finite() { w.clamp(TRACK_MIN_PX, TRACK_MAX_PX) } else { TRACK_MIN_PX }
+@@ -93,7 +105,7 @@ pub fn track_w(scale: f32) -> f32 {
+ 
+ /// Signal numbers' text size at this zoom; `None` when too small to read.
+ pub fn number_px(scale: f32) -> Option<f32> {
+-    let px = (NUMBER_UNITS * scale).min(NUMBER_MAX_PX);
++    let px = (NUMBER_UNITS * scale).min(NUMBER_MAX_PX * glyph(scale));
+     (px >= NUMBER_MIN_PX).then_some(px)
+ }
+ 
+@@ -380,10 +392,12 @@ fn signal_shapes(d: &mut Drawing, s: &SignalMark, cam: &Camera, screen: Rect, st
+     let routes: Vec<RouteState> =
+         s.routes.iter().filter_map(|r| st.view.and_then(|v| v.routes.get(r)).map(|rv| rv.state)).collect();
+     let disc = signal_disc(cam, screen, s);
++    let g = glyph(cam.scale);
++    let lamp = LAMP_R * g;
+     if s.facing != Vec2::ZERO {
+         let base = cam.to_screen(screen, s.base);
+-        let top = base + left_of(s.facing) * POST_PX;
+-        let hook = top + s.facing * HOOK_PX;
++        let top = base + left_of(s.facing) * (POST_PX * g);
++        let hook = top + s.facing * (HOOK_PX * g);
+         // Fringe signals are grey whatever is set from them.
+         let colour = if s.fringe {
+             FRINGE
+@@ -402,37 +416,37 @@ fn signal_shapes(d: &mut Drawing, s: &SignalMark, cam: &Camera, screen: Rect, st
+     }
+     let cancelling = routes.contains(&RouteState::Cancelling);
+     if s.fringe {
+-        d.shapes.push(Shape::circle_filled(disc, LAMP_R, FRINGE));
++        d.shapes.push(Shape::circle_filled(disc, lamp, FRINGE));
+     } else if cancelling && !blink_on(st.time) {
+         // Approach locking timing out: the lamp flashes red.
+-        d.shapes.push(Shape::circle_stroke(disc, LAMP_R, Stroke::new(1.0, RED)));
++        d.shapes.push(Shape::circle_stroke(disc, lamp, Stroke::new(1.0, RED)));
+     } else {
+         let (first, second) = signal_lamps(aspect, st.aspects);
+-        d.shapes.push(Shape::circle_filled(disc, LAMP_R, first));
++        d.shapes.push(Shape::circle_filled(disc, lamp, first));
+         if let Some(c) = second {
+-            d.shapes.push(Shape::circle_filled(disc + s.facing * (LAMP_R * 2.2), LAMP_R, c));
++            d.shapes.push(Shape::circle_filled(disc + s.facing * (lamp * 2.2), lamp, c));
+         }
+     }
+     if st.selected == Some(s.name.as_str()) && blink_on(st.time) {
+-        d.shapes.push(Shape::circle_stroke(disc, LAMP_R + 3.5, Stroke::new(2.0, SELECT)));
++        d.shapes.push(Shape::circle_stroke(disc, lamp + 3.5, Stroke::new(2.0, SELECT)));
+     }
+     if st.exits.contains(&ExitName::Signal(s.name.clone())) {
+-        d.shapes.push(Shape::circle_stroke(disc, LAMP_R + 3.5, Stroke::new(2.0, SELECT)));
++        d.shapes.push(Shape::circle_stroke(disc, lamp + 3.5, Stroke::new(2.0, SELECT)));
+     }
+     if st.refused == Some(s.name.as_str()) || st.blocking == Some(s.name.as_str()) {
+-        d.shapes.push(Shape::circle_stroke(disc, LAMP_R + 6.0, Stroke::new(2.0, REFUSED)));
++        d.shapes.push(Shape::circle_stroke(disc, lamp + 6.0, Stroke::new(2.0, REFUSED)));
+     }
+-    d.keep.rounds.push((disc, LAMP_R));
++    d.keep.rounds.push((disc, lamp));
+     if s.facing != Vec2::ZERO {
+         // A second yellow's spot, kept clear whatever is shown (spec P3).
+-        d.keep.rounds.push((disc + s.facing * (LAMP_R * 2.2), LAMP_R));
++        d.keep.rounds.push((disc + s.facing * (lamp * 2.2), lamp));
+     }
+     if let (true, Some(size)) = (st.numbers, number_px(cam.scale)) {
+         let side = if s.facing == Vec2::ZERO { vec2(0.0, -1.0) } else { left_of(s.facing) };
+         let base = cam.to_screen(screen, s.base);
+-        let alts = number_alts(base, disc, s.facing, track_w(cam.scale), auto_button(cam, screen, s).is_some());
++        let alts = number_alts(base, disc, s.facing, track_w(cam.scale), auto_button(cam, screen, s).is_some(), g);
+         let text = TextItem {
+-            at: disc + side * (LAMP_R + 2.0),
++            at: disc + side * (lamp + 2.0),
+             anchor: anchor_towards(side),
+             text: st.names.signal(&s.name),
+             size,
+@@ -446,17 +460,19 @@ fn signal_shapes(d: &mut Drawing, s: &SignalMark, cam: &Camera, screen: Rect, st
+ /// A signal number's other spots, best first (spec §3.3): hugging the track
+ /// behind the post, ahead of the lamp (past its ○A), one row further out
+ /// behind and ahead, and the two spots on the other side of the track.
+-/// `base` is the foot of the post and `disc` the lamp, on screen.
+-pub fn number_alts(base: Pos2, disc: Pos2, facing: Vec2, track_w: f32, has_auto: bool) -> Vec<(Pos2, Align2)> {
++/// `base` is the foot of the post and `disc` the lamp, on screen; `g` the
++/// glyph size (`glyph`).
++pub fn number_alts(base: Pos2, disc: Pos2, facing: Vec2, track_w: f32, has_auto: bool, g: f32) -> Vec<(Pos2, Align2)> {
+     let f = if facing == Vec2::ZERO { vec2(1.0, 0.0) } else { facing };
+     let l = left_of(f);
+     let side = track_w / 2.0 + NUMBER_CLEAR_PX;
+-    let ahead = HOOK_PX + LAMP_R + if has_auto { AUTO_AHEAD_PX + AUTO_R } else { LAMP_R } + 2.0;
++    let (lamp, hook) = (LAMP_R * g, HOOK_PX * g);
++    let ahead = hook + lamp + if has_auto { (AUTO_AHEAD_PX + AUTO_R) * g } else { lamp } + 2.0;
+     vec![
+         (base + l * side - f * 2.0, corner(l - f)),
+         (base + l * side + f * ahead, corner(l + f)),
+-        (disc + l * (LAMP_R + 2.0) - f * (LAMP_R + 2.0), corner(l - f)),
+-        (disc + l * (LAMP_R + 2.0) + f * (ahead - HOOK_PX - LAMP_R), corner(l + f)),
++        (disc + l * (lamp + 2.0) - f * (lamp + 2.0), corner(l - f)),
++        (disc + l * (lamp + 2.0) + f * (ahead - hook - lamp), corner(l + f)),
+         (base - l * side - f * 2.0, corner(-l - f)),
+         (base - l * side + f * 2.0, corner(-l + f)),
+     ]
+@@ -470,7 +486,7 @@ pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawi
+     for p in &scene.platforms {
+         let r = Rect::from_two_pos(to(p.rect.min), to(p.rect.max));
+         d.shapes.push(Shape::rect_filled(r, CornerRadius::ZERO, PLATFORM));
+-        let text = TextItem { at: r.center(), anchor: Align2::CENTER_CENTER, text: p.label.clone(), size: 9.0, colour: BG, monospace: false };
++        let text = TextItem { at: r.center(), anchor: Align2::CENTER_CENTER, text: p.label.clone(), size: 9.0 * glyph(cam.scale), colour: BG, monospace: false };
+         d.movable_text(text, Role::Platform, Vec::new(), Some(r));
+     }
+     for t in &scene.tracks {
+@@ -525,19 +541,20 @@ pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawi
+             let on = st.view.is_some_and(|v| {
+                 s.routes.iter().filter_map(|r| v.routes.get(r)).any(|rv| rv.auto_working && rv.state != RouteState::Cancelling)
+             });
++            let auto_r = AUTO_R * glyph(cam.scale);
+             // Blue where you can press it; a spectator's are grey, read-only.
+             let colour = if s.operable { AUTO } else { FRINGE };
+             d.shapes.push(if on {
+-                Shape::circle_filled(c, AUTO_R, colour)
++                Shape::circle_filled(c, auto_r, colour)
+             } else {
+-                Shape::circle_stroke(c, AUTO_R, Stroke::new(1.5, colour))
++                Shape::circle_stroke(c, auto_r, Stroke::new(1.5, colour))
+             });
+-            d.keep.rounds.push((c, AUTO_R));
++            d.keep.rounds.push((c, auto_r));
+             // The `A` outward, away from the track; else ahead, else on the inside.
+             let ahead = if s.facing == Vec2::ZERO { vec2(1.0, 0.0) } else { s.facing };
+             let out = left_of(ahead);
+-            let gap = AUTO_R + AUTO_LETTER_GAP_PX;
+-            let text = TextItem { at: c + out * gap, anchor: corner(out), text: "A".into(), size: AUTO_LETTER_PX, colour, monospace: true };
++            let gap = auto_r + AUTO_LETTER_GAP_PX;
++            let text = TextItem { at: c + out * gap, anchor: corner(out), text: "A".into(), size: AUTO_LETTER_PX * glyph(cam.scale), colour, monospace: true };
+             let alts = vec![(c + ahead * gap, corner(ahead)), (c - out * gap, corner(-out))];
+             d.movable_text(text, Role::AutoLetter, alts, None);
+         }
+@@ -593,7 +610,7 @@ fn highlight_shapes(d: &mut Drawing, scene: &Scene, cam: &Camera, screen: Rect,
+         match h {
+             Highlight::Signal(s) | Highlight::Exit(ExitName::Signal(s)) => {
+                 if let Some(m) = signal(s) {
+-                    ring(d, signal_disc(cam, screen, m), LAMP_R + HIGHLIGHT_GAP_PX + 4.0);
++                    ring(d, signal_disc(cam, screen, m), LAMP_R * glyph(cam.scale) + HIGHLIGHT_GAP_PX + 4.0);
+                 }
+             }
+             Highlight::Exit(ExitName::Node(n)) => {
+@@ -628,7 +645,7 @@ fn highlight_shapes(d: &mut Drawing, scene: &Scene, cam: &Camera, screen: Rect,
+             }
+             Highlight::Ui(u) => {
+                 if let Some(c) = u.strip_prefix("auto:").and_then(signal).and_then(|m| auto_button(cam, screen, m)) {
+-                    ring(d, c, AUTO_R + HIGHLIGHT_GAP_PX);
++                    ring(d, c, AUTO_R * glyph(cam.scale) + HIGHLIGHT_GAP_PX);
+                 }
+             }
+         }
+diff --git a/crates/client-ui/src/screens.rs b/crates/client-ui/src/screens.rs
+index 7ca03c7..95d8653 100644
+--- a/crates/client-ui/src/screens.rs
++++ b/crates/client-ui/src/screens.rs
+@@ -25,8 +25,16 @@ use crate::scene::Scene;
+ 
+ /// Alarms and the connection banner.
+ pub const ALARM: Color32 = Color32::from_rgb(0xFF, 0x5A, 0x5A);
+-/// How far one wheel "line" (egui points of scroll) zooms.
+-const ZOOM_PER_POINT: f32 = 1.0 / 200.0;
++/// How far one wheel "line" (egui points of scroll) zooms: about ×1.2 a
++/// notch (polish spec M11; it was ×1.8).
++pub const ZOOM_PER_POINT: f32 = 1.0 / 600.0;
++/// One press of the zoom buttons or keys.
++pub const ZOOM_STEP: f32 = 1.25;
++/// The zoom buttons: this big, this far in from the diagram's corner.
++const ZOOM_BUTTON: f32 = 26.0;
++const ZOOM_INSET: f32 = 8.0;
++/// Until the player first moves the view, the diagram says how.
++pub const VIEW_HINT: &str = "Drag to move · wheel, + or - to zoom · Fit shows it all";
+ /// Simplifier columns, in points: headcode, lateness, from, to, at,
+ /// platform, arrival, departure (wide enough for `BTHNLGR`, `ML_UP` and
+ /// `05:03½`).
+@@ -858,6 +866,19 @@ impl UiApp {
+             cam.pan(resp.drag_delta());
+             self.cam_moved = true;
+         }
++        // Buttons and keys zoom about the middle (polish spec M11); not while
++        // typing in the simplifier's search.
++        let keys = if ui.ctx().egui_wants_keyboard_input() {
++            0
++        } else {
++            ui.input(|i| {
++                i32::from(i.key_pressed(Key::Plus) || i.key_pressed(Key::Equals)) - i32::from(i.key_pressed(Key::Minus))
++            })
++        };
++        if keys != 0 {
++            cam.zoom_at(rect, rect.center(), ZOOM_STEP.powi(keys));
++            self.cam_moved = true;
++        }
+         if let Some(p) = resp.hover_pos() {
+             let (scroll, zoom) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
+             if scroll != 0.0 {
+@@ -915,6 +936,18 @@ impl UiApp {
+             None => d,
+         };
+         paint::paint(&painter, d);
++        if !self.cam_moved {
++            painter.text(rect.left_bottom() + vec2(ZOOM_INSET, -ZOOM_INSET), Align2::LEFT_BOTTOM, VIEW_HINT, FontId::proportional(12.0), paint::LABEL);
++        }
++        // The zoom buttons, on top of the diagram (polish spec M11).
++        let corner = |k: f32| rect.right_top() + vec2(-(ZOOM_INSET + ZOOM_BUTTON) * k, ZOOM_INSET);
++        let plus = ui.put(Rect::from_min_size(corner(2.0) - vec2(4.0, 0.0), vec2(ZOOM_BUTTON, ZOOM_BUTTON)), egui::Button::new("+"));
++        let minus = ui.put(Rect::from_min_size(corner(1.0), vec2(ZOOM_BUTTON, ZOOM_BUTTON)), egui::Button::new("-"));
++        let steps = i32::from(plus.clicked()) - i32::from(minus.clicked());
++        if let (Some(c), true) = (self.cam.as_mut(), steps != 0) {
++            c.zoom_at(rect, rect.center(), ZOOM_STEP.powi(steps));
++            self.cam_moved = true;
++        }
+         match click {
+             // With the enquiry on, a headcode opens its window and nothing else.
+             Some(Some(t)) => match self.core.headcode_at(&t).filter(|_| self.settings.enquiry) {
+```
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `scripts/cargo test -p signalbox-client-core -p signalbox-client-ui`
+Expected: PASS, no warnings (as on the scratch copy).
+
+- [ ] **Step 5: Document**
+
+`CLAUDE.md`, "Browser client": "Zoom: ×1.2 a wheel notch, + and − buttons and keys ×1.25; signal glyphs grow with the
+zoom once the track is at its widest, up to twice their size (`paint::glyph`, polish spec M11)."
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/client-ui crates/client-ui/src/hit.rs crates/client-ui/src/paint.rs crates/client-ui/src/screens.rs CLAUDE.md
+git commit -m "feat(client-ui): finer zoom with buttons and keys; signal glyphs grow when zoomed in"
+```
+
+---
+
+### Task 20: Which way points lie (UI review M12)
+
+Spec §10 M12 (U17). The unused leg is thin, the leg points move to flashes, and an unused crossover middle is thin.
+
+**Files:**
+- Modify: `crates/client-ui/src/paint.rs`
+- Test: `crates/client-ui/tests/layouts.rs`
+- Test: `crates/client-ui/tests/paint.rs`
+
+**Interfaces:**
+- Consumes: `PointsMark.{normal_meets, reverse_meets}`.
+- Produces: `paint::{UNUSED_W = 0.4, unused_crossovers(&Scene, Option<&View>) -> BTreeSet<String>}`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Apply (written and run on the scratch copy; re-check the context on the base, keep the intent):
+
+```diff
+diff --git a/crates/client-ui/tests/layouts.rs b/crates/client-ui/tests/layouts.rs
+index 8dd5b75..d5895b7 100644
+--- a/crates/client-ui/tests/layouts.rs
++++ b/crates/client-ui/tests/layouts.rs
+@@ -134,3 +134,19 @@ fn every_lesson_draws_with_its_highlights() {
+         }
+     }
+ }
++
++/// Polish spec M12: Liverpool Street's crossovers are found, and a
++/// crossover's middle stops counting as unused once an end lies over it.
++#[test]
++fn crossovers_neither_end_of_which_is_set_are_found() {
++    let mut g = Game::new(world("liverpool-st"), GameMeta { layout: "liverpool-st".into(), seed: 1 });
++    g.connect("sam");
++    let (l, mut v) = (g.layout_of("sam").unwrap(), g.view_of("sam").unwrap());
++    let sc = Scene::build(&l).unwrap();
++    let unused = client_ui::paint::unused_crossovers(&sc, Some(&v));
++    assert!(unused.len() >= 4, "{unused:?}");
++    let middle = unused.iter().next().unwrap().clone();
++    let end = sc.points.iter().find(|p| p.reverse_meets.contains(&middle)).unwrap();
++    v.points.get_mut(&end.name).unwrap().position = protocol::PointsPos::Reverse;
++    assert!(!client_ui::paint::unused_crossovers(&sc, Some(&v)).contains(&middle), "{} lies over it", end.name);
++}
+diff --git a/crates/client-ui/tests/paint.rs b/crates/client-ui/tests/paint.rs
+index aeb1ba8..8176e7c 100644
+--- a/crates/client-ui/tests/paint.rs
++++ b/crates/client-ui/tests/paint.rs
+@@ -237,15 +237,19 @@ fn points_show_the_lying_leg_whole_and_a_gap_in_the_other() {
+     let (n_end, rv_end) = (short(n, c), short(rv, c));
+     let legs = lines_of(&r.idle(), TRACK_FREE, w);
+     assert!(has(&legs, c, n_end), "normal lies: whole up to its joint {legs:?}");
+-    assert!(has(&legs, c + (rv - c) * GAP, rv_end), "reverse: from the gap");
++    // Polish spec M12: the other leg is thin as well as short of the points.
++    let thin = lines_of(&r.idle(), TRACK_FREE, w * UNUSED_W);
++    assert!(has(&thin, c + (rv - c) * GAP, rv_end), "reverse: thin, from the gap {thin:?}");
++    assert!(!has(&legs, c + (rv - c) * GAP, rv_end), "not at full width");
++    // Moving to reverse: the reverse leg flashes, whole then gapped; normal is thin.
+     r.view.points.insert(s("P"), PointsView { position: PointsPos::Reverse, moving: true, locked: false });
+-    let open = lines_of(&r.draw(None, &[], None, 0.0), TRACK_FREE, w);
+-    assert!(has(&open, c, rv_end) && has(&open, c + (n - c) * GAP, n_end));
+-    assert!(!has(&open, c, c + (n - c) * GAP), "the gap open");
+-    let shut = lines_of(&r.draw(None, &[], None, 0.3), TRACK_FREE, w);
+-    assert!(has(&shut, c, c + (n - c) * GAP), "while moving, the gap flashes");
++    let lit = r.draw(None, &[], None, 0.0);
++    assert!(has(&lines_of(&lit, TRACK_FREE, w), c, rv_end), "bright half: whole");
++    assert!(has(&lines_of(&lit, TRACK_FREE, w * UNUSED_W), c + (n - c) * GAP, n_end));
++    let dark = lines_of(&r.draw(None, &[], None, 0.3), TRACK_FREE, w);
++    assert!(has(&dark, c + (rv - c) * GAP, rv_end) && !has(&dark, c, rv_end), "dark half: gapped");
+     r.view.points.get_mut("P").unwrap().moving = false;
+-    assert!(!has(&lines_of(&r.draw(None, &[], None, 0.3), TRACK_FREE, w), c, c + (n - c) * GAP));
++    assert!(has(&lines_of(&r.draw(None, &[], None, 0.3), TRACK_FREE, w), c, rv_end), "swung: steady");
+ }
+ 
+ /// W1 faces right (+x): its post goes up (the left of travel, y grows
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `scripts/cargo test -p signalbox-client-ui --test paint points_show --test layouts crossovers`
+Expected: compile errors (`UNUSED_W`, `unused_crossovers` not found).
+
+- [ ] **Step 3: Implement**
+
+```diff
+diff --git a/crates/client-ui/src/paint.rs b/crates/client-ui/src/paint.rs
+index 092ead7..a7db69c 100644
+--- a/crates/client-ui/src/paint.rs
++++ b/crates/client-ui/src/paint.rs
+@@ -65,6 +65,9 @@ pub const NUMBER_MAX_PX: f32 = 11.0;
+ pub const NUMBER_MIN_PX: f32 = 7.0;
+ /// Where the non-lying leg of points starts, as a fraction of its length.
+ pub const GAP: f32 = 0.5;
++/// The non-lying leg, and a crossover's middle while neither end lies over
++/// it, are drawn this fraction of the track's width (polish spec M12).
++pub const UNUSED_W: f32 = 0.4;
+ /// The ○A button's circle.
+ pub const AUTO_R: f32 = 4.0;
+ /// Headcodes: text size in pixels.
+@@ -258,31 +261,53 @@ fn points_shapes(out: &mut Vec<Shape>, p: &PointsMark, to: &dyn Fn(Pos2) -> Pos2
+     let c = to(p.at);
+     // The toe and the lying leg carry the route; an overlap held here ends
+     // in a tick at the far end of each that nothing held goes on from.
+-    for (leg, meets) in [(p.toe, &p.toe_meets), lie] {
++    // While the points move, the leg they move to flashes: its first half
++    // shows only in the bright half of the blink (polish spec M12).
++    for (i, (leg, meets)) in [(p.toe, &p.toe_meets), lie].into_iter().enumerate() {
+         let Some(l) = leg else { continue };
+         let end = leg_end(p, c, to(l), meets);
+-        bar(out, c, end, w, colour, p.fringe);
++        if i == 1 && moving && !blink_on(st.time) {
++            bar(out, c + (to(l) - c) * GAP, end, w, colour, p.fringe);
++        } else {
++            bar(out, c, end, w, colour, p.fringe);
++        }
+         if overlap && !meets.iter().any(|m| held(m)) {
+             tick(out, end, end - c, w);
+         }
+     }
++    // The other leg: thin, and short of the points (polish spec M12).
+     if let (Some(o), meets) = other {
+         let far = to(o);
+         let end = leg_end(p, c, far, meets);
+         let gap_end = c + (far - c) * GAP;
+-        bar(out, gap_end, end, w, colour, p.fringe);
+-        // While moving the gap flashes: closed in the dark half of the blink.
+-        if moving && !blink_on(st.time) {
+-            bar(out, c, gap_end, w, colour, p.fringe);
++        bar(out, gap_end, end, w * UNUSED_W, colour, p.fringe);
++    }
++}
++
++/// Sections lying beyond the non-lying leg of two or more points: the middle
++/// of a crossover neither end of which is set over it (polish spec M12).
++pub fn unused_crossovers(scene: &Scene, view: Option<&View>) -> std::collections::BTreeSet<String> {
++    let mut seen: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
++    for p in &scene.points {
++        let lying = view.and_then(|v| v.points.get(&p.name)).map_or(PointsPos::Normal, |v| v.position);
++        let other = match lying {
++            PointsPos::Normal => &p.reverse_meets,
++            PointsPos::Reverse => &p.normal_meets,
++        };
++        for m in other {
++            *seen.entry(m.as_str()).or_default() += 1;
+         }
+     }
++    seen.into_iter().filter(|(_, n)| *n >= 2).map(|(s, _)| s.to_string()).collect()
+ }
+ 
+-fn track_shapes(d: &mut Drawing, t: &TrackLine, to: &dyn Fn(Pos2) -> Pos2, st: &PaintState, w: f32) {
++fn track_shapes(d: &mut Drawing, t: &TrackLine, to: &dyn Fn(Pos2) -> Pos2, st: &PaintState, w: f32, unused: bool) {
+     let section = |name: &str| st.view.and_then(|v| v.sections.get(name));
+     let held = |name: &str| section(name).is_some_and(|s| s.held != Held::Free);
+     let (a, b) = trimmed(t, to(t.a), to(t.b));
+-    bar(&mut d.shapes, a, b, w, track_colour(section(&t.section)), t.fringe);
++    // An unused crossover's middle is thin unless something is on it or holds it.
++    let thin = unused && section(&t.section).is_none_or(|s| !s.occupied && s.held == Held::Free);
++    bar(&mut d.shapes, a, b, if thin { w * UNUSED_W } else { w }, track_colour(section(&t.section)), t.fringe);
+     d.keep.bars.push((a, b, w));
+     // End of overlap: an end of an overlap section where nothing held goes on.
+     if section(&t.section).is_some_and(|s| s.held == Held::Overlap) {
+@@ -489,8 +514,9 @@ pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawi
+         let text = TextItem { at: r.center(), anchor: Align2::CENTER_CENTER, text: p.label.clone(), size: 9.0 * glyph(cam.scale), colour: BG, monospace: false };
+         d.movable_text(text, Role::Platform, Vec::new(), Some(r));
+     }
++    let unused = unused_crossovers(scene, st.view);
+     for t in &scene.tracks {
+-        track_shapes(&mut d, t, &to, st, w);
++        track_shapes(&mut d, t, &to, st, w, unused.contains(&t.section));
+     }
+     for p in &scene.points {
+         points_shapes(&mut d.shapes, p, &to, st, track_colour(section(&p.section)), w);
+```
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `scripts/cargo test -p signalbox-client-core -p signalbox-client-ui`
+Expected: PASS, no warnings (as on the scratch copy).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add crates/client-ui crates/client-ui/src/paint.rs
+git commit -m "feat(client-ui): points show which way they lie; unused crossover middles are thin"
+```
+
+---
+
+### Task 21: Fit keeps a long area readable (UI review M13)
+
+Spec §10 M13 (U18, U19). Merges with P1: the legibility measurement uses the same Fit and reports, not asserts,
+criterion 3 where Fit shows part of an area.
+
+**Files:**
+- Modify: `crates/client-ui/src/scene.rs`
+- Modify: `crates/client-ui/src/screens.rs`
+- Modify: `CLAUDE.md`
+- Test: `crates/client-ui/tests/legibility.rs`
+- Test: `crates/client-ui/tests/screens.rs`
+
+**Interfaces:**
+- Consumes: `Scene::fit_bounds`, `Camera::fit`.
+- Produces: `scene::FIT_MIN_SCALE = 0.55`; `Scene.focus: Option<Pos2>`; `Scene::fit_camera(Rect) -> Option<Camera>`;
+  `legibility.rs` rows gain `readable` and count only on-screen hidden numbers.
+
+- [ ] **Step 1: Write the failing tests**
+
+Apply (written and run on the scratch copy; re-check the context on the base, keep the intent):
+
+```diff
+diff --git a/crates/client-ui/tests/legibility.rs b/crates/client-ui/tests/legibility.rs
+index 0f2e321..ab09c2d 100644
+--- a/crates/client-ui/tests/legibility.rs
++++ b/crates/client-ui/tests/legibility.rs
+@@ -51,6 +51,9 @@ struct Row {
+     hidden: Vec<String>,
+     /// How long `plan` took (debug builds are several times slower).
+     ms: f64,
++    /// Fit showed part of the area round its busiest station (polish spec
++    /// M13), not all of it: reported, not held to criterion 3.
++    readable: bool,
+ }
+ 
+ #[test]
+@@ -79,7 +82,8 @@ fn every_view_is_legible_at_every_zoom() {
+             let names = Names::new(&l);
+             let view = format!("{name} {}", area.as_deref().unwrap_or("spectator"));
+             for (window, screen) in windows() {
+-                let fit = Camera::fit(sc.fit_bounds().unwrap(), screen);
++                let fit = sc.fit_camera(screen).unwrap();
++                let readable = fit.scale > Camera::fit(sc.fit_bounds().unwrap(), screen).scale;
+                 for zoom in [1.0_f32, 2.0, 4.0] {
+                     let cam = Camera { centre: fit.centre, scale: fit.scale * zoom };
+                     let st = PaintState {
+@@ -98,24 +102,45 @@ fn every_view_is_legible_at_every_zoom() {
+                     let t0 = std::time::Instant::now();
+                     let plan = labels::plan(&d, &mut measure);
+                     let ms = t0.elapsed().as_secs_f64() * 1000.0;
++                    // Own numbers hidden where the player looks (a readable Fit,
++                    // polish spec M13, shows only part of a long area).
++                    let hidden: Vec<String> = d
++                        .movable
++                        .iter()
++                        .zip(&plan.spots)
++                        .filter(|(m, spot)| m.role == labels::Role::Number && spot.is_none() && screen.contains(d.texts[m.text].at))
++                        .map(|(m, _)| d.texts[m.text].text.clone())
++                        .collect();
+                     let audit = labels::audit(&on_screen(labels::apply(d, &plan), screen), &mut measure);
+-                    rows.push(Row { window, view: view.clone(), zoom, audit, hidden: plan.hidden_numbers.clone(), ms });
++                    rows.push(Row { window, view: view.clone(), zoom, audit, hidden, ms, readable });
+                 }
+             }
+         }
+     }
+-    println!("{:10} {:38} {:>4} {:>8} {:>7} {:>5} {:>6} {:>7}  shown", "window", "view", "zoom", "overlaps", "covered", "tight", "hidden", "plan ms");
++    println!("{:10} {:38} {:>4} {:>8} {:>7} {:>5} {:>6} {:>7} {:>4}  shown", "window", "view", "zoom", "overlaps", "covered", "tight", "hidden", "plan ms", "fit");
+     for r in &rows {
+         println!(
+-            "{:10} {:38} {:>4} {:>8} {:>7} {:>5} {:>6} {:>7.2}  {:?} {:?}",
+-            r.window, r.view, r.zoom, r.audit.overlaps, r.audit.covered, r.audit.tight, r.hidden.len(), r.ms, r.audit.shown, r.hidden
++            "{:10} {:38} {:>4} {:>8} {:>7} {:>5} {:>6} {:>7.2} {:>4}  {:?} {:?}",
++            r.window,
++            r.view,
++            r.zoom,
++            r.audit.overlaps,
++            r.audit.covered,
++            r.audit.tight,
++            r.hidden.len(),
++            r.ms,
++            if r.readable { "read" } else { "all" },
++            r.audit.shown,
++            r.hidden
+         );
+     }
+     for r in &rows {
+         assert_eq!(r.audit.overlaps, 0, "{} {} x{}: texts overlap", r.window, r.view, r.zoom);
+         assert_eq!(r.audit.covered, 0, "{} {} x{}: texts cover track, lamps or boxes", r.window, r.view, r.zoom);
+     }
+-    let fit_small: Vec<&Row> = rows.iter().filter(|r| r.window == "1280x800" && r.zoom == 1.0).collect();
++    // Criterion 3 holds where Fit frames the whole area; a readable Fit (Gretz's
++    // boxes, which drew no numbers at all before) is reported above.
++    let fit_small: Vec<&Row> = rows.iter().filter(|r| r.window == "1280x800" && r.zoom == 1.0 && !r.readable).collect();
+     for r in fit_small.iter().filter(|r| !r.view.ends_with("spectator")) {
+         assert!(r.hidden.is_empty(), "{}: every own number drawn at 1280x800 Fit, not {:?}", r.view, r.hidden);
+     }
+diff --git a/crates/client-ui/tests/screens.rs b/crates/client-ui/tests/screens.rs
+index 4706ada..59200f5 100644
+--- a/crates/client-ui/tests/screens.rs
++++ b/crates/client-ui/tests/screens.rs
+@@ -953,3 +953,22 @@ fn the_diagram_zooms_with_buttons_and_keys_and_says_how() {
+     assert!(!has_text(&r.frame(), client_ui::screens::VIEW_HINT), "moved: the hint goes");
+     assert!((client_ui::screens::ZOOM_PER_POINT * 100.0).exp() < 1.2, "a wheel notch is a small step");
+ }
++
++/// Polish spec M13: Gretz's long areas are not a thin strip at Fit: Fit
++/// shows them at a readable scale round their busiest station; short areas
++/// and spectators still see everything.
++#[test]
++fn fit_keeps_a_long_area_readable() {
++    use client_ui::scene::FIT_MIN_SCALE;
++    let mut r = Rig::in_game(converted("gretz-armainvilliers"), Some("Gretz"));
++    r.frame();
++    let cam = r.ui.camera().unwrap();
++    let sc = client_ui::scene::Scene::build(r.ui.core.game().unwrap().layout().unwrap()).unwrap();
++    assert_eq!((cam.scale, Some(cam.centre)), (FIT_MIN_SCALE, sc.focus), "{cam:?}");
++    let mut r = Rig::in_game(converted("gretz-armainvilliers"), None);
++    r.frame();
++    assert!(r.ui.camera().unwrap().scale < FIT_MIN_SCALE, "a spectator sees the whole layout");
++    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
++    r.frame();
++    assert!(r.ui.camera().unwrap().scale > FIT_MIN_SCALE);
++}
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `scripts/cargo test -p signalbox-client-ui --test screens fit_keeps`
+Expected: compile error (`FIT_MIN_SCALE`).
+
+- [ ] **Step 3: Implement**
+
+```diff
+diff --git a/crates/client-ui/src/scene.rs b/crates/client-ui/src/scene.rs
+index 5d8c526..d78b314 100644
+--- a/crates/client-ui/src/scene.rs
++++ b/crates/client-ui/src/scene.rs
+@@ -8,6 +8,8 @@ use client_core::select;
+ use egui::{Pos2, Rect, Vec2, pos2, vec2};
+ use protocol::{ExitName, Layout};
+ 
++use crate::camera::Camera;
++
+ #[derive(Clone, Debug, PartialEq)]
+ pub struct TrackLine {
+     pub segment: String,
+@@ -147,8 +149,15 @@ pub struct Scene {
+     pub own: Option<Rect>,
+     /// Bounds of everything drawn.
+     pub all: Option<Rect>,
++    /// Your area's busiest station (the most calls in your simplifier): the
++    /// middle of its platforms. `None` for a spectator (polish spec M13).
++    pub focus: Option<Pos2>,
+ }
+ 
++/// Fit never shows a player's area smaller than this (pixels per layout
++/// unit), just above where signal numbers appear (polish spec M13).
++pub const FIT_MIN_SCALE: f32 = 0.55;
++
+ /// Coordinates beyond this are nonsense and left out, so bounds, centres
+ /// and fits stay finite.
+ pub const MAX_COORD: f64 = 1.0e7;
+@@ -368,15 +377,44 @@ impl Scene {
+         for p in &sc.points {
+             grow(&mut sc.all, p.at);
+         }
++        sc.focus = busiest(l, &sc);
+         Some(sc)
+     }
+ 
++    /// The "Fit" camera: your own area (or everything) framed in `screen`; a
++    /// player's area too long to read that way is shown at `FIT_MIN_SCALE`
++    /// round its busiest station instead (polish spec M13).
++    pub fn fit_camera(&self, screen: Rect) -> Option<Camera> {
++        let fit = Camera::fit(self.fit_bounds()?, screen);
++        Some(match self.focus {
++            Some(centre) if fit.scale < FIT_MIN_SCALE => Camera { centre, scale: FIT_MIN_SCALE },
++            _ => fit,
++        })
++    }
++
+     /// What "Fit" frames: your own area, or everything.
+     pub fn fit_bounds(&self) -> Option<Rect> {
+         self.own.or(self.all)
+     }
+ }
+ 
++/// The middle of the platforms of the place your simplifier calls at most
++/// (ties: the first in name order), among places with a platform in your own
++/// area; `None` for a spectator or with no such place.
++fn busiest(l: &Layout, sc: &Scene) -> Option<Pos2> {
++    let own = sc.own?;
++    l.area.as_ref()?;
++    let mut calls: BTreeMap<&str, usize> = BTreeMap::new();
++    for c in l.simplifier.iter().flat_map(|r| &r.calls) {
++        *calls.entry(c.place.as_str()).or_default() += 1;
++    }
++    let mine = |place: &str| -> Option<Rect> {
++        sc.platforms.iter().filter(|p| p.place == place && own.contains(p.rect.center())).map(|p| p.rect).reduce(|a, b| a.union(b))
++    };
++    let (place, _) = calls.iter().filter(|(p, _)| mine(p).is_some()).max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0)))?;
++    Some(mine(place)?.center())
++}
++
+ /// Chain drawn lines into runs through plain joints, and give each run the
+ /// directions its signals face. A run's end is loose where your visible
+ /// track stops: no other segment meets it, or it is a route's exit (a
+diff --git a/crates/client-ui/src/screens.rs b/crates/client-ui/src/screens.rs
+index 95d8653..242a30a 100644
+--- a/crates/client-ui/src/screens.rs
++++ b/crates/client-ui/src/screens.rs
+@@ -856,7 +856,7 @@ impl UiApp {
+         // changes size while the player has not moved the view (polish spec H7).
+         let resized = self.fit_size.is_some_and(|s| (s - rect.size()).length() > 0.5);
+         if self.fitted.as_ref() != Some(&fit_key) || self.cam.is_none() || (resized && !self.cam_moved) {
+-            self.cam = Some(scene.fit_bounds().map_or(Camera { centre: rect.center(), scale: 1.0 }, |b| Camera::fit(b, rect)));
++            self.cam = Some(scene.fit_camera(rect).unwrap_or(Camera { centre: rect.center(), scale: 1.0 }));
+             self.fitted = Some(fit_key);
+             self.cam_moved = false;
+         }
+```
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `scripts/cargo test -p signalbox-client-core -p signalbox-client-ui`
+Expected: PASS, no warnings (as on the scratch copy).
+
+- [ ] **Step 5: Document**
+
+`CLAUDE.md`, "Browser client": "Fit shows a player's area at no less than 0.55 px per unit, round its busiest station
+when it is too long (`Scene::fit_camera`, polish spec M13)."
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/client-ui crates/client-ui/src/scene.rs crates/client-ui/src/screens.rs CLAUDE.md
+git commit -m "feat(client-ui): Fit keeps a long area readable round its busiest station"
+```
+
+---
+
+### Task 22: The lobby orients a newcomer and checks the form in place (UI review M14, M15)
+
+Spec §10 M14, M15 (U20, U21). Additive protocol (titles, descriptions, your name, last played), the layouts'
+one-line descriptions, Sign out through the web shell, and a form checked as typed.
+
+**Files:**
+- Modify: `crates/client-core/src/app.rs`
+- Modify: `crates/client-core/src/form.rs`
+- Modify: `crates/client-core/src/lib.rs`
+- Modify: `crates/client-ui/src/screens.rs`
+- Modify: `crates/client-web/src/lib.rs`
+- Modify: `crates/protocol/src/lobby.rs`
+- Modify: `crates/server/src/layouts.rs`
+- Modify: `crates/server/src/supervisor.rs`
+- Modify: `crates/ts2-import/src/areas.rs`
+- Modify: `layouts/drain.areas.json`
+- Modify: `layouts/gretz-armainvilliers.areas.json`
+- Modify: `layouts/liverpool-st.areas.json`
+- Modify: `CLAUDE.md`
+- Test: `crates/client-core/tests/app.rs`
+- Test: `crates/client-core/tests/form.rs`
+- Test: `crates/client-ui/tests/screens.rs`
+- Test: `crates/protocol/tests/lobby.rs`
+- Test: `crates/server/tests/front.rs`
+- Test: `crates/server/tests/supervisor.rs`
+- Test: `crates/server/tests/units.rs`
+- Test: `crates/ts2-import/tests/areas.rs`
+
+**Interfaces:**
+- Consumes: Task 9's area list (moved into the new lobby), `SaveSummary.last_played`.
+- Produces: `LayoutInfo.{title, description}`, `LobbyReply::Layouts.you`, `GameInfo.last_played`; the areas file's
+  `description`; `App::me()`; `client_core::form::{seed, start, utc}`; `UiApp::wants_logout()` (the web shell goes to
+  `/auth/logout`); `LOBBY_W = 900.0`, `FORM_NOTE_W = 230.0`, `pub LOBBY_INTRO`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Apply (written and run on the scratch copy; re-check the context on the base, keep the intent):
+
+```diff
+diff --git a/crates/client-core/tests/app.rs b/crates/client-core/tests/app.rs
+index a459acc..00612e3 100644
+--- a/crates/client-core/tests/app.rs
++++ b/crates/client-core/tests/app.rs
+@@ -81,10 +81,11 @@ fn the_lobby_lists_games_and_layouts_and_sends_what_you_ask() {
+         players: vec![s("bob")],
+         error: None,
+         creator: Some(s("bob")),
++        last_played: None,
+         can_delete: false,
+     };
+     h.push(ServerFrame::Lobby(LobbyReply::Games { games: vec![info.clone()] }));
+-    h.push(ServerFrame::Lobby(LobbyReply::Layouts { layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West")] }] }));
++    h.push(ServerFrame::Lobby(LobbyReply::Layouts { layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West")], title: String::new(), description: String::new() }], you: None }));
+     app.tick(1.0);
+     assert_eq!(app.games(), [info]);
+     assert_eq!(app.layouts()[0].name, "twobox");
+diff --git a/crates/client-core/tests/form.rs b/crates/client-core/tests/form.rs
+new file mode 100644
+index 0000000..b88c4da
+--- /dev/null
++++ b/crates/client-core/tests/form.rs
+@@ -0,0 +1,24 @@
++//! The lobby form's checks (polish spec M15) and the Last played date (M14).
++
++use client_core::form::{seed, start, utc};
++
++#[test]
++fn seeds_are_whole_numbers_or_blank() {
++    assert_eq!((seed(""), seed(" 42 ")), (Ok(None), Ok(Some(42))));
++    assert!(seed("abc").is_err() && seed("-1").is_err() && seed("1.5").is_err());
++}
++
++#[test]
++fn starts_are_clock_times_or_blank() {
++    assert_eq!((start(" "), start("8:00"), start("07:30:15")), (Ok(None), Ok(Some("8:00".into())), Ok(Some("07:30:15".into()))));
++    for bad in ["25:00", "7", "07:60", "x:10", "07:30:15:00", "0730"] {
++        assert!(start(bad).is_err(), "{bad}");
++    }
++}
++
++#[test]
++fn unix_times_read_as_utc_dates() {
++    assert_eq!(utc(0), "1970-01-01 00:00 UTC");
++    assert_eq!(utc(1_790_865_900), "2026-10-01 14:45 UTC");
++    assert_eq!(utc(951_782_400), "2000-02-29 00:00 UTC");
++}
+diff --git a/crates/client-ui/tests/screens.rs b/crates/client-ui/tests/screens.rs
+index 59200f5..b08190d 100644
+--- a/crates/client-ui/tests/screens.rs
++++ b/crates/client-ui/tests/screens.rs
+@@ -42,7 +42,7 @@ impl Rig {
+         let mut r = Rig { ctx: egui::Context::default(), ui, h, game, t: 0.0, events: vec![], lobby_sent: vec![], size: vec2(1280.0, 800.0) };
+         r.frame();
+         r.lobby_sent.clear();
+-        r.h.push(ServerFrame::Lobby(LobbyReply::Layouts { layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")] }] }));
++        r.h.push(ServerFrame::Lobby(LobbyReply::Layouts { layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")], title: String::new(), description: String::new() }], you: None }));
+         r.frame();
+         r
+     }
+@@ -147,6 +147,7 @@ fn the_lobby_lists_games_and_creates_one() {
+         players: vec![s("bob")],
+         error: Some(s("disk full")),
+         creator: Some(s("bob")),
++        last_played: None,
+         can_delete: false,
+     };
+     r.h.push(ServerFrame::Lobby(LobbyReply::Games { games: vec![info] }));
+@@ -174,6 +175,7 @@ fn deleting_a_game_asks_first() {
+         players: vec![],
+         error: None,
+         creator: Some(s("ann")),
++        last_played: None,
+         can_delete,
+     };
+     r.h.push(ServerFrame::Lobby(LobbyReply::Games { games: vec![game("g-mine", true), game("g-theirs", false)] }));
+@@ -972,3 +974,50 @@ fn fit_keeps_a_long_area_readable() {
+     r.frame();
+     assert!(r.ui.camera().unwrap().scale > FIT_MIN_SCALE);
+ }
++
++/// Polish spec M14, M15: the lobby says what this is and who you are, signs
++/// out, describes the layout, explains a bad seed beside its field, and
++/// will not send the form until it is right.
++#[test]
++fn the_lobby_orients_a_newcomer_and_checks_the_form_in_place() {
++    let mut r = Rig::lobby(drawn_twobox());
++    r.h.push(ServerFrame::Lobby(LobbyReply::Layouts {
++        layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West")], title: s("Two boxes"), description: s("Two small boxes.") }],
++        you: Some(s("ann")),
++    }));
++    let saved = GameInfo {
++        id: s("g-abc"),
++        layout: s("twobox"),
++        state: GameState::Saved,
++        sim_time: 25_300.0,
++        areas: vec![],
++        players: vec![],
++        error: None,
++        creator: Some(s("bob")),
++        last_played: Some(1_790_865_900),
++        can_delete: false,
++    };
++    r.h.push(ServerFrame::Lobby(LobbyReply::Games { games: vec![saved] }));
++    r.frame();
++    let out = r.frame();
++    for want in [client_ui::screens::LOBBY_INTRO, "Signed in as ann", "Two boxes", "Two small boxes.", "By", "bob", "2026-10-01 14:45 UTC"] {
++        assert!(has_text(&out, want), "{want} in {:?}", texts(&out));
++    }
++    let create = text_at(&out, "Create");
++    let seed = text_at(&out, "random").center();
++    r.click(seed, PointerButton::Primary);
++    r.events.push(Event::Text("x1".into()));
++    r.frame();
++    let out = r.frame();
++    assert!(has_text(&out, "a whole number, or blank for random"));
++    assert_eq!(text_at(&out, "Create"), create, "nothing moved");
++    r.click(create.center(), PointerButton::Primary);
++    assert!(r.lobby_sent.is_empty(), "not sent: {:?}", r.lobby_sent);
++    click_text(&mut r, &out, "Sign out");
++    assert!(r.ui.wants_logout());
++    // A wide window centres the column.
++    r.size = vec2(1920.0, 1080.0);
++    r.frame();
++    let out = r.frame();
++    assert!(text_at(&out, "signalbox").min.x > 400.0, "{:?}", text_at(&out, "signalbox"));
++}
+diff --git a/crates/protocol/tests/lobby.rs b/crates/protocol/tests/lobby.rs
+index 770eecf..f4e1148 100644
+--- a/crates/protocol/tests/lobby.rs
++++ b/crates/protocol/tests/lobby.rs
+@@ -93,6 +93,7 @@ fn lobby_replies() {
+                     players: vec![s("ann"), s("sam")],
+                     error: None,
+                     creator: None,
++                    last_played: None,
+                     can_delete: false,
+                 },
+                 GameInfo {
+@@ -104,6 +105,7 @@ fn lobby_replies() {
+                     players: vec![],
+                     error: Some(s("resume: bad snapshot")),
+                     creator: Some(s("sam")),
++                    last_played: None,
+                     can_delete: true,
+                 },
+             ],
+@@ -118,10 +120,19 @@ fn lobby_replies() {
+     );
+     check_server(
+         ServerFrame::Lobby(LobbyReply::Layouts {
+-            layouts: vec![LayoutInfo { name: s("drain"), areas: vec![s("Drain"), s("Lambeth")] }],
++            layouts: vec![LayoutInfo { name: s("drain"), areas: vec![s("Drain"), s("Lambeth")], title: String::new(), description: String::new() }],
++            you: None,
+         }),
+         json!({"type": "layouts", "layouts": [{"name": "drain", "areas": ["Drain", "Lambeth"]}]}),
+     );
++    // Polish spec M14: the signed-in name, a layout's title and description, when known.
++    check_server(
++        ServerFrame::Lobby(LobbyReply::Layouts {
++            layouts: vec![LayoutInfo { name: s("drain"), areas: vec![s("Bank")], title: s("W&C"), description: s("A shuttle") }],
++            you: Some(s("ann")),
++        }),
++        json!({"type": "layouts", "you": "ann", "layouts": [{"name": "drain", "areas": ["Bank"], "title": "W&C", "description": "A shuttle"}]}),
++    );
+     check_server(
+         ServerFrame::Lobby(LobbyReply::Joined { game: s("g-abcdefgh2345"), you: s("ann") }),
+         json!({"type": "joined", "game": "g-abcdefgh2345", "you": "ann"}),
+diff --git a/crates/server/tests/front.rs b/crates/server/tests/front.rs
+index cfab6f8..58820fa 100644
+--- a/crates/server/tests/front.rs
++++ b/crates/server/tests/front.rs
+@@ -60,7 +60,10 @@ async fn the_lobby_and_a_game_over_websockets() {
+     ann.send(&lobby(LobbyMsg::ListLayouts)).await.unwrap();
+     assert_eq!(
+         next(&mut ann).await.unwrap(),
+-        ServerFrame::Lobby(LobbyReply::Layouts { layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")] }] })
++        ServerFrame::Lobby(LobbyReply::Layouts {
++            layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")], title: s("Two boxes"), description: String::new() }],
++            you: Some(s("ann")),
++        })
+     );
+     let id = create(&mut ann, "twobox").await;
+     let mut bob = f.connect("bob").await;
+diff --git a/crates/server/tests/supervisor.rs b/crates/server/tests/supervisor.rs
+index b53ed34..e8992dc 100644
+--- a/crates/server/tests/supervisor.rs
++++ b/crates/server/tests/supervisor.rs
+@@ -174,7 +174,7 @@ fn layouts_are_read_once_and_only_valid_names_count() {
+     let root = temp_dir("layouts");
+     let dir = layouts_dir(&root);
+     let l = Layouts::load(&dir).unwrap();
+-    assert_eq!(l.infos(), [LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")] }]);
++    assert_eq!(l.infos(), [LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")], title: s("Two boxes"), description: String::new() }]);
+     assert_eq!(l.path("twobox"), Some(dir.join("twobox.json")));
+     assert_eq!(l.path("../layouts/twobox"), None);
+     assert_eq!(l.path("Bad Name"), None);
+@@ -266,7 +266,10 @@ async fn the_lobby_lists_layouts_and_saved_games() {
+     rig.lobby(&ann, LobbyMsg::ListLayouts);
+     assert_eq!(
+         next(&ann).await.unwrap(),
+-        ServerFrame::Lobby(LobbyReply::Layouts { layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")] }] })
++        ServerFrame::Lobby(LobbyReply::Layouts {
++            layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")], title: s("Two boxes"), description: String::new() }],
++            you: Some(s("ann")),
++        })
+     );
+     rig.lobby(&ann, LobbyMsg::ListGames);
+     let Some(ServerFrame::Lobby(LobbyReply::Games { games })) = next(&ann).await else { panic!() };
+diff --git a/crates/server/tests/units.rs b/crates/server/tests/units.rs
+index 7fbd7ce..fce6e4f 100644
+--- a/crates/server/tests/units.rs
++++ b/crates/server/tests/units.rs
+@@ -156,9 +156,10 @@ fn the_placeholder_page_escapes_every_name() {
+         players: vec![],
+         error: Some("<b>bad</b>".into()),
+         creator: None,
++        last_played: None,
+         can_delete: false,
+     }];
+-    let page = index_page("a<b", &games, &[LayoutInfo { name: "drain".into(), areas: vec![] }]);
++    let page = index_page("a<b", &games, &[LayoutInfo { name: "drain".into(), areas: vec![], title: String::new(), description: String::new() }]);
+     assert!(!page.contains("<script>") && !page.contains("<b>bad"), "{page}");
+     assert!(page.contains("Hackney &amp; Bow: robot") && page.contains("Signed in as a&lt;b"), "{page}");
+ }
+diff --git a/crates/ts2-import/tests/areas.rs b/crates/ts2-import/tests/areas.rs
+index deef2a4..7af58f9 100644
+--- a/crates/ts2-import/tests/areas.rs
++++ b/crates/ts2-import/tests/areas.rs
+@@ -15,6 +15,7 @@ fn spec(boundaries: &[&str], areas: &[(&str, Vec<&str>)]) -> AreasFile {
+     AreasFile {
+         schema: 1,
+         prefix: None,
++        description: None,
+         boundaries: boundaries.iter().map(|s| s.to_string()).collect(),
+         areas: areas
+             .iter()
+@@ -260,3 +261,17 @@ fn gretz_has_three_boxes() {
+     assert_eq!(w.layout["box_prefix"], "G");
+     assert_eq!(w.layout["workstations"], json!({"Gretz": "A", "Tournan & Marles": "B", "Mortcerf & Coulommiers": "C"}));
+ }
++
++/// Polish spec M14: a layout's one-line description reaches the world's
++/// `layout`, for the lobby; every shipped areas file has one.
++#[test]
++fn the_description_goes_into_the_layout() {
++    for name in ["liverpool-st", "drain", "gretz-armainvilliers"] {
++        let dir = env!("CARGO_MANIFEST_DIR");
++        let read = |p: String| std::fs::read_to_string(p).unwrap();
++        let mut w = ts2_import::convert(&read(format!("{dir}/tests/data/{name}.json"))).unwrap().world;
++        ts2_import::areas::apply(&mut w, &ts2_import::areas::parse(&read(format!("{dir}/../../layouts/{name}.areas.json"))).unwrap()).unwrap();
++        let d = w.layout["description"].as_str().unwrap_or_default();
++        assert!((20..=120).contains(&d.len()), "{name}: {d:?}");
++    }
++}
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `scripts/cargo test -p signalbox-protocol --test lobby -p signalbox-client-core --test form -p signalbox-client-ui --test screens the_lobby -p ts2-import --test areas`
+Expected: compile errors (`title`, `you`, `last_played`, `form`).
+
+- [ ] **Step 3: Implement**
+
+```diff
+diff --git a/crates/client-core/src/app.rs b/crates/client-core/src/app.rs
+index 9dd85b2..6d2910e 100644
+--- a/crates/client-core/src/app.rs
++++ b/crates/client-core/src/app.rs
+@@ -372,7 +372,12 @@ impl App {
+     fn lobby_reply(&mut self, r: LobbyReply) {
+         match r {
+             LobbyReply::Games { games } => self.games = games,
+-            LobbyReply::Layouts { layouts } => self.layouts = layouts,
++            LobbyReply::Layouts { layouts, you } => {
++                self.layouts = layouts;
++                if you.is_some() {
++                    self.me = you;
++                }
++            }
+             LobbyReply::Lessons { lessons } => self.lessons = lessons,
+             LobbyReply::Joined { game, you } => {
+                 self.joining = None;
+@@ -507,6 +512,11 @@ impl App {
+         }
+     }
+ 
++    /// Your signed-in name, once the front has said it.
++    pub fn me(&self) -> Option<&str> {
++        self.me.as_deref()
++    }
++
+     pub fn lobby_note(&self) -> Option<&str> {
+         self.lobby_note.as_deref()
+     }
+diff --git a/crates/client-core/src/form.rs b/crates/client-core/src/form.rs
+new file mode 100644
+index 0000000..aee47ca
+--- /dev/null
++++ b/crates/client-core/src/form.rs
+@@ -0,0 +1,41 @@
++//! The lobby's New game form, checked where it is typed (polish spec M15):
++//! a seed is a whole number or blank, a start time `HH:MM` or `HH:MM:SS` or
++//! blank; anything else is said beside the field, never sent.
++
++/// A typed seed: `Ok(None)` blank (random), `Ok(Some(n))`, or why not.
++pub fn seed(typed: &str) -> Result<Option<u64>, &'static str> {
++    let t = typed.trim();
++    if t.is_empty() {
++        return Ok(None);
++    }
++    t.parse().map(Some).map_err(|_| "a whole number, or blank for random")
++}
++
++/// A typed start time: `Ok(None)` blank (the layout's own), `Ok(Some(t))`
++/// as typed, or why not. The front checks it again.
++pub fn start(typed: &str) -> Result<Option<String>, &'static str> {
++    let t = typed.trim();
++    if t.is_empty() {
++        return Ok(None);
++    }
++    let parts: Vec<&str> = t.split(':').collect();
++    let num = |s: &str, max: u32| s.len() <= 2 && !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) && s.parse::<u32>().is_ok_and(|v| v <= max);
++    let ok = matches!(parts.as_slice(), [h, m] if num(h, 23) && num(m, 59)) || matches!(parts.as_slice(), [h, m, s] if num(h, 23) && num(m, 59) && num(s, 59));
++    if ok { Ok(Some(t.to_string())) } else { Err("HH:MM, or blank for the layout's start") }
++}
++
++/// Unix seconds as `2026-10-01 14:05 UTC` (the lobby's Last played).
++pub fn utc(unix_s: u64) -> String {
++    let (days, secs) = (unix_s / 86_400, unix_s % 86_400);
++    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
++    let z = days as i64 + 719_468;
++    let era = z.div_euclid(146_097);
++    let doe = z - era * 146_097;
++    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
++    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
++    let mp = (5 * doy + 2) / 153;
++    let d = doy - (153 * mp + 2) / 5 + 1;
++    let m = if mp < 10 { mp + 3 } else { mp - 9 };
++    let y = yoe + era * 400 + i64::from(m <= 2);
++    format!("{y:04}-{m:02}-{d:02} {:02}:{:02} UTC", secs / 3600, secs / 60 % 60)
++}
+diff --git a/crates/client-core/src/lib.rs b/crates/client-core/src/lib.rs
+index 8894ce8..78031ef 100644
+--- a/crates/client-core/src/lib.rs
++++ b/crates/client-core/src/lib.rs
+@@ -4,6 +4,7 @@
+ //! it in a browser.
+ 
+ pub mod app;
++pub mod form;
+ pub mod input;
+ pub mod lessons;
+ pub mod log;
+diff --git a/crates/client-ui/src/screens.rs b/crates/client-ui/src/screens.rs
+index 242a30a..38f7b27 100644
+--- a/crates/client-ui/src/screens.rs
++++ b/crates/client-ui/src/screens.rs
+@@ -63,6 +63,13 @@ const ENQUIRY_OFFSET_PX: f32 = 16.0;
+ /// The top bar's fixed widths (polish spec M5): the clock state (`paused`,
+ /// `8×`) and the pause/resume button.
+ const CLOCK_STATE_W: f32 = 52.0;
++/// The lobby's column, centred in a wide window (polish spec M14).
++const LOBBY_W: f32 = 900.0;
++/// The slot beside a form field for what is wrong with it (polish spec M15).
++const FORM_NOTE_W: f32 = 230.0;
++/// The lobby's first line (polish spec M14).
++pub const LOBBY_INTRO: &str =
++    "Run a signal box: set routes for trains on real layouts, alone or with friends. New here? Start with the tutorial below.";
+ /// The lobby's layout list, wide enough for every name, so Create never moves.
+ const LAYOUT_COMBO_W: f32 = 180.0;
+ const PAUSE_W: f32 = 64.0;
+@@ -111,6 +118,8 @@ pub struct UiApp {
+     confirm_delete: Option<String>,
+     /// Release area was pressed and awaits "Yes, release" (polish spec M10).
+     confirm_release: bool,
++    /// Sign out was pressed: the shell goes to `/auth/logout` (polish spec M14).
++    wants_logout: bool,
+     settings: Settings,
+     /// Where the settings are kept between visits (none in most tests).
+     store: Option<Box<dyn SettingsStore>>,
+@@ -160,6 +169,7 @@ impl UiApp {
+             new_game: NewGame::default(),
+             confirm_delete: None,
+             confirm_release: false,
++            wants_logout: false,
+             settings: Settings::default(),
+             store: None,
+             side_tab: SideTab::default(),
+@@ -230,6 +240,11 @@ impl UiApp {
+         }
+     }
+ 
++    /// Sign out was pressed: the shell should send the browser to `/auth/logout`.
++    pub fn wants_logout(&self) -> bool {
++        self.wants_logout
++    }
++
+     /// The headcode whose enquiry window is open.
+     pub fn enquiry(&self) -> Option<&str> {
+         self.enquiry.as_deref()
+@@ -278,113 +293,153 @@ impl UiApp {
+         ui.ctx().request_repaint_after(Duration::from_millis(every));
+     }
+ 
++    /// The lobby (polish spec M14, M15): a centred column with a line of
++    /// orientation, who you are and Sign out; the tutorials; the New game
++    /// form, labels first, each field's problem beside it and the front's
++    /// answer in a fixed line below (nothing shifts); the games with who
++    /// made them and when they were last played.
+     fn lobby(&mut self, ui: &mut Ui) {
+         egui::CentralPanel::default().show(ui, |ui| {
++            let side = ((ui.available_width() - LOBBY_W) / 2.0).max(0.0);
++            ui.horizontal_top(|ui| {
++                ui.add_space(side);
++                ui.vertical(|ui| {
++                    ui.set_max_width(LOBBY_W);
++                    self.lobby_column(ui);
++                });
++            });
++        });
++    }
++
++    fn lobby_column(&mut self, ui: &mut Ui) {
++        ui.horizontal(|ui| {
+             ui.heading("signalbox");
+-            if let Some(n) = self.core.lobby_note() {
+-                ui.label(RichText::new(n).color(ALARM));
+-            }
+-            ui.separator();
+-            self.tutorials(ui);
+-            ui.separator();
+-            ui.label(RichText::new("New game").strong());
+-            let layouts: Vec<String> = self.core.layouts().iter().map(|l| l.name.clone()).collect();
+-            let areas: Vec<Vec<String>> = self.core.layouts().iter().map(|l| l.areas.clone()).collect();
+-            if layouts.is_empty() {
+-                ui.label("No layouts yet.");
+-            } else {
+-                self.new_game.layout = self.new_game.layout.min(layouts.len() - 1);
+-                ui.horizontal(|ui| {
+-                    egui::ComboBox::from_label("Layout").width(LAYOUT_COMBO_W).selected_text(layouts[self.new_game.layout].as_str()).show_ui(ui, |ui| {
+-                        for (i, name) in layouts.iter().enumerate() {
+-                            ui.selectable_value(&mut self.new_game.layout, i, name.as_str());
+-                        }
+-                    });
+-                    // Where the creator starts (polish spec H2): an area to signal, or watching.
+-                    let mine = &areas[self.new_game.layout];
+-                    self.new_game.area = self.new_game.area.min(mine.len());
+-                    let shown = |i: usize| if i == 0 { "watch".to_string() } else { mine[i - 1].clone() };
+-                    ui.label("Signal");
+-                    egui::ComboBox::from_id_salt("new_game_area").selected_text(shown(self.new_game.area)).show_ui(ui, |ui| {
+-                        for i in 0..=mine.len() {
+-                            ui.selectable_value(&mut self.new_game.area, i, shown(i));
+-                        }
+-                    });
+-                    ui.label("Seed");
+-                    ui.add(egui::TextEdit::singleline(&mut self.new_game.seed).desired_width(90.0).hint_text("random"));
+-                    ui.label("Start");
+-                    ui.add(egui::TextEdit::singleline(&mut self.new_game.start).desired_width(70.0).hint_text("HH:MM"));
+-                    if ui.button("Create").clicked() {
+-                        let seed = self.new_game.seed.trim().parse().ok();
+-                        let start = Some(self.new_game.start.trim().to_string()).filter(|s| !s.is_empty());
+-                        let area = self.new_game.area.checked_sub(1).map(|i| mine[i].clone());
+-                        self.core.create_game_in(&layouts[self.new_game.layout], seed, start, area.as_deref());
++            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
++                if let Some(me) = self.core.me() {
++                    if ui.button("Sign out").clicked() {
++                        self.wants_logout = true;
++                    }
++                    ui.label(format!("Signed in as {me}"));
++                }
++            });
++        });
++        ui.label(LOBBY_INTRO);
++        ui.separator();
++        self.tutorials(ui);
++        ui.separator();
++        ui.label(RichText::new("New game").strong());
++        let layouts = self.core.layouts().to_vec();
++        if layouts.is_empty() {
++            ui.label("No layouts yet.");
++        } else {
++            self.new_game.layout = self.new_game.layout.min(layouts.len() - 1);
++            let chosen = &layouts[self.new_game.layout];
++            let shown = |l: &protocol::LayoutInfo| if l.title.is_empty() { l.name.clone() } else { l.title.clone() };
++            ui.horizontal(|ui| {
++                ui.label("Layout");
++                egui::ComboBox::from_id_salt("new_game_layout").width(LAYOUT_COMBO_W).selected_text(shown(chosen)).show_ui(ui, |ui| {
++                    for (i, l) in layouts.iter().enumerate() {
++                        ui.selectable_value(&mut self.new_game.layout, i, shown(l));
+                     }
+                 });
+-            }
+-            ui.separator();
++                // Where the creator starts (polish spec H2): an area to signal, or watching.
++                let mine = &chosen.areas;
++                self.new_game.area = self.new_game.area.min(mine.len());
++                let area = |i: usize| if i == 0 { "watch".to_string() } else { mine[i - 1].clone() };
++                ui.label("Signal");
++                egui::ComboBox::from_id_salt("new_game_area").selected_text(area(self.new_game.area)).show_ui(ui, |ui| {
++                    for i in 0..=mine.len() {
++                        ui.selectable_value(&mut self.new_game.area, i, area(i));
++                    }
++                });
++            });
++            ui.label(RichText::new(&chosen.description).color(paint::LABEL));
++            let seed = client_core::form::seed(&self.new_game.seed);
++            let start = client_core::form::start(&self.new_game.start);
+             ui.horizontal(|ui| {
+-                ui.label(RichText::new("Games").strong());
+-                if ui.button("Refresh").clicked() {
+-                    self.core.refresh();
++                ui.label("Seed").on_hover_text("The same seed gives the same delays and dwell times; blank for random.");
++                ui.add(egui::TextEdit::singleline(&mut self.new_game.seed).desired_width(90.0).hint_text("random"));
++                ui.add_sized([FORM_NOTE_W, 18.0], egui::Label::new(RichText::new(*seed.as_ref().err().unwrap_or(&"")).color(ALARM)));
++                ui.label("Start").on_hover_text("The time on the sim clock when the game begins; blank for the layout's own.");
++                ui.add(egui::TextEdit::singleline(&mut self.new_game.start).desired_width(70.0).hint_text("HH:MM"));
++                ui.add_sized([FORM_NOTE_W, 18.0], egui::Label::new(RichText::new(*start.as_ref().err().unwrap_or(&"")).color(ALARM)));
++            });
++            ui.horizontal(|ui| {
++                let ok = seed.is_ok() && start.is_ok();
++                if ui.add_enabled(ok, egui::Button::new("Create")).clicked() {
++                    if let (Ok(seed), Ok(start)) = (seed, start.clone()) {
++                        let area = self.new_game.area.checked_sub(1).map(|i| chosen.areas[i].clone());
++                        self.core.create_game_in(&chosen.name, seed, start, area.as_deref());
++                    }
+                 }
+             });
+-            let games = self.core.games().to_vec();
+-            if games.is_empty() {
+-                ui.label("No games yet.");
+-                return;
++        }
++        // The front's answers and the lobby's news, in a line that is always there.
++        ui.label(RichText::new(self.core.lobby_note().unwrap_or(" ")).color(ALARM));
++        ui.separator();
++        ui.horizontal(|ui| {
++            ui.label(RichText::new("Games").strong());
++            if ui.button("Refresh").clicked() {
++                self.core.refresh();
+             }
+-            let mut join = None;
+-            let mut delete = None;
+-            egui::Grid::new("games").striped(true).show(ui, |ui| {
+-                for h in ["Game", "Layout", "State", "Time", "Areas", "Players", ""] {
+-                    ui.label(RichText::new(h).strong());
+-                }
+-                ui.end_row();
+-                for g in &games {
+-                    ui.label(&g.id);
+-                    ui.label(&g.layout);
+-                    let state = match g.state {
+-                        GameState::Running => "running".to_string(),
+-                        GameState::Saved => "saved".to_string(),
+-                        GameState::Crashed => format!("crashed: {}", g.error.as_deref().unwrap_or("?")),
+-                    };
+-                    ui.label(state);
+-                    ui.label(fmt_hms(g.sim_time));
+-                    let areas: Vec<String> =
+-                        g.areas.iter().map(|a| format!("{} ({})", a.name, a.holder.as_deref().unwrap_or("robot"))).collect();
+-                    ui.label(areas.join(", "));
+-                    ui.label(g.players.join(", "));
+-                    ui.horizontal(|ui| {
+-                        if ui.button(if g.state == GameState::Running { "Join" } else { "Resume" }).clicked() {
+-                            join = Some(g.id.clone());
+-                        }
+-                        // Owner decision 13: the front re-checks all of it.
+-                        if g.can_delete {
+-                            if self.confirm_delete.as_deref() == Some(g.id.as_str()) {
+-                                ui.label(RichText::new("Delete for good?").color(ALARM));
+-                                if ui.button("Yes, delete").clicked() {
+-                                    delete = Some(g.id.clone());
+-                                }
+-                                if ui.button("Cancel").clicked() {
+-                                    self.confirm_delete = None;
+-                                }
+-                            } else if ui.button("Delete").clicked() {
+-                                self.confirm_delete = Some(g.id.clone());
++        });
++        let games = self.core.games().to_vec();
++        if games.is_empty() {
++            ui.label("No games yet.");
++            return;
++        }
++        let mut join = None;
++        let mut delete = None;
++        egui::Grid::new("games").striped(true).show(ui, |ui| {
++            for h in ["Game", "Layout", "By", "Last played", "State", "Time", "Areas", "Players", ""] {
++                ui.label(RichText::new(h).strong());
++            }
++            ui.end_row();
++            for g in &games {
++                ui.label(&g.id);
++                ui.label(&g.layout);
++                ui.label(g.creator.as_deref().unwrap_or("—"));
++                ui.label(g.last_played.map(client_core::form::utc).unwrap_or_default());
++                let state = match g.state {
++                    GameState::Running => "running".to_string(),
++                    GameState::Saved => "saved".to_string(),
++                    GameState::Crashed => format!("crashed: {}", g.error.as_deref().unwrap_or("?")),
++                };
++                ui.label(state);
++                ui.label(fmt_hms(g.sim_time));
++                let areas: Vec<String> =
++                    g.areas.iter().map(|a| format!("{} ({})", a.name, a.holder.as_deref().unwrap_or("robot"))).collect();
++                ui.label(areas.join(", "));
++                ui.label(g.players.join(", "));
++                ui.horizontal(|ui| {
++                    if ui.button(if g.state == GameState::Running { "Join" } else { "Resume" }).clicked() {
++                        join = Some(g.id.clone());
++                    }
++                    // Owner decision 13: the front re-checks all of it.
++                    if g.can_delete {
++                        if self.confirm_delete.as_deref() == Some(g.id.as_str()) {
++                            ui.label(RichText::new("Delete for good?").color(ALARM));
++                            if ui.button("Yes, delete").clicked() {
++                                delete = Some(g.id.clone());
++                            }
++                            if ui.button("Cancel").clicked() {
++                                self.confirm_delete = None;
+                             }
++                        } else if ui.button("Delete").clicked() {
++                            self.confirm_delete = Some(g.id.clone());
+                         }
+-                    });
+-                    ui.end_row();
+-                }
+-            });
+-            if let Some(id) = join {
+-                self.core.join(&id);
+-            }
+-            if let Some(id) = delete {
+-                self.confirm_delete = None;
+-                self.core.delete_game(&id);
++                    }
++                });
++                ui.end_row();
+             }
+         });
++        if let Some(id) = join {
++            self.core.join(&id);
++        }
++        if let Some(id) = delete {
++            self.confirm_delete = None;
++            self.core.delete_game(&id);
++        }
+     }
+ 
+     /// The lobby's Tutorial list: each lesson, ticked once done here.
+diff --git a/crates/client-web/src/lib.rs b/crates/client-web/src/lib.rs
+index e23e114..b817db6 100644
+--- a/crates/client-web/src/lib.rs
++++ b/crates/client-web/src/lib.rs
+@@ -24,6 +24,7 @@ use crate::transport::WebSocketTransport;
+ struct WebApp {
+     ui: UiApp,
+     sent_to_login: bool,
++    sent_to_logout: bool,
+ }
+ 
+ impl eframe::App for WebApp {
+@@ -35,6 +36,13 @@ impl eframe::App for WebApp {
+                 let _ = w.location().set_href("/auth/login");
+             }
+         }
++        // The lobby's Sign out (polish spec M14).
++        if self.ui.wants_logout() && !self.sent_to_logout {
++            self.sent_to_logout = true;
++            if let Some(w) = web_sys::window() {
++                let _ = w.location().set_href("/auth/logout");
++            }
++        }
+     }
+ }
+ 
+@@ -85,7 +93,7 @@ async fn run(canvas: web_sys::HtmlCanvasElement) -> Result<(), String> {
+                 let settings = Box::new(LocalStore::new(SETTINGS_KEY));
+                 let lessons = Box::new(LocalStore::new(LESSONS_KEY));
+                 let ui = UiApp::with_stores(App::new(Box::new(transport), now), settings, lessons);
+-                Ok(Box::new(WebApp { ui, sent_to_login: false }))
++                Ok(Box::new(WebApp { ui, sent_to_login: false, sent_to_logout: false }))
+             }),
+         )
+         .await
+diff --git a/crates/protocol/src/lobby.rs b/crates/protocol/src/lobby.rs
+index 7dc5c8f..01637ad 100644
+--- a/crates/protocol/src/lobby.rs
++++ b/crates/protocol/src/lobby.rs
+@@ -43,7 +43,12 @@ pub enum LobbyMsg {
+ #[serde(tag = "type", rename_all = "snake_case")]
+ pub enum LobbyReply {
+     Games { games: Vec<GameInfo> },
+-    Layouts { layouts: Vec<LayoutInfo> },
++    /// `you`: the signed-in name, for the lobby to show (polish spec M14).
++    Layouts {
++        layouts: Vec<LayoutInfo>,
++        #[serde(default, skip_serializing_if = "Option::is_none")]
++        you: Option<String>,
++    },
+     /// You are in `game` as `you`; its layout and view follow.
+     Joined { game: String, you: String },
+     Error { code: String, message: String },
+@@ -75,6 +80,9 @@ pub struct GameInfo {
+     /// Who created it; `None` for saves from before owner decision 13.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub creator: Option<String>,
++    /// When it was last played, Unix seconds (saved games; polish spec M14).
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub last_played: Option<u64>,
+     /// Whether the user this list was sent to may delete it now.
+     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+     pub can_delete: bool,
+@@ -92,6 +100,12 @@ pub struct AreaHolder {
+ pub struct LayoutInfo {
+     pub name: String,
+     pub areas: Vec<String>,
++    /// The world's title and the layout's one-line description (polish spec
++    /// M14); empty when the file has none.
++    #[serde(default, skip_serializing_if = "String::is_empty")]
++    pub title: String,
++    #[serde(default, skip_serializing_if = "String::is_empty")]
++    pub description: String,
+ }
+ 
+ /// `"type"` tags of `LobbyMsg`.
+diff --git a/crates/server/src/layouts.rs b/crates/server/src/layouts.rs
+index a0d2bae..c18c893 100644
+--- a/crates/server/src/layouts.rs
++++ b/crates/server/src/layouts.rs
+@@ -46,7 +46,9 @@ impl Layouts {
+                 .as_array()
+                 .and_then(|a| a.iter().map(|x| x["name"].as_str().map(str::to_string)).collect::<Option<Vec<String>>>())
+                 .ok_or_else(|| format!("{}: no named areas", path.display()))?;
+-            list.push(LayoutInfo { name: name.to_string(), areas });
++            let text_at = |v: &serde_json::Value| v.as_str().unwrap_or_default().to_string();
++            let (title, description) = (text_at(&v["title"]), text_at(&v["layout"]["description"]));
++            list.push(LayoutInfo { name: name.to_string(), areas, title, description });
+         }
+         list.sort_by(|a, b| a.name.cmp(&b.name));
+         Ok(Layouts { dir: dir.to_path_buf(), list })
+diff --git a/crates/server/src/supervisor.rs b/crates/server/src/supervisor.rs
+index d6f7672..4e46835 100644
+--- a/crates/server/src/supervisor.rs
++++ b/crates/server/src/supervisor.rs
+@@ -295,7 +295,7 @@ impl Supervisor {
+                 self.reply(user, conn, frame(LobbyReply::Games { games: self.list_games_for(user) }))
+             }
+             ClientFrame::Lobby(LobbyMsg::ListLayouts) => {
+-                self.reply(user, conn, frame(LobbyReply::Layouts { layouts: self.layouts.infos() }))
++                self.reply(user, conn, frame(LobbyReply::Layouts { layouts: self.layouts.infos(), you: Some(user.to_string()) }))
+             }
+             ClientFrame::Lobby(LobbyMsg::Leave) => {
+                 {
+@@ -618,6 +618,7 @@ impl Supervisor {
+                     players: vec![],
+                     error: None,
+                     creator: s.creator.clone(),
++                    last_played: Some(s.last_played),
+                     can_delete: false,
+                 },
+                 Err(e) => GameInfo {
+@@ -629,6 +630,7 @@ impl Supervisor {
+                     players: vec![],
+                     error: Some(e.clone()),
+                     creator: None,
++                    last_played: None,
+                     can_delete: false,
+                 },
+             };
+@@ -649,6 +651,7 @@ impl Supervisor {
+                 players: vec![],
+                 error: None,
+                 creator: None,
++                last_played: None,
+                 can_delete: false,
+             });
+             info.layout = e.layout.clone();
+diff --git a/crates/ts2-import/src/areas.rs b/crates/ts2-import/src/areas.rs
+index eade2d7..45407db 100644
+--- a/crates/ts2-import/src/areas.rs
++++ b/crates/ts2-import/src/areas.rs
+@@ -24,6 +24,10 @@ pub struct AreasFile {
+     #[serde(default)]
+     pub boundaries: Vec<String>,
+     pub areas: Vec<AreaSpec>,
++    /// One line for the lobby (polish spec M14), written into the world's
++    /// `layout` as `description`.
++    #[serde(default)]
++    pub description: Option<String>,
+ }
+ 
+ #[derive(Debug, Clone, PartialEq, Deserialize)]
+@@ -141,6 +145,9 @@ pub fn apply(world: &mut WorldFile, spec: &AreasFile) -> Result<Vec<AreaCount>,
+             spec.areas.iter().zip(letters).map(|(a, l)| (a.name.clone(), Value::String(l))).collect();
+         layout.insert("box_prefix".into(), Value::String(prefix));
+         layout.insert("workstations".into(), Value::Object(ws));
++        if let Some(d) = &spec.description {
++            layout.insert("description".into(), Value::String(d.clone()));
++        }
+     }
+     *world = out;
+     Ok(counts)
+diff --git a/layouts/drain.areas.json b/layouts/drain.areas.json
+index 2cfc34b..dab7d31 100644
+--- a/layouts/drain.areas.json
++++ b/layouts/drain.areas.json
+@@ -1,5 +1,6 @@
+ {
+   "schema": 1,
++  "description": "The Waterloo & City line: two stations and a shuttle between them. The gentlest place to start.",
+   "prefix": "W",
+   "boundaries": ["73", "84"],
+   "areas": [
+diff --git a/layouts/gretz-armainvilliers.areas.json b/layouts/gretz-armainvilliers.areas.json
+index 6ca520c..8418fcd 100644
+--- a/layouts/gretz-armainvilliers.areas.json
++++ b/layouts/gretz-armainvilliers.areas.json
+@@ -1,5 +1,6 @@
+ {
+   "schema": 1,
++  "description": "Gretz-Armainvilliers, east of Paris: a long main line and its branches, three signal boxes.",
+   "prefix": "G",
+   "boundaries": ["39,1V1", "39,1V2", "52,1"],
+   "areas": [
+diff --git a/layouts/liverpool-st.areas.json b/layouts/liverpool-st.areas.json
+index 2439ed5..8b82aad 100644
+--- a/layouts/liverpool-st.areas.json
++++ b/layouts/liverpool-st.areas.json
+@@ -1,5 +1,6 @@
+ {
+   "schema": 1,
++  "description": "London Liverpool Street: a busy terminus and its approaches, worked from three workstations.",
+   "prefix": "L",
+   "boundaries": ["61", "64", "63", "66", "65", "68", "91", "90", "93", "92", "95", "94"],
+   "areas": [
+```
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `scripts/cargo test -p signalbox-protocol -p signalbox-server -p signalbox-client-core -p signalbox-client-ui -p ts2-import -p signalbox-bot && scripts/cargo test -p signalbox-server --features dev-auth && scripts/wasm-build`
+Expected: PASS, no warnings (as on the scratch copy).
+
+- [ ] **Step 5: Document**
+
+`CLAUDE.md`, "Browser client": "The lobby (polish spec M14, M15): who you are and Sign out (`UiApp::wants_logout`,
+followed by `client-web`), layouts by title with the areas file's `description`, By and Last played, and a form
+checked as typed (`client_core::form`)."
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/client-core crates/client-core/src/app.rs crates/client-core/src/form.rs crates/client-core/src/lib.rs crates/client-ui crates/client-ui/src/screens.rs crates/client-web/src/lib.rs crates/protocol crates/protocol/src/lobby.rs crates/server crates/server/src/layouts.rs crates/server/src/supervisor.rs crates/ts2-import crates/ts2-import/src/areas.rs layouts/drain.areas.json layouts/gretz-armainvilliers.areas.json layouts/liverpool-st.areas.json CLAUDE.md
+git commit -m "feat: a lobby that orients a newcomer, signs out, and checks the form where it is typed"
+```
+
+---
+
+### Task 23: Lessons: a done step waits, words for both aspect modes, a box that does not move (UI review H4, H5, H6)
+
+Spec §10 H4, H5, H6 (U4, U5, U6). A step may carry a `done` text: its task done, it says so and waits for Next. The
+lesson box's buttons sit in a row above the text that never moves. Lesson 1's Real aspects step comes before the
+train, with a signal showing proceed. The CI play-through presses Next on a done step, as a player would.
+
+**Files:**
+- Modify: `crates/client-ui/src/screens.rs`
+- Modify: `crates/game/src/lesson/file.rs`
+- Modify: `crates/game/src/lesson/run.rs`
+- Modify: `crates/protocol/src/lesson.rs`
+- Modify: `lessons/01-reading-the-panel/lesson.json`
+- Modify: `lessons/02-setting-routes/lesson.json`
+- Modify: `lessons/03-running-trains/lesson.json`
+- Modify: `lessons/04-junctions-and-handovers/lesson.json`
+- Modify: `CLAUDE.md`
+- Test: `crates/client-core/tests/lessons.rs`
+- Test: `crates/client-ui/tests/lesson.rs`
+- Test: `crates/game/tests/lesson.rs`
+- Test: `crates/game/tests/lessons.rs`
+- Test: `crates/protocol/tests/golden.rs`
+
+**Interfaces:**
+- Consumes: `lesson::Runner::{settle, view}`, the lessons' `lesson.json` files, Task 8's points names in lesson 2.
+- Produces: `Step.done: Option<String>`; `LessonView.{completed: bool, after: Option<String>}`; the runner's
+  `Progress.completed` (a Next pressed before it does not count); `LESSON_NEXT_W = 72.0`; Enter presses Next.
+
+- [ ] **Step 1: Write the failing tests**
+
+Apply (written and run on the scratch copy; re-check the context on the base, keep the intent):
+
+```diff
+diff --git a/crates/client-core/tests/lessons.rs b/crates/client-core/tests/lessons.rs
+index 6e8a7eb..ac2c021 100644
+--- a/crates/client-core/tests/lessons.rs
++++ b/crates/client-core/tests/lessons.rs
+@@ -19,6 +19,8 @@ fn lesson(index: u32, done: bool) -> ServerFrame {
+         needs_next: false,
+         done,
+         alert: None,
++        completed: false,
++        after: None,
+     }))
+ }
+ 
+diff --git a/crates/client-ui/tests/lesson.rs b/crates/client-ui/tests/lesson.rs
+index b72d932..3057ed5 100644
+--- a/crates/client-ui/tests/lesson.rs
++++ b/crates/client-ui/tests/lesson.rs
+@@ -189,9 +189,14 @@ fn a_lesson_is_followed_through_the_lesson_box_and_the_diagram() {
+     for gone in ["Penalty", "Release area", "Claim"] {
+         assert!(!has_text(&out, gone), "{gone} is not offered in a lesson");
+     }
+-    r.click(find(&out, "Next"));
++    let next = find(&out, "Next");
++    r.click(next);
+     let out = r.until("Step 2 of 10");
+-    assert!(!has_text(&out, "Next"), "this step waits for a click on the diagram");
++    // Polish spec H4: Next stays where it was, greyed while the step waits
++    // for the diagram; pressing it does nothing.
++    assert_eq!(find(&out, "Next"), next, "the button row never moves");
++    r.click(next);
++    assert_eq!(r.step(), 1, "a greyed Next does nothing");
+     // The step's highlight pulses round H3.
+     let rings = out.shapes.iter().filter(|c| matches!(&c.shape, Shape::Circle(cs) if is_highlight(cs.stroke.color))).count();
+     assert_eq!(rings, 1, "a highlight ring round H3");
+@@ -204,6 +209,10 @@ fn a_lesson_is_followed_through_the_lesson_box_and_the_diagram() {
+     r.until("Step 4 of 10");
+     assert_eq!(r.ui.core.game().unwrap().selected(), Some("3"), "H3 is still the entrance");
+     r.click(r.at(405.0, 0.0));
++    // Polish spec H5: the route is set and the step says so, waiting for Next.
++    let out = r.until("Done: the route is white");
++    assert_eq!((r.step(), find(&out, "Next")), (3, next));
++    r.events.push(Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::default() });
+     r.until("Step 5 of 10");
+     let out = r.frame();
+     r.click(find(&out, "Restart step"));
+diff --git a/crates/game/tests/lesson.rs b/crates/game/tests/lesson.rs
+index a0d4284..3c9d48c 100644
+--- a/crates/game/tests/lesson.rs
++++ b/crates/game/tests/lesson.rs
+@@ -279,6 +279,8 @@ fn joining_claims_the_lessons_area_and_shows_the_first_step() {
+             needs_next: true,
+             done: false,
+             alert: None,
++            completed: false,
++            after: None,
+         }
+     );
+ }
+@@ -602,3 +604,23 @@ fn joining_sends_the_layout_and_view_once() {
+     let (_, out) = Rig::new(&hollins(), "Hollins Cross", json!([{"say": "x", "wait_for": next()}]));
+     assert!(matches!(&out[..], [(_, ServerMsg::Layout(_)), (_, ServerMsg::View(_)), (_, ServerMsg::Lesson(_))]), "{out:?}");
+ }
++
++/// Polish spec H5: a step with a `done` text, its task done, says so and
++/// waits for Next, so the player sees the result; a Next pressed early does
++/// not count.
++#[test]
++fn a_done_step_waits_for_next_after_its_task() {
++    let steps = json!([
++        {"say": "pause it", "done": "Paused: nothing moves.", "wait_for": {"clock": {"paused": true}}},
++        {"say": "end", "wait_for": next()}
++    ]);
++    let (mut rig, _) = Rig::new(&hollins(), "Hollins Cross", steps);
++    let v = rig.r.view();
++    assert_eq!((v.completed, v.needs_next, v.after.clone()), (false, false, None));
++    assert!(rig.send(ClientMsg::LessonNext).is_empty(), "too early");
++    let v = lessons(&rig.send(ClientMsg::Vote { proposal: Proposal::Pause }));
++    assert_eq!((v[0].index, v[0].completed, v[0].needs_next, v[0].after.as_deref()), (0, true, true, Some("Paused: nothing moves.")));
++    assert_eq!(rig.r.step(), 0, "it waits");
++    let v = lessons(&rig.send(ClientMsg::LessonNext));
++    assert_eq!((v[0].index, v[0].completed), (1, false));
++}
+diff --git a/crates/game/tests/lessons.rs b/crates/game/tests/lessons.rs
+index 4806b17..4622b5c 100644
+--- a/crates/game/tests/lessons.rs
++++ b/crates/game/tests/lessons.rs
+@@ -173,6 +173,11 @@ fn play(dir: &PathBuf) -> f64 {
+         let since = p.g.sim().now_s();
+         let mut ticks = 0u32;
+         while p.r.step() == i {
++            // The task is done: the player looks, then presses Next (polish spec H5).
++            if p.r.view().completed {
++                p.send(ClientMsg::LessonNext);
++                continue;
++            }
+             if trains {
+                 p.drive();
+             }
+diff --git a/crates/protocol/tests/golden.rs b/crates/protocol/tests/golden.rs
+index 92bc47d..a2e93f2 100644
+--- a/crates/protocol/tests/golden.rs
++++ b/crates/protocol/tests/golden.rs
+@@ -404,6 +404,8 @@ fn lesson_view() {
+         needs_next: false,
+         done: false,
+         alert: Some(s("Restart the step.")),
++        completed: false,
++        after: None,
+     };
+     check_server(
+         ServerMsg::Lesson(v.clone()),
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `scripts/cargo test -p signalbox-game --test lesson a_done_step -p signalbox-client-ui --test lesson`
+Expected: compile errors (no fields `completed`, `after`; the lesson file's `done` is an unknown field).
+
+- [ ] **Step 3: Implement**
+
+```diff
+diff --git a/crates/client-ui/src/screens.rs b/crates/client-ui/src/screens.rs
+index 38f7b27..5967da2 100644
+--- a/crates/client-ui/src/screens.rs
++++ b/crates/client-ui/src/screens.rs
+@@ -58,6 +58,8 @@ pub fn simplifier_columns(train_w: f32) -> [f32; 8] {
+ pub fn table_width(cols: &[f32; 8]) -> f32 {
+     cols.iter().sum::<f32>() + CELL_GAP * (cols.len() - 1) as f32
+ }
++/// The lesson box's Next button is at least this wide (polish spec H4).
++const LESSON_NEXT_W: f32 = 72.0;
+ /// The enquiry window opens this far right of and below where it was asked for.
+ const ENQUIRY_OFFSET_PX: f32 = 16.0;
+ /// The top bar's fixed widths (polish spec M5): the clock state (`paused`,
+@@ -668,8 +670,11 @@ impl UiApp {
+         });
+     }
+ 
+-    /// The lesson (tutorial spec §4): title, step, what to do, the alert,
+-    /// and its buttons; on `done`, the way back to the lobby.
++    /// The lesson (tutorial spec §4; polish spec H4, H5): its title, then a
++    /// row of buttons that never moves — Next on the left (greyed while the
++    /// step waits for something else; Enter presses it), Restart step,
++    /// Restart lesson and Leave on the right — then the step, its text, a
++    /// done step's result and the alert. On `done`, the way back.
+     fn lesson_box(&mut self, ui: &mut Ui) {
+         let Some(v) = self.core.game().and_then(|g| g.lesson()).cloned() else { return };
+         let mut act: Option<fn(&mut App)> = None;
+@@ -685,25 +690,32 @@ impl UiApp {
+                 }
+             });
+         } else {
++            ui.horizontal(|ui| {
++                let typing = ui.ctx().egui_wants_keyboard_input();
++                let enter = v.needs_next && !typing && ui.input(|i| i.key_pressed(Key::Enter));
++                if ui.add_enabled(v.needs_next, egui::Button::new("Next").min_size(vec2(LESSON_NEXT_W, 0.0))).clicked() || enter {
++                    act = Some(App::lesson_next);
++                }
++                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
++                    if ui.button("Leave").clicked() {
++                        act = Some(App::leave);
++                    }
++                    if ui.button("Restart lesson").clicked() {
++                        act = Some(App::lesson_restart);
++                    }
++                    if ui.button("Restart step").clicked() {
++                        act = Some(App::lesson_restart_step);
++                    }
++                });
++            });
+             ui.label(format!("Step {} of {}", v.index + 1, v.count));
+             ui.label(RichText::new(&v.say).size(14.0));
++            if v.completed {
++                ui.label(RichText::new(v.after.as_deref().unwrap_or("Done. Press Next.")).color(paint::GREEN).size(14.0));
++            }
+             if let Some(a) = &v.alert {
+                 ui.label(RichText::new(a).color(ALARM));
+             }
+-            ui.horizontal(|ui| {
+-                if v.needs_next && ui.button("Next").clicked() {
+-                    act = Some(App::lesson_next);
+-                }
+-                if ui.button("Restart step").clicked() {
+-                    act = Some(App::lesson_restart_step);
+-                }
+-                if ui.button("Restart lesson").clicked() {
+-                    act = Some(App::lesson_restart);
+-                }
+-                if ui.button("Leave").clicked() {
+-                    act = Some(App::leave);
+-                }
+-            });
+         }
+         ui.separator();
+         if let Some(f) = act {
+diff --git a/crates/game/src/lesson/file.rs b/crates/game/src/lesson/file.rs
+index dd473c6..2297287 100644
+--- a/crates/game/src/lesson/file.rs
++++ b/crates/game/src/lesson/file.rs
+@@ -34,6 +34,11 @@ pub struct Step {
+     /// when `wait_for` alone does not say (`rejected`, say).
+     #[serde(default)]
+     pub solution: Vec<Move>,
++    /// Said once the step's task is done; the step then waits for Next, so
++    /// the player sees the result (polish spec H5). Without it the lesson
++    /// moves on at once.
++    #[serde(default)]
++    pub done: Option<String>,
+ }
+ 
+ /// What a step waits for.
+diff --git a/crates/game/src/lesson/run.rs b/crates/game/src/lesson/run.rs
+index ee4e579..a57eabf 100644
+--- a/crates/game/src/lesson/run.rs
++++ b/crates/game/src/lesson/run.rs
+@@ -28,6 +28,9 @@ pub const COLLISION_ALERT: &str = "Two trains collided. Press Restart step to tr
+ struct Progress {
+     next: bool,
+     rejected: bool,
++    /// The task of a step with a `done` text is done: it now waits for
++    /// Next (polish spec H5).
++    completed: bool,
+ }
+ 
+ /// What has happened so far in the lesson, so that a step whose event came
+@@ -118,9 +121,10 @@ impl Runner {
+ 
+     pub fn view(&self) -> LessonView {
+         let count = self.lesson.steps.len();
+-        let (say, highlight, needs_next) = match self.lesson.steps.get(self.step) {
+-            Some(s) => (s.say.clone(), s.highlight.clone(), s.wait_for.needs_next()),
+-            None => (String::new(), vec![], false),
++        let completed = self.progress.completed;
++        let (say, highlight, needs_next, after) = match self.lesson.steps.get(self.step) {
++            Some(s) => (s.say.clone(), s.highlight.clone(), s.wait_for.needs_next() || completed, s.done.clone().filter(|_| completed)),
++            None => (String::new(), vec![], false, None),
+         };
+         LessonView {
+             lesson: self.id.clone(),
+@@ -132,6 +136,8 @@ impl Runner {
+             needs_next,
+             done: self.done(),
+             alert: self.alert.clone(),
++            completed,
++            after,
+         }
+     }
+ 
+@@ -333,15 +339,30 @@ impl Runner {
+         if self.alert.is_some() {
+             return vec![];
+         }
+-        let mut moved = false;
++        let mut changed = false;
+         while let Some(step) = self.lesson.steps.get(self.step) {
+-            if !self.met(g, &step.wait_for) {
+-                break;
++            // A step with a `done` text waits for Next once its task is done
++            // (polish spec H5); any other moves on as soon as its condition holds.
++            if self.progress.completed {
++                if !self.progress.next {
++                    break;
++                }
++            } else {
++                if !self.met(g, &step.wait_for) {
++                    break;
++                }
++                if step.done.is_some() && !step.wait_for.needs_next() {
++                    self.progress.completed = true;
++                    // A Next pressed before the task was done does not count.
++                    self.progress.next = false;
++                    changed = true;
++                    break;
++                }
+             }
+             self.begin(g, self.step + 1);
+-            moved = true;
++            changed = true;
+         }
+-        if moved { self.message(g) } else { vec![] }
++        if changed { self.message(g) } else { vec![] }
+     }
+ 
+     fn met(&self, g: &Game, c: &Condition) -> bool {
+diff --git a/crates/protocol/src/lesson.rs b/crates/protocol/src/lesson.rs
+index 8eb6131..6144122 100644
+--- a/crates/protocol/src/lesson.rs
++++ b/crates/protocol/src/lesson.rs
+@@ -50,4 +50,10 @@ pub struct LessonView {
+     /// Said after a SPAD or a collision: the step can be restarted.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub alert: Option<String>,
++    /// The step's task is done and it waits for Next, so the player sees
++    /// what happened (polish spec H5); `after` says what to look at.
++    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
++    pub completed: bool,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub after: Option<String>,
+ }
+diff --git a/lessons/01-reading-the-panel/lesson.json b/lessons/01-reading-the-panel/lesson.json
+index 226a381..397ad55 100644
+--- a/lessons/01-reading-the-panel/lesson.json
++++ b/lessons/01-reading-the-panel/lesson.json
+@@ -29,22 +29,23 @@
+       "wait_for": {"continue": {}}
+     },
+     {
+-      "say": "A train is coming. Its headcode 2S01 has appeared in the berth of S1, and the track under it has turned red: red track means a train is on it. The train will stop at S1, because S1 is red. Press Next.",
++      "say": "The lesson has set a route from S3 to S5, so S3 shows a proceed aspect. On a signal box panel a signal shows only red (stop) or green (go). Open Settings at the top and choose Real aspects to see what the driver sees: S3 turns yellow, meaning 'the next signal is red'. Switch back to Red/green if you like, then press Next.",
++      "highlight": [{"ui": "settings"}, {"signal": "3"}],
++      "do": [{"set_route": {"entrance": "3", "exit": {"kind": "signal", "name": "5"}}}],
++      "wait_for": {"continue": {}}
++    },
++    {
++      "say": "The lesson has cancelled S3's route. A train is coming. Its headcode 2S01 has appeared in the berth of S1, and the track under it has turned red: red track means a train is on it. The train will stop at S1, because S1 is red. Press Next.",
+       "highlight": [{"berth": "B1"}],
+-      "do": [{"spawn": {"headcode": "2S01", "entry": "W"}}],
++      "do": [{"cancel_route": {"entrance": "3"}}, {"spawn": {"headcode": "2S01", "entry": "W"}}],
+       "wait_for": {"all": [{"berth": {"name": "B1", "headcode": "2S01"}}, {"continue": {}}]}
+     },
+     {
+-      "say": "This time the lesson sets a route for you, from S1 to S3. A route is the path a train may take; it shows white. S1 now shows green, so the driver may go. Watch the train run through the station and stop at S3. Press Next.",
++      "say": "This time the lesson sets a route for you, from S1 to S3. A route is the path a train may take; it shows white. S1 now shows a proceed aspect, so the driver may go. Watch the train run through the station and stop at S3. Press Next.",
+       "highlight": [{"signal": "1"}, {"section": "TB"}],
+       "do": [{"set_route": {"entrance": "1", "exit": {"kind": "signal", "name": "3"}}}],
+       "wait_for": {"all": [{"route_set": {"entrance": "1", "exit": {"kind": "signal", "name": "3"}}}, {"continue": {}}]}
+     },
+-    {
+-      "say": "On a signal box panel a signal shows only red (stop) or green (go). Open Settings at the top and choose Real aspects to see what the driver sees: with yellow meaning 'the next signal is red'. Switch back to Red/green if you like, then press Next.",
+-      "highlight": [{"ui": "settings"}],
+-      "wait_for": {"continue": {}}
+-    },
+     {
+       "say": "The lesson now clears the way out: S3 to S5, and S5 to the edge of your area. Watch 2S01 leave. Behind it the track turns grey again as it is freed.",
+       "do": [
+diff --git a/lessons/02-setting-routes/lesson.json b/lessons/02-setting-routes/lesson.json
+index 5aad0cc..e2bce82 100644
+--- a/lessons/02-setting-routes/lesson.json
++++ b/lessons/02-setting-routes/lesson.json
+@@ -21,11 +21,13 @@
+     },
+     {
+       "say": "Click H5 to set the route from H3 to H5. The points are set for platform 1, the route turns white, and H3 turns green. The short white piece past H5 is the overlap: spare track kept clear in case a train runs a little past a red signal. (If H3 is no longer chosen, click H3 first.)",
++      "done": "Done: the route is white and H3 shows a proceed aspect. Look, then press Next.",
+       "highlight": [{"exit": {"kind": "signal", "name": "5"}}],
+       "wait_for": {"route_set": {"entrance": "3", "exit": {"kind": "signal", "name": "5"}}}
+     },
+     {
+       "say": "Now cancel the route. Right-click H3 and choose 'Cancel route H3 to H5'. The white track goes grey and H3 goes back to red.",
++      "done": "Done: the track is grey again and H3 is back to red. Press Next.",
+       "highlight": [{"signal": "3"}],
+       "wait_for": {"route_cancelled": {"entrance": "3"}}
+     },
+@@ -49,6 +51,7 @@
+     },
+     {
+       "say": "Now set the route from H3 to H7, into platform 2. It uses the points as they lie.",
++      "done": "Done: the route into platform 2 is set over the reversed points. Press Next.",
+       "highlight": [{"signal": "3"}, {"exit": {"kind": "signal", "name": "7"}}],
+       "wait_for": {"route_set": {"entrance": "3", "exit": {"kind": "signal", "name": "7"}}}
+     },
+diff --git a/lessons/03-running-trains/lesson.json b/lessons/03-running-trains/lesson.json
+index 5d6b2b2..032f7e1 100644
+--- a/lessons/03-running-trains/lesson.json
++++ b/lessons/03-running-trains/lesson.json
+@@ -36,6 +36,7 @@
+     },
+     {
+       "say": "Watch the train. As it leaves each track circuit, the white route behind it turns grey: this is sectional release, which frees track for other routes as soon as the train has passed. The step ends when 2H05 stands at platform 2.",
++      "done": "2H05 stands at platform 2, and the route behind it has gone grey. Press Next.",
+       "highlight": [{"platform": {"place": "HXC", "platform": "2"}}],
+       "wait_for": {"train_at": {"headcode": "2H05", "place": "HXC", "platform": "2"}}
+     },
+diff --git a/lessons/04-junctions-and-handovers/lesson.json b/lessons/04-junctions-and-handovers/lesson.json
+index 79e3633..b52062d 100644
+--- a/lessons/04-junctions-and-handovers/lesson.json
++++ b/lessons/04-junctions-and-handovers/lesson.json
+@@ -38,6 +38,7 @@
+     },
+     {
+       "say": "Beside KA5 is a small blue circle marked A: the auto-working button. Click it. It fills in, and the route from KA5 now stays set after each train, so the trains behind get a clear signal without you setting it again. Auto-working suits plain line with no junction. (If the route has already gone, set KA5 to KB7 again first, then click the circle.)",
++      "done": "Done: the circle is filled, so auto-working is on. Press Next.",
+       "highlight": [{"ui": "auto:5"}],
+       "wait_for": {"auto_working": {"signal": "5", "on": true}}
+     },
+```
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `scripts/cargo test -p signalbox-protocol -p signalbox-game -p signalbox-client-core -p signalbox-client-ui -p signalbox-server && scripts/cargo test -p signalbox-game --test lessons -- --nocapture`
+Expected: PASS, no warnings (as on the scratch copy).
+
+- [ ] **Step 5: Document**
+
+`CLAUDE.md`, "Tutorials": "A step may carry a `done` text (polish spec H5): once its task is done it says so and
+waits for Next; the CI play-through presses Next there. The lesson box's buttons sit above the text and never move;
+Enter is Next (H4)."
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/client-core crates/client-ui crates/client-ui/src/screens.rs crates/game crates/game/src/lesson/file.rs crates/game/src/lesson/run.rs crates/protocol crates/protocol/src/lesson.rs lessons/01-reading-the-panel/lesson.json lessons/02-setting-routes/lesson.json lessons/03-running-trains/lesson.json lessons/04-junctions-and-handovers/lesson.json CLAUDE.md
+git commit -m "feat: lesson steps can wait to show their result; a lesson box that does not move; texts for both aspect modes"
+```
+
+---
+
+### Task 24: Tutorial highlights that stand out and keep clear (UI review M16)
+
+Spec §10 M16 (U22). A stronger pulse with a black underlay, points outlined along their legs, and a signal's ring
+kept clear so the placer moves its number off it (the plan cache is keyed by the highlights too).
+
+**Files:**
+- Modify: `crates/client-ui/src/paint.rs`
+- Modify: `crates/client-ui/src/screens.rs`
+- Test: `crates/client-ui/tests/paint.rs`
+
+**Interfaces:**
+- Consumes: Task 1's `KeepClear.rounds`, Task 3's `PlacementKey`.
+- Produces: `paint::{HIGHLIGHT_MIN_ALPHA = 0.6, HIGHLIGHT_UNDER_PX = 2.0}`; `PlacementKey` gains `Vec<Highlight>`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Apply (written and run on the scratch copy; re-check the context on the base, keep the intent):
+
+```diff
+diff --git a/crates/client-ui/tests/paint.rs b/crates/client-ui/tests/paint.rs
+index 8176e7c..368259b 100644
+--- a/crates/client-ui/tests/paint.rs
++++ b/crates/client-ui/tests/paint.rs
+@@ -725,7 +725,7 @@ fn a_lesson_highlight_outlines_what_it_names_and_pulses() {
+         (Highlight::Signal(s("W1")), 1),
+         (Highlight::Exit(ExitName::Signal(s("A"))), 1),
+         (Highlight::Exit(ExitName::Node(s("E"))), 1),
+-        (Highlight::Points(s("P")), 1),
++        (Highlight::Points(s("P")), 6),
+         (Highlight::Berth(s("BA")), 1),
+         (Highlight::Section(s("TW2")), 2),
+         (Highlight::Section(s("TP")), 6),
+@@ -744,9 +744,9 @@ fn a_lesson_highlight_outlines_what_it_names_and_pulses() {
+     let d = with(&[Highlight::Signal(s("W1"))], 0.0);
+     let Shape::Circle(c) = highlighted(&d)[0] else { panic!() };
+     assert!(close(c.center, signal_disc(&r.cam, screen(), w1)), "round the lamp");
+-    // 1 Hz between a third and full strength.
++    // 1 Hz between 60 % and full strength (polish spec M16).
+     assert_eq!(highlight_colour(0.25).a(), 255);
+-    assert_eq!(highlight_colour(0.75).a(), 89);
++    assert_eq!(highlight_colour(0.75).a(), 153);
+     assert_eq!(highlight_colour(1.25), highlight_colour(0.25));
+ }
+ 
+@@ -852,3 +852,40 @@ fn signal_glyphs_grow_when_zoomed_in() {
+     let n = d.texts.iter().find(|t| t.text == "TAW1").unwrap();
+     assert_eq!(n.size, NUMBER_MAX_PX * 2.0);
+ }
++
++/// Polish spec M16: a highlight is drawn over a black underlay, a points
++/// highlight outlines the legs (no ring takes in the signals beside them),
++/// and a signal's ring is kept clear so the placer moves its number off it.
++#[test]
++fn highlights_stand_out_and_keep_clear_of_labels() {
++    use client_ui::labels::{Role, plan};
++    let r = Rig::new(Some("West"));
++    let with = |h: &[Highlight]| {
++        let st = PaintState {
++            view: Some(&r.view),
++            selected: None,
++            exits: &[],
++            refused: None,
++            blocking: None,
++            time: 0.0,
++            aspects: AspectMode::RedGreen,
++            numbers: true,
++            names: &r.names,
++            highlight: h,
++        };
++        draw(&r.sc, &r.cam, screen(), &st)
++    };
++    let d = with(&[Highlight::Points("P".into())]);
++    assert!(highlighted(&d).iter().all(|s| matches!(s, Shape::LineSegment { .. })), "legs, no ring");
++    let under = d.shapes.iter().filter(|s| matches!(s, Shape::LineSegment { stroke, .. } if stroke.color == BG && stroke.width == HIGHLIGHT_W + HIGHLIGHT_UNDER_PX)).count();
++    assert_eq!(under, 6, "a black line under each");
++    let d = with(&[Highlight::Signal("W1".into())]);
++    let ring = d.keep.rounds.iter().find(|(c, rad)| close(*c, r.disc("W1")) && *rad > LAMP_R + HIGHLIGHT_GAP_PX).copied();
++    assert!(ring.is_some(), "the ring is kept clear");
++    let p = plan(&d, &mut |t| vec2(t.text.chars().count() as f32 * 6.0, 10.0));
++    let w1 = d.movable.iter().position(|m| m.role == Role::Number && d.texts[m.text].text == "TAW1").unwrap();
++    let (off, anchor) = p.spots[w1].expect("drawn");
++    let t = &d.texts[d.movable[w1].text];
++    let at = anchor.anchor_size(t.at + off, vec2(24.0, 10.0));
++    assert!(!client_ui::labels::touches_round(at, ring.unwrap()), "TAW1 moved off the ring: {at:?}");
++}
+```
+
+- [ ] **Step 2: Run them to see them fail**
+
+Run: `scripts/cargo test -p signalbox-client-ui --test paint highlight`
+Expected: compile error (`HIGHLIGHT_UNDER_PX` not found); with it stubbed, alpha is 89, not 153, and the points highlight is a ring.
+
+- [ ] **Step 3: Implement**
+
+```diff
+diff --git a/crates/client-ui/src/paint.rs b/crates/client-ui/src/paint.rs
+index a7db69c..050f9be 100644
+--- a/crates/client-ui/src/paint.rs
++++ b/crates/client-ui/src/paint.rs
+@@ -38,6 +38,11 @@ pub const HIGHLIGHT: Color32 = Color32::from_rgb(0xFF, 0x8C, 0x1A);
+ /// The highlight's outline: this wide, and this far round what it marks.
+ pub const HIGHLIGHT_W: f32 = 2.5;
+ pub const HIGHLIGHT_GAP_PX: f32 = 5.0;
++/// The pulse's weakest strength (polish spec M16).
++pub const HIGHLIGHT_MIN_ALPHA: f64 = 0.6;
++/// Each highlight stroke is drawn over a black one this much wider, so it
++/// stands out on ochre platforms and grey track alike (polish spec M16).
++pub const HIGHLIGHT_UNDER_PX: f32 = 2.0;
+ 
+ /// Track width: this many pixels per layout unit, within the limits.
+ pub const TRACK_UNITS: f32 = 9.0;
+@@ -146,11 +151,12 @@ pub fn blink_on(time: f64) -> bool {
+     (time * 4.0).floor().rem_euclid(2.0) == 0.0
+ }
+ 
+-/// A tutorial highlight's colour at `time`: a calm 1 Hz pulse between a
+-/// third and full strength (tutorial spec §4: UI, not panel state).
++/// A tutorial highlight's colour at `time`: a calm 1 Hz pulse between 60 %
++/// and full strength (tutorial spec §4: UI, not panel state; polish spec
++/// M16: never a dim brown).
+ pub fn highlight_colour(time: f64) -> Color32 {
+     let k = 0.5 + 0.5 * (time * std::f64::consts::TAU).sin();
+-    let a = (255.0 * (0.35 + 0.65 * k)).round().clamp(0.0, 255.0) as u8;
++    let a = (255.0 * (HIGHLIGHT_MIN_ALPHA + (1.0 - HIGHLIGHT_MIN_ALPHA) * k)).round().clamp(0.0, 255.0) as u8;
+     Color32::from_rgba_unmultiplied(HIGHLIGHT.r(), HIGHLIGHT.g(), HIGHLIGHT.b(), a)
+ }
+ 
+@@ -614,11 +620,20 @@ fn highlight_shapes(d: &mut Drawing, scene: &Scene, cam: &Camera, screen: Rect,
+     }
+     let colour = highlight_colour(st.time);
+     let stroke = Stroke::new(HIGHLIGHT_W, colour);
++    let under = Stroke::new(HIGHLIGHT_W + HIGHLIGHT_UNDER_PX, BG);
+     let to = |p: Pos2| cam.to_screen(screen, p);
+     let w = track_w(cam.scale);
+-    let ring = |d: &mut Drawing, c: Pos2, r: f32| d.shapes.push(Shape::circle_stroke(c, r, stroke));
++    // A ring is kept clear of texts too: the placer moves a number off it
++    // (polish spec M16).
++    let ring = |d: &mut Drawing, c: Pos2, r: f32| {
++        d.shapes.push(Shape::circle_stroke(c, r, under));
++        d.shapes.push(Shape::circle_stroke(c, r, stroke));
++        d.keep.rounds.push((c, r + HIGHLIGHT_W));
++    };
+     let boxed = |d: &mut Drawing, r: Rect| {
+-        d.shapes.push(Shape::rect_stroke(r.expand(HIGHLIGHT_GAP_PX - 2.0), CornerRadius::same(2), stroke, StrokeKind::Outside));
++        let r = r.expand(HIGHLIGHT_GAP_PX - 2.0);
++        d.shapes.push(Shape::rect_stroke(r, CornerRadius::same(2), under, StrokeKind::Outside));
++        d.shapes.push(Shape::rect_stroke(r, CornerRadius::same(2), stroke, StrokeKind::Outside));
+     };
+     // Both sides of a bar, clear of it.
+     let along = |d: &mut Drawing, a: Pos2, b: Pos2| {
+@@ -628,6 +643,7 @@ fn highlight_shapes(d: &mut Drawing, scene: &Scene, cam: &Camera, screen: Rect,
+         }
+         let n = vec2(-v.y, v.x).normalized() * (w / 2.0 + HIGHLIGHT_GAP_PX);
+         for side in [n, -n] {
++            d.shapes.push(Shape::line_segment([a + side, b + side], under));
+             d.shapes.push(Shape::line_segment([a + side, b + side], stroke));
+         }
+     };
+@@ -644,9 +660,13 @@ fn highlight_shapes(d: &mut Drawing, scene: &Scene, cam: &Camera, screen: Rect,
+                     boxed(d, Rect::from_center_size(to(e.at), vec2(7.0, 7.0)));
+                 }
+             }
++            // Points: their legs outlined, not a ring that takes in the
++            // signals beside them (polish spec M16).
+             Highlight::Points(p) => {
+                 if let Some(m) = scene.points.iter().find(|m| m.name == *p) {
+-                    ring(d, to(m.at), w + HIGHLIGHT_GAP_PX * 2.0);
++                    for leg in [m.toe, m.normal, m.reverse].into_iter().flatten() {
++                        along(d, to(m.at), to(leg));
++                    }
+                 }
+             }
+             Highlight::Berth(b) => {
+diff --git a/crates/client-ui/src/screens.rs b/crates/client-ui/src/screens.rs
+index 5967da2..c383a40 100644
+--- a/crates/client-ui/src/screens.rs
++++ b/crates/client-ui/src/screens.rs
+@@ -152,7 +152,9 @@ pub struct UiApp {
+     ticks_store: Option<Box<dyn SettingsStore>>,
+ }
+ 
+-type PlacementKey = (String, u64, u32, bool);
++/// (game, layout generation, scale bits, numbers on, the lesson's highlights:
++/// a highlight ring is kept clear, polish spec M16).
++type PlacementKey = (String, u64, u32, bool, Vec<Highlight>);
+ 
+ impl UiApp {
+     pub fn new(core: App) -> UiApp {
+@@ -991,7 +993,7 @@ impl UiApp {
+             highlight: &highlight,
+         };
+         let d = paint::draw(scene, &cam, rect, &st);
+-        let key = (g.id.clone(), g.layout_gen(), cam.scale.to_bits(), self.settings.numbers);
++        let key = (g.id.clone(), g.layout_gen(), cam.scale.to_bits(), self.settings.numbers, highlight.clone());
+         if self.placement.as_ref().is_none_or(|(k, p)| *k != key || p.spots.len() != d.movable.len()) {
+             let plan = ui.ctx().fonts_mut(|f| {
+                 labels::plan(&d, &mut |t| f.layout_no_wrap(t.text.clone(), paint::font(t), t.colour).size())
+```
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `scripts/cargo test -p signalbox-client-core -p signalbox-client-ui`
+Expected: PASS, no warnings (as on the scratch copy).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add crates/client-ui crates/client-ui/src/paint.rs crates/client-ui/src/screens.rs
+git commit -m "feat(client-ui): tutorial highlights stand out and keep clear of the labels"
+```
+
+---
+
+### Task 25: Final verification
 
 **Files:** none (fixes go back to the task that owns them).
 
@@ -3841,22 +8263,20 @@ docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/w" -w /w -e CARGO_HOME=/w/.carg
   && cargo test -p signalbox-server --features dev-auth --locked'
 ```
 
-Expected: all green, no warnings.
+Expected: all green, no warnings (as on the scratch copy).
 
 - [ ] **Step 2: The browser client and the browser check**
 
 Run: `scripts/wasm-build && deploy/browser-check.sh --no-build`
-Expected: the three `ok` lines.
+Expected: the three `ok` lines. Look at `target/browser-check/webgl2-lobby.png` (the centred lobby, its first line,
+"Signed in as check", Sign out) and `webgl2-game.png` (the hint line at the diagram's foot, + and − in its corner).
 
-- [ ] **Step 3: The numbers for the owner**
+- [ ] **Step 3: The lessons and the numbers for the owner**
 
-Run: `scripts/cargo test --release -p signalbox-client-ui --test legibility -- --nocapture`
-Expected: PASS; copy the 1280x800 and 1920x1080 Fit rows and the plan times into the branch report, with the browser-check screenshots.
-
-- [ ] **Step 4: The robot soaks and the WTT (controller)**
-
-Run: `scripts/cargo test --release -p ts2-import --test soak -- --ignored` and `scripts/cargo test --release -p signalbox-bot --test soak -- --ignored`
-Expected: PASS. Then Task 4c Step 6 with the owner's PDF, and `git status --short --ignored external/` shows the PDF and its text only as ignored (`!!`).
+Run: `scripts/cargo test -p signalbox-game --test lessons -- --nocapture` (every lesson to the end; note each one's sim
+seconds) and `scripts/cargo test --release -p signalbox-client-ui --test legibility -- --nocapture`.
+Expected: PASS; copy the 1280x800 and 1920x1080 rows at zoom 1 (with their `all`/`read` column) and the plan times
+into the branch report, with the browser-check screenshots.
 
 ---
 
@@ -3865,6 +8285,6 @@ Expected: PASS. Then Task 4c Step 6 with the owner's PDF, and `git status --shor
 The owner has agreed to redeploy as the realism pass did.
 
 1. **CI cache:** nothing to reseed (no new crates).
-2. **Deploy:** first copy the owner's WTT PDF into `external/wtt/` of the checkout being built (`deploy/README.md`, "The Waterloo & City timetable"); the build log must show its sha256 (`7709d5b5…2475b`) and `574 services, 5 entries from 05:40:00`. Then as "Build and run" from the merged commit, and `deploy/smoke.sh https://ra.tail3e0c1e.ts.net:50160 303`. The image now carries Drain's WTT timetable (private: never push it) and the front passes `--current-layout` on resume. Roll back by retagging the previous `<rev>`.
+2. **Deploy:** as "Build and run" from the merged commit (with the owner's WTT PDF in `external/wtt/`, as since the drain-wtt plan), then `deploy/smoke.sh https://ra.tail3e0c1e.ts.net:50160 303`. The front passes `--current-layout` on resume. Roll back by retagging the previous `<rev>`.
 3. **Old saves:** join an existing pre-realism Drain save in the lobby; its signals must read `WA…`/`WB…` and `docker logs signalbox` show `display data from layout drain`. Its timetable still ends at 06:43 (spec P9).
-4. **Owner's look (morning):** the `legibility` table and the browser-check screenshots in the branch report; then in Chrome/Edge and Firefox on the tailnet: Liverpool Street box A at Fit (numbers clear of the next platform road), the spectator view of Gretz (no pile-ups; ○A appears one zoom step in), a new Drain game (starts 05:40, 203 in Bank 8, headcodes like `202/1`; through the morning peak the trains keep running, up to about 1½ minutes late under the robot; the simplifier opens at now).
+4. **Owner's look (morning):** the `legibility` table and the browser-check screenshots in the branch report; then in Chrome/Edge and Firefox on the tailnet, at 1024 and 1920 px wide: the lobby (first line, Signed in, layout descriptions, Signal list, a bad seed explained in place); create Liverpool Street choosing an area (you signal at once); box A at Fit (numbers clear of the next platform road); the top bar while a second player votes (nothing moves; Agree/Decline; the outcome logged); a refused route (the blocking route named and outlined); hover hints and the hand cursor; Hide panel; zoom with the wheel, + and −; Gretz box A at Fit (readable, round Gretz); points swinging; Release area (asks); Leave (the lobby shows the area free); lessons 1 and 2 (the Next row stays put, done steps wait, Real aspects shows yellow at S3, highlights). **Then the proposed decisions U1–U22 (spec §10.2) for the owner's OK.**
