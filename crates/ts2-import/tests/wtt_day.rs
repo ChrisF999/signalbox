@@ -4,10 +4,9 @@
 //! is skipped without it; slow in debug builds:
 //! `scripts/cargo test --release -p ts2-import --test wtt_day -- --ignored --nocapture`
 //!
-//! Pending: under today's robot the morning peak gridlocks (polish spec
-//! §4.6). The `robot-fixes` branch rewrites robot planning; once it is
-//! merged this soak is re-run and the owner decides on the robot standing
-//! rule (P22) from it. Until then it is expected to fail.
+//! Without the robot's standing rule (`robot::may_stand`, polish spec P22)
+//! the morning peak gridlocks at about 07:00 on every seed; with it the
+//! whole day runs.
 
 use std::collections::BTreeMap;
 
@@ -104,12 +103,13 @@ fn worst(v: &[(i64, String, f64)]) -> (i64, String) {
 /// No SPADs, collisions or stuck trains; every train stabled by 01:00; no
 /// stop more than 3 minutes late, over five seeds (the dwell times differ).
 #[test]
-#[ignore = "pending robot-fixes + P22 decision (expected to gridlock until then); needs external/wtt/wtt.bbox.html"]
+#[ignore = "needs the owner's WTT in external/wtt/ (wtt.bbox.html); run in release"]
 fn the_real_wtt_runs_a_whole_day() {
     let Some(w) = drain_with_wtt() else {
         eprintln!("no {WTT}: skipped");
         return;
     };
+    let mut failed = Vec::new();
     for seed in [1, 2, 3, 7, 42] {
         let d = run_day(w.clone(), seed);
         let mut hourly: BTreeMap<u32, (i64, usize, usize)> = BTreeMap::new();
@@ -139,9 +139,16 @@ fn the_real_wtt_runs_a_whole_day() {
             "  by hour (worst s / stops over 1 min late / stops): {}",
             hourly.iter().map(|(h, (m, l, n))| format!("{h:02}h {m}/{l}/{n}")).collect::<Vec<_>>().join(", ")
         );
-        assert_eq!((d.spads, d.collisions, d.violations), (0, 0, 0), "seed {seed}");
-        assert!(d.stuck.is_empty() && d.running.is_empty(), "seed {seed}: {:?} {:?}", d.stuck, d.running);
-        assert_eq!(d.stabled, 5, "seed {seed}");
-        assert!(worst(&d.arrivals).0 <= 180 && worst(&d.departures).0 <= 180, "seed {seed}");
+        let clean = (d.spads, d.collisions, d.violations) == (0, 0, 0)
+            && d.stuck.is_empty()
+            && d.running.is_empty()
+            && d.stabled == 5
+            && worst(&d.arrivals).0 <= 180
+            && worst(&d.departures).0 <= 180;
+        if !clean {
+            failed.push(seed);
+        }
     }
+    // Every seed is reported before the verdict.
+    assert!(failed.is_empty(), "seeds {failed:?} failed");
 }

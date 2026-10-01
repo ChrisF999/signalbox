@@ -35,7 +35,7 @@ scripts/cargo run -p sim-cli -- replay crates/core/tests/fixtures/junction.json 
 scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/drain.json -o /w/target/drain.json
 scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/liverpool-st.json -o /w/target/lst.json --areas /w/layouts/liverpool-st.areas.json --lines /w/layouts/liverpool-st.lines.json
 scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/drain.json -o /w/target/drain.json --areas /w/layouts/drain.areas.json --lines /w/layouts/drain.lines.json --wtt /w/external/wtt/wtt.bbox.html   # the real WTT: external/wtt/README.md
-scripts/cargo test --release -p ts2-import --test wtt_day -- --ignored --nocapture   # the real WTT, a whole day under the robot (skips without it; pending robot-fixes + P22)
+scripts/cargo test --release -p ts2-import --test wtt_day -- --ignored --nocapture   # the real WTT, a whole day under the robot (skips without it)
 ```
 
 Paths passed through `scripts/cargo` resolve inside the container (`/w` = repo root).
@@ -122,7 +122,10 @@ expects red). `robot.rs` is a deterministic auto-signaller (it plans each
 train's whole remaining journey in one Dijkstra search, booked platforms/lines
 first, memoised per `Sim` by (entrance, service, call)); `robot::soak` runs a
 world under it and is the integration oracle (no SPADs, collisions, invariant
-violations or stuck trains).
+violations or stuck trains). The robot sets a train's routes only all the way to its next
+stop, or to a signal where it fouls no route from another signal, or
+(`robot::may_stand`, polish spec P22) to an automatic signal on plain line
+whose routes all end there.
 
 ### TS2 converter (`crates/ts2-import`)
 Pipeline in `lib.rs::convert`: parse TS2 JSON (`ts2.rs`) → `graph::build` (TS2's

@@ -28,6 +28,6 @@ To try it outside Docker (poppler-utils installed):
       --areas /w/layouts/drain.areas.json --lines /w/layouts/drain.lines.json --wtt /w/external/wtt/wtt.bbox.html
     scripts/cargo test --release -p ts2-import --test wtt_day -- --ignored --nocapture
 
-The whole-day soak (`wtt_day`) is pending: without the robot changes of
-the `robot-fixes` branch and the owner's decision on the robot standing
-rule (polish spec P22), the robot gridlocks Drain's morning peak.
+The whole-day soak (`wtt_day`) runs the day under the robot over five
+seeds; it needs the robot's standing rule (polish spec P22), without which
+the morning peak gridlocks.

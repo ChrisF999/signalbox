@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use signalbox_core::robot::{SoakReport, commands, soak, soak_with};
+use signalbox_core::robot::{self, ROBOT_EVERY_TICKS, SoakReport, commands, soak, soak_with};
 use signalbox_core::sim::Sim;
 use signalbox_core::world::World;
 
@@ -34,6 +34,42 @@ fn drain_runs_its_whole_timetable() {
     assert_safe("drain", &r);
     assert!(r.still_running.is_empty(), "{r:?}");
     assert_eq!(r.waiting_to_enter, 0, "{r:?}");
+}
+
+/// The robot lets a train wait at an automatic signal on plain line where
+/// routes from two platforms meet before it (polish spec P22, §4.6): a
+/// westbound train leaves Bank for signal 73 while platform 26 is still
+/// occupied, instead of waiting at Bank until it clears.
+#[test]
+fn drain_trains_wait_at_automatic_signal_73() {
+    let dir = env!("CARGO_MANIFEST_DIR");
+    let mut w = ts2_import::convert(&std::fs::read_to_string(format!("{dir}/tests/data/drain.json")).unwrap()).unwrap().world;
+    // A runs from Bank platform 8 into platform 26 and stands there; B leaves platform 7 behind it.
+    let (services, entries) = (
+        r#"[{"headcode": "A", "train_type": "UT", "calls": [{"place": "BNK", "platform": "8", "dep": "06:00:00"},
+                {"place": "WTL", "platform": "26", "arr": "06:03:00", "dep": "23:00:00"}], "end": {"kind": "stable"}},
+            {"headcode": "B", "train_type": "UT", "calls": [{"place": "BNK", "platform": "7", "dep": "06:04:00"},
+                {"place": "WTL", "platform": "26", "arr": "06:08:00"}], "end": {"kind": "stable"}}]"#,
+        r#"[{"service": "A", "at": {"segment": "L8", "offset_m": 79.0, "direction": "up"}, "time": "06:00:00"},
+            {"service": "B", "at": {"segment": "L7", "offset_m": 79.0, "direction": "up"}, "time": "06:00:00"}]"#,
+    );
+    w.services = serde_json::from_str(services).unwrap();
+    w.entries = serde_json::from_str(entries).unwrap();
+    let mut sim = Sim::new(World::from_file(w).unwrap(), 7);
+    for i in 0..(8 * 600) {
+        if i % ROBOT_EVERY_TICKS == 0 {
+            for c in robot::commands(&sim) {
+                sim.submit(c);
+            }
+        }
+        sim.step();
+    }
+    let b = sim.trains().iter().find(|t| t.headcode == "B").unwrap();
+    let net = &sim.world().net;
+    assert_eq!(net.segments[b.head().0.idx()].name, "L1000003", "B waits on the plain line at 73");
+    assert_eq!(b.speed, 0.0);
+    let a = sim.trains().iter().find(|t| t.headcode == "A").unwrap();
+    assert_eq!(net.segments[a.head().0.idx()].name, "L1000009", "A still in platform 26");
 }
 
 /// The seed of the owner's Liverpool Street run the robot fixes were measured on.
@@ -75,9 +111,14 @@ impl Metrics {
         let late: Vec<i64> = r.arrival_late_s.iter().map(|&l| l.max(0)).collect();
         let late_only: Vec<i64> = r.arrival_late_s.iter().copied().filter(|&l| l > 0).collect();
         format!(
-            "unlabelled {} | due {} entered {} never {} | entry late p50 {} p90 {} max {} | arrivals {} late {} (late p50 {} p90 {}) all p50 {} p90 {} | \
+            "unlabelled {} | entered {} exited {} stabled {} stuck {} | longest fringe wait {:.0} s | due {} entered {} never {} | entry late p50 {} p90 {} max {} | arrivals {} late {} (late p50 {} p90 {}) all p50 {} p90 {} | \
              wrong platforms {} | penalties {} | robot rounds {} mean {:.1} us max {:.1} ms",
             self.unlabelled.len(),
+            r.entered,
+            r.exited,
+            r.stabled,
+            r.stuck.len(),
+            r.max_fringe_wait_s,
             r.entries_due,
             r.entries_due_entered,
             r.entries_due - r.entries_due_entered,

@@ -218,13 +218,13 @@ fn journey(w: &World, t: &Train, from: SignalId, k0: usize) -> Option<Journey> {
 type Journey = Vec<(RouteId, bool)>;
 
 /// The robot's memo of `journey` results by (entrance, service, first call)
-/// and of `shared_sections`. Both depend on the static world only, so the
+/// and of `route_users`. Both depend on the static world only, so the
 /// cache never changes what the robot does, only how fast it decides; it is
 /// not sim state and starts empty in every `Sim`.
 #[derive(Default)]
 pub struct PlanCache {
     journeys: Mutex<BTreeMap<(SignalId, ServiceId, usize), Option<Journey>>>,
-    shared: OnceLock<Vec<bool>>,
+    users: OnceLock<Vec<Vec<(SignalId, Exit)>>>,
 }
 
 impl std::fmt::Debug for PlanCache {
@@ -241,8 +241,8 @@ impl PlanCache {
         map.entry(key).or_insert_with(|| journey(w, t, from, k0)).clone()
     }
 
-    fn shared(&self, w: &World) -> &[bool] {
-        self.shared.get_or_init(|| shared_sections(w))
+    fn users(&self, w: &World) -> &[Vec<(SignalId, Exit)>] {
+        self.users.get_or_init(|| route_users(w))
     }
 }
 
@@ -273,18 +273,20 @@ fn footprint(w: &World, chain: &[RouteId], length_m: f64) -> Vec<SectionId> {
 
 /// The routes from `entrance` the train should have set together: up to its
 /// next stopping call or its exit, or to the first signal before that where
-/// it could stand without fouling track that routes from other signals use.
+/// it could stand without fouling track that routes from other signals use
+/// (`may_stand`).
 fn plan(sim: &Sim, t: &Train, entrance: SignalId) -> Option<Vec<RouteId>> {
     let w = sim.world();
     let cache = sim.plan_cache();
-    let shared = cache.shared(w);
+    let users = cache.users(w);
     let next = t.next_call + usize::from(t.dwell.is_some());
     let full = cache.journey(w, t, entrance, next)?;
     let mut chain = Vec::new();
     for (r, ends_leg) in full {
         chain.push(r);
-        let clear = matches!(w.routes[r.idx()].exit, Exit::Signal(_))
-            && footprint(w, &chain, t.length_m).iter().all(|s| !shared[s.idx()]);
+        let exit = w.routes[r.idx()].exit;
+        let clear = matches!(exit, Exit::Signal(_))
+            && footprint(w, &chain, t.length_m).iter().all(|&s| may_stand(w, users, s, exit));
         if ends_leg || clear {
             break;
         }
@@ -292,20 +294,41 @@ fn plan(sim: &Sim, t: &Train, entrance: SignalId) -> Option<Vec<RouteId>> {
     (!chain.is_empty()).then_some(chain)
 }
 
-/// Sections in the paths of routes from more than one signal.
-fn shared_sections(w: &World) -> Vec<bool> {
-    let mut first: Vec<Option<SignalId>> = vec![None; w.net.sections.len()];
-    let mut shared = vec![false; w.net.sections.len()];
+/// For each section, the entrance and exit of every route whose path uses it.
+fn route_users(w: &World) -> Vec<Vec<(SignalId, Exit)>> {
+    let mut users: Vec<Vec<(SignalId, Exit)>> = vec![Vec::new(); w.net.sections.len()];
     for def in &w.routes {
         for &s in &def.path {
-            match first[s.idx()] {
-                None => first[s.idx()] = Some(def.entrance),
-                Some(e) if e != def.entrance => shared[s.idx()] = true,
-                Some(_) => {}
+            if !users[s.idx()].contains(&(def.entrance, def.exit)) {
+                users[s.idx()].push((def.entrance, def.exit));
             }
         }
     }
-    shared
+    users
+}
+
+/// Whether a train may stand on section `s` waiting at `exit`: no route
+/// from another signal uses `s`, or `s` is plain line (no points) whose
+/// routes all end at `exit` and `exit` is an automatic signal (polish spec
+/// P22, §4.6). There the train blocks nothing that could go anywhere else:
+/// it is waiting in a block section, as on any plain line.
+fn may_stand(w: &World, users: &[Vec<(SignalId, Exit)>], s: SectionId, exit: Exit) -> bool {
+    let here = &users[s.idx()];
+    if here.iter().all(|u| u.0 == here[0].0) {
+        return true;
+    }
+    let automatic = match exit {
+        Exit::Signal(x) => {
+            let onward = &w.routes_from[x.idx()];
+            !onward.is_empty() && onward.iter().all(|&o| w.routes[o.idx()].automatic)
+        }
+        Exit::Node(_) => false,
+    };
+    let plain = w.net.sections[s.idx()].segments.iter().all(|g| {
+        let sg = &w.net.segments[g.idx()];
+        [sg.a, sg.b].iter().all(|n| !matches!(w.net.nodes[n.idx()].kind, NodeKind::Points { .. }))
+    });
+    automatic && plain && here.iter().all(|u| u.1 == exit)
 }
 
 /// Route requests for trains facing a red signal with no route set.
