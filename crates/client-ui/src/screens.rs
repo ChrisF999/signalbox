@@ -470,9 +470,10 @@ impl UiApp {
         ui.horizontal(|ui| {
             let trains = ui.selectable_value(&mut self.side_tab, SideTab::Trains, RichText::new("TRAINS").strong());
             mark(ui, &trains, lit.contains(&Highlight::Ui("trains".into())), now);
+            let was_simplifier = self.side_tab == SideTab::Simplifier;
             let simplifier = ui.selectable_value(&mut self.side_tab, SideTab::Simplifier, RichText::new("SIMPLIFIER").strong());
             mark(ui, &simplifier, lit.contains(&Highlight::Ui("simplifier".into())), now);
-            if simplifier.clicked() {
+            if simplifier.clicked() && !was_simplifier {
                 // Opened again: build the lines afresh and scroll to now.
                 self.simplifier_lines = None;
             }
@@ -580,10 +581,12 @@ impl UiApp {
         ui.add(egui::TextEdit::singleline(&mut self.search).id_salt("simplifier_search").desired_width(120.0).hint_text("headcode"));
         let Some(g) = self.core.game() else { return };
         let Some(l) = g.layout() else { return };
+        // The scroll target needs the clock: wait for the first view.
+        let Some(v) = g.view() else { return };
         let key = (g.layout_gen(), self.search.clone());
         if self.simplifier_lines.as_ref().map(|(k, _)| k) != Some(&key) {
             let rows = simplifier::rows(l, &self.search);
-            self.simplifier_scroll = g.view().map(|v| simplifier::now_line(&rows, v.sim_time));
+            self.simplifier_scroll = Some(simplifier::now_line(&rows, v.sim_time));
             let lines = rows
                 .into_iter()
                 .flat_map(|r| simplifier::lines(r).into_iter().enumerate().map(|(i, line)| (line, i == 0)))
@@ -595,7 +598,6 @@ impl UiApp {
             ui.label(if l.simplifier.is_empty() { "No booked trains here" } else { "No headcode matches" });
             return;
         }
-        let v = g.view();
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 4.0;
         let header = ["Train", "Late", "From", "To", "At", "Plat", "Arr", "Dep"];
         simplifier_row(ui, row_h, header.map(|h| RichText::new(h).strong()));
@@ -605,7 +607,7 @@ impl UiApp {
         }
         area.show_rows(ui, row_h, lines.len(), |ui, range| {
             for (line, first) in &lines[range] {
-                let late = if *first { simplifier::lateness(v, &line.headcode) } else { None };
+                let late = if *first { simplifier::lateness(Some(v), &line.headcode) } else { None };
                 let late = late.as_deref().unwrap_or("");
                 let cells = [
                     RichText::new(g.names().headcode(&line.headcode)).monospace().color(paint::HEADCODE),

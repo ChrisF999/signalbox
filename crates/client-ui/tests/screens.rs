@@ -767,3 +767,39 @@ fn the_simplifier_opens_at_now() {
     assert!(!side.iter().any(|t| t == "BW01"), "BW01 ran at 06:00: {side:?}");
     assert!(side.iter().any(|t| t == "BW06") && side.iter().any(|t| t == "BW07"), "06:30's trains: {side:?}");
 }
+
+/// The layout can arrive before the first view with SIMPLIFIER open: the
+/// list still opens at now once the view comes.
+#[test]
+fn the_simplifier_opens_at_now_when_the_view_follows_the_layout() {
+    let dir = env!("CARGO_MANIFEST_DIR");
+    let w = ts2_import::convert(&std::fs::read_to_string(format!("{dir}/../ts2-import/tests/data/drain.json")).unwrap()).unwrap().world;
+    let mut r = Rig::in_game(signalbox_core::world::World::from_file(w).unwrap(), None);
+    let out = r.frame();
+    click_text(&mut r, &out, "SIMPLIFIER"); // the tab is kept across a rejoin
+    let out = r.frame();
+    click_text(&mut r, &out, "Leave");
+    let out = r.frame();
+    assert!(has_text(&out, "New game"), "back in the lobby: {:?}", texts(&out));
+    r.game.handle("ann", ClientMsg::Vote { proposal: Proposal::Speed { x: 8 } });
+    for _ in 0..225 {
+        r.game.advance(1.0); // 06:00 to 06:30 at 8x
+    }
+    r.h.push(ServerFrame::Lobby(LobbyReply::Joined { game: s("g-test"), you: s("ann") }));
+    let (layout, rest): (Vec<_>, Vec<_>) = r.game.connect("ann").into_iter().partition(|(_, m)| matches!(m, ServerMsg::Layout(_)));
+    assert!(!layout.is_empty(), "connect sends the layout");
+    for (_, m) in layout {
+        r.h.push(ServerFrame::Game(m));
+    }
+    r.frame();
+    r.frame();
+    assert!(r.ui.core.game().is_some_and(|g| g.view().is_none() && g.layout().is_some()), "layout before view");
+    for (_, m) in rest {
+        r.h.push(ServerFrame::Game(m));
+    }
+    r.frame();
+    let out = r.frame();
+    let side = side_texts(&r, &out);
+    assert!(!side.iter().any(|t| t == "BW01"), "BW01 ran at 06:00: {side:?}");
+    assert!(side.iter().any(|t| t == "BW06"), "06:30's trains: {side:?}");
+}

@@ -141,6 +141,7 @@ fn the_simplifier_opens_at_the_first_train_not_yet_finished() {
     let rows = vec![&a, &b, &c, &u];
     assert_eq!(now_line(&rows, 0.0), 0);
     assert_eq!(now_line(&rows, 160.0), 0, "1A01 is still running");
+    assert_eq!(now_line(&rows, 200.0), 0, "a call at exactly now has not finished");
     assert_eq!(now_line(&rows, 250.0), 3, "after 1A01's two lines and 1A02's one");
     assert_eq!(now_line(&rows, 600.0), 6, "a row with no times never finishes");
 }
