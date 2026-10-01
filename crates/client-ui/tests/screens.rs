@@ -1509,7 +1509,10 @@ fn the_lobby_orients_a_newcomer_and_checks_the_form_in_place() {
     r.h.push(ServerFrame::Lobby(LobbyReply::Games { games: vec![saved] }));
     r.frame();
     let out = r.frame();
-    for want in [client_ui::screens::LOBBY_INTRO, "Signed in as ann", "Two boxes", "Two small boxes.", "By", "bob", "2026-10-01 14:45 UTC"] {
+    // The layout list and the games table both show the title, not the file name.
+    assert_eq!(texts(&out).iter().filter(|(t, _)| t == "Two boxes").count(), 2, "{:?}", texts(&out));
+    assert!(!has_text(&out, "twobox"), "{:?}", texts(&out));
+    for want in [client_ui::screens::LOBBY_INTRO, "Signed in as ann", "Two small boxes.", "By", "bob", "2026-10-01 14:45 UTC"] {
         assert!(has_text(&out, want), "{want} in {:?}", texts(&out));
     }
     let create = text_at(&out, "Create");
@@ -1529,4 +1532,28 @@ fn the_lobby_orients_a_newcomer_and_checks_the_form_in_place() {
     r.frame();
     let out = r.frame();
     assert!(text_at(&out, "signalbox").min.x > 400.0, "{:?}", text_at(&out, "signalbox"));
+}
+
+/// Polish spec H2 through the moved Signal picker: the area chosen there is claimed once the new game's layout comes.
+#[test]
+fn the_signal_picker_chooses_the_area_a_new_game_claims() {
+    let mut r = Rig::lobby(drawn_twobox());
+    let out = r.frame();
+    click_text(&mut r, &out, "watch");
+    r.frame();
+    let out = r.frame();
+    click_text(&mut r, &out, "East");
+    r.frame();
+    let out = r.frame();
+    assert!(has_text(&out, "East"), "{:?}", texts(&out));
+    click_text(&mut r, &out, "Create");
+    assert_eq!(r.lobby_sent, [LobbyMsg::CreateGame { layout: s("twobox"), seed: None, start: None }]);
+    r.h.push(ServerFrame::Lobby(LobbyReply::Joined { game: s("g-test"), you: s("ann") }));
+    for (_, m) in r.game.connect("ann") {
+        r.h.push(ServerFrame::Game(m));
+    }
+    for _ in 0..4 {
+        r.frame();
+    }
+    assert_eq!(r.ui.core.game().unwrap().area(), Some("East"));
 }

@@ -374,12 +374,8 @@ impl UiApp {
                     }
                 });
             });
-            // The full title (a wide one is clipped in the list) and the one-line description.
-            let about = match (chosen.title.is_empty(), chosen.description.is_empty()) {
-                (false, false) => format!("{}: {}", chosen.title, chosen.description),
-                (false, true) => chosen.title.clone(),
-                _ => chosen.description.clone(),
-            };
+            // The one-line description (it starts with the place, so the title is not repeated).
+            let about = if chosen.description.is_empty() { chosen.title.clone() } else { chosen.description.clone() };
             ui.label(RichText::new(about).color(paint::LABEL));
             let seed = client_core::form::seed(&self.new_game.seed);
             let start = client_core::form::start(&self.new_game.start);
@@ -424,7 +420,8 @@ impl UiApp {
             ui.end_row();
             for g in &games {
                 ui.label(&g.id);
-                ui.label(&g.layout);
+                let title = layouts.iter().find(|l| l.name == g.layout).map(|l| l.title.as_str()).filter(|t| !t.is_empty());
+                ui.label(title.unwrap_or(&g.layout));
                 ui.label(g.creator.as_deref().unwrap_or("\u{2014}"));
                 ui.label(g.last_played.map(client_core::form::utc).unwrap_or_default());
                 let state = match g.state {
