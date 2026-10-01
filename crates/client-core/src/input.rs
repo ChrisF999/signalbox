@@ -126,6 +126,28 @@ impl App {
         Some(simplifier::resolve(l, Some(v), v.berths.get(b)?))
     }
 
+    /// What a click on `target` would do, for the end of its hover text
+    /// (polish spec M3); `None` where clicks do nothing for you. A left
+    /// click on points opens their menu (decision U9), it never swings them.
+    pub fn hint(&self, target: &Target) -> Option<&'static str> {
+        let g = self.game.as_ref()?;
+        let (l, v) = (g.bot.layout()?, g.bot.view()?);
+        let exit = |e: ExitName| g.selected.as_deref().is_some_and(|s| select::exits_from(l, s).contains(&e));
+        match target {
+            Target::Signal(s) if exit(ExitName::Signal(s.clone())) => Some("click: set the route to here"),
+            Target::Signal(s) if g.selected.as_deref() == Some(s.as_str()) => Some("click again or Esc: forget the entrance"),
+            Target::Signal(s) if select::can_enter(l, s) && !select::signal_menu(l, v, s).is_empty() => {
+                Some("click: choose as entrance · right-click: cancel the route")
+            }
+            Target::Signal(s) if select::can_enter(l, s) => Some("click: choose as entrance"),
+            Target::Exit(n) if exit(ExitName::Node(n.clone())) => Some("click: set the route to here"),
+            Target::Points(p) if !select::points_menu(l, v, p).is_empty() => Some("click: open the menu to swing them"),
+            Target::Berth(b) if select::operable_berth(l, b) => Some("right-click: interpose or cancel a headcode"),
+            Target::Auto(s) if select::auto_toggle(l, v, s).is_some() => Some("click: auto-working on or off"),
+            _ => None,
+        }
+    }
+
     /// Hover text.
     pub fn describe(&self, target: &Target) -> String {
         let Some(g) = self.game.as_ref() else { return String::new() };

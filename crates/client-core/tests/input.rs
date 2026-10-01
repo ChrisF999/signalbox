@@ -452,3 +452,21 @@ fn a_dead_auto_click_on_a_cancelling_route_says_it_is_cancelling() {
     l.signals.iter_mut().for_each(|s| s.operable = s.operable || s.name == "W1");
     assert_eq!(select::describe_auto(&l, &v, "W1"), "Auto-working TAW1: its route is cancelling");
 }
+
+/// Polish spec M3: hover text ends with what a click would do, and says
+/// nothing where clicks do nothing for you.
+#[test]
+fn hints_say_what_a_click_does() {
+    let mut t = Table::new("ann", Some("West"));
+    assert_eq!(t.app.hint(&sig("W1")), Some("click: choose as entrance"));
+    t.app.click(&sig("W1"));
+    assert_eq!(t.app.hint(&sig("A")), Some("click: set the route to here"));
+    assert_eq!(t.app.hint(&sig("W1")), Some("click again or Esc: forget the entrance"));
+    assert_eq!(t.app.hint(&Target::Berth(s("BA"))), Some("right-click: interpose or cancel a headcode"));
+    assert_eq!(t.app.hint(&Target::Section(s("TW1"))), None);
+    assert_eq!(t.app.hint(&Target::Points(s("P"))), None, "East's points");
+    let e = Table::new("eve", Some("East"));
+    assert_eq!(e.app.hint(&Target::Points(s("P"))), Some("click: open the menu to swing them"));
+    let spec = Table::new("sam", None);
+    assert_eq!(spec.app.hint(&sig("W1")), None);
+}

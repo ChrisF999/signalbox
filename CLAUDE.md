@@ -325,6 +325,8 @@ output is byte-identical for the same input.
 - `hit_test` takes the view as well as the scene; points and exits win over
   an empty berth under the pointer. The side panel's minimum width is 398 pt
   (it fits the simplifier).
+- The diagram shows a pointing hand over what you can work and ends hover text with what a click does
+  (`App::hint`); a left click on your points opens their menu and never swings them (polish spec M3, U9).
 
 ### Tutorials (`lessons/`, `game::lesson`)
 - Design: `docs/superpowers/specs/2026-10-01-tutorial-design.md`; decisions in

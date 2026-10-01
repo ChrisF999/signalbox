@@ -841,3 +841,24 @@ fn a_spectator_is_not_told_to_claim_when_every_area_is_held() {
     assert!(has_text(&out, "All areas are held; you are watching"), "{:?}", texts(&out));
     assert!(!has_text(&out, "Claim an area to signal"));
 }
+
+/// Polish spec M3 (U9): what you can click shows a pointing hand and says
+/// what a click does; points you work open their menu on a left click and
+/// are never swung by it.
+#[test]
+fn clickable_things_say_so_and_points_open_on_a_left_click() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("East"));
+    let p = r.at(207.5, 0.0);
+    r.events.push(Event::PointerMoved(p));
+    r.frame();
+    let out = r.frame();
+    assert_eq!(out.platform_output.cursor_icon, egui::CursorIcon::PointingHand);
+    r.click(p, PointerButton::Primary);
+    let out = r.frame();
+    assert!(has_text(&out, "Swing TBP reverse"), "{:?}", texts(&out));
+    // Track is hover only: no hand.
+    let mut r = Rig::in_game(drawn_twobox(), Some("East"));
+    r.events.push(Event::PointerMoved(r.at(150.0, 0.0)));
+    r.frame();
+    assert_eq!(r.frame().platform_output.cursor_icon, egui::CursorIcon::Default);
+}

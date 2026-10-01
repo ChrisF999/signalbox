@@ -721,9 +721,17 @@ impl UiApp {
         // Every click goes on, even one on nothing or on what is not yours:
         // a dead click clears the entrance (`App::click` decides what the
         // rest mean, from the same operability `Hit::clickable` shows).
-        let click = resp.clicked().then(|| hit_at(resp.interact_pointer_pos()).map(|h| h.target));
-        if resp.secondary_clicked() {
+        let click = resp.clicked().then(|| hit_at(resp.interact_pointer_pos()));
+        // Points you can work open their menu on a left click too, and never
+        // swing on it (polish spec M3, decision U9).
+        let points_menu = matches!(&click, Some(Some(h)) if h.clickable && matches!(h.target, Target::Points(_)));
+        let click = if points_menu { None } else { click.map(|h| h.map(|h| h.target)) };
+        if resp.secondary_clicked() || points_menu {
             self.menu_target = hit_at(resp.interact_pointer_pos()).map(|h| h.target);
+        }
+        // What can be clicked shows a pointing hand (polish spec M3).
+        if hover.as_ref().is_some_and(|h| h.clickable) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
         let exits = self.core.valid_exits();
         let highlight = self.highlights();
@@ -766,10 +774,23 @@ impl UiApp {
             self.menu_target = None;
         }
         let resp = match &hover {
-            Some(h) => resp.on_hover_text_at_pointer(self.core.describe(&h.target)),
+            Some(h) => {
+                let text = match self.core.hint(&h.target) {
+                    Some(hint) => format!("{}\n{hint}", self.core.describe(&h.target)),
+                    None => self.core.describe(&h.target),
+                };
+                resp.on_hover_text_at_pointer(text)
+            }
             None => resp,
         };
-        resp.context_menu(|ui| self.menu_ui(ui));
+        let open = if resp.secondary_clicked() || points_menu {
+            Some(egui::SetOpenCommand::Bool(true))
+        } else if resp.clicked() {
+            Some(egui::SetOpenCommand::Bool(false))
+        } else {
+            None
+        };
+        egui::Popup::menu(&resp).open_memory(open).at_pointer_fixed().show(|ui| self.menu_ui(ui));
     }
 
     fn menu_ui(&mut self, ui: &mut Ui) {
