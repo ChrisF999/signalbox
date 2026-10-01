@@ -64,6 +64,17 @@ fn admit_refuses_the_robot_name_in_any_case() {
     assert_eq!(admit(Some("robot2"), &members), Ok(s("robot2")), "only the exact name is reserved");
 }
 
+/// `seed` is the command log's sender while a game is prepared (timetables
+/// spec P7): reserved like `robot`.
+#[test]
+fn admit_refuses_the_seed_name_in_any_case() {
+    let members = vec![s("signalbox-users")];
+    for name in ["seed", "Seed", "SEED"] {
+        assert_eq!(admit(Some(name), &members), Err(Denied::ReservedName), "{name}");
+    }
+    assert_eq!(admit(Some("seeder"), &members), Ok(s("seeder")));
+}
+
 fn jwt_with(payload: serde_json::Value) -> String {
     format!("eyJhbGciOiJub25lIn0.{}.sig", URL_SAFE_NO_PAD.encode(payload.to_string()))
 }

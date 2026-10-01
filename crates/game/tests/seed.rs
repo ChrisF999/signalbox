@@ -247,3 +247,46 @@ fn a_save_with_a_moved_start_resumes_exactly_as_before() {
     let log = logged(&copy);
     assert!(!log.is_empty() && log.iter().all(|(_, p, _)| p == ROBOT));
 }
+
+/// A save failure while preparing (a full disk, say: here an injected
+/// failure of every command insert) stops the seeding with an error; the
+/// caller abandons it and nothing is left.
+#[test]
+fn a_save_failure_while_preparing_is_an_error_and_leaves_nothing() {
+    let path = temp_save("twobox-disk-full");
+    let mut s = Seeding::create(&path, &twobox_json(), meta(), hms("07:30")).unwrap();
+    Connection::open(seed::temp_path(&path))
+        .unwrap()
+        .execute("CREATE TRIGGER full BEFORE INSERT ON commands BEGIN SELECT RAISE(FAIL, 'database or disk is full'); END", [])
+        .unwrap();
+    let err = s.run(|_| true).unwrap_err().to_string();
+    assert!(err.contains("while preparing") && err.contains("disk is full"), "{err}");
+    assert!(s.game().sim().tick() < s.until_tick());
+    s.abandon();
+    assert!(!path.exists() && !seed::temp_path(&path).exists());
+}
+
+/// `finish` failing (here the WAL cannot be checkpointed: another reader
+/// holds it) is an error that leaves neither the save nor its temporary file.
+#[test]
+fn a_finish_that_fails_leaves_nothing() {
+    let path = temp_save("twobox-finish-fails");
+    let mut s = Seeding::create(&path, &twobox_json(), meta(), hms("07:10")).unwrap();
+    assert_eq!(s.run(|_| true).unwrap(), Progress::Reached);
+    let reader = Connection::open(seed::temp_path(&path)).unwrap();
+    reader.execute_batch("BEGIN").unwrap();
+    let _: i64 = reader.query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0)).unwrap();
+    let err = s.finish().err().expect("finish fails while a reader holds the WAL").to_string();
+    assert!(err.contains("checkpoint"), "{err}");
+    drop(reader);
+    assert!(!path.exists() && !seed::temp_path(&path).exists());
+}
+
+#[test]
+fn seed_is_a_reserved_name_like_robot() {
+    let mut g = game();
+    let out = g.connect(SEED);
+    assert_eq!(error_codes(&out, SEED), [protocol::codes::RESERVED_NAME]);
+    assert!(g.handle(SEED, protocol::ClientMsg::Claim { area: "West".into() }).is_empty());
+    assert_eq!(g.holder("West"), None);
+}

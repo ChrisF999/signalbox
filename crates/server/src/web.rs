@@ -304,16 +304,16 @@ pub mod dev {
         user: String,
     }
 
-    /// 1–32 of `A-Z a-z 0-9 _ . -`, and not `robot` in any case.
+    /// 1–32 of `A-Z a-z 0-9 _ . -`, and not `robot` or `seed` in any case.
     pub fn valid_dev_user(s: &str) -> bool {
         (1..=32).contains(&s.len())
             && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b))
-            && !crate::supervisor::is_robot(s)
+            && !crate::supervisor::is_reserved(s)
     }
 
     pub async fn login(State(state): State<AppState>, jar: SignedCookieJar, Query(q): Query<DevQuery>) -> Response {
         if !valid_dev_user(&q.user) {
-            return (StatusCode::BAD_REQUEST, "user: 1 to 32 of A-Z a-z 0-9 _ . -, not robot").into_response();
+            return (StatusCode::BAD_REQUEST, "user: 1 to 32 of A-Z a-z 0-9 _ . -, not robot or seed").into_response();
         }
         let id = state.sessions.create(&q.user);
         (jar.add(cookie(SESSION_COOKIE, &id, SESSION_TTL.as_secs())), Redirect::to("/")).into_response()

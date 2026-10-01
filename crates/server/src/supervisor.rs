@@ -32,7 +32,7 @@ use tokio::time::{Instant, sleep, timeout};
 use crate::layouts::{Layouts, new_game_id, valid_game_id};
 use crate::lessons::Lessons;
 use crate::outbox::{Outbox, Pushed};
-use crate::process::{EXIT_SEED_TOO_SLOW, normalise_start};
+use crate::process::{EXIT_NOT_PREPARED, EXIT_SEED_TOO_SLOW, PREPARING_FAILED, normalise_start};
 
 /// Game processes running at once, at most (tutorials not counted).
 pub const MAX_LIVE_GAMES: usize = 8;
@@ -125,15 +125,17 @@ fn notice(n: Notice) -> ServerFrame {
     ServerFrame::Game(ServerMsg::Notice(n))
 }
 
-/// The game refuses `robot` as a player, but a `Connect` for it would still
-/// count as somebody visiting, so the front never lets it into a game.
-fn reserved_name() -> ServerFrame {
-    ServerFrame::error(codes::RESERVED_NAME, format!("`{ROBOT}` is a reserved name"))
+/// The game refuses `robot` and `seed` as players, but a `Connect` for one
+/// would still count as somebody visiting, so the front never lets them
+/// into a game.
+fn reserved_name(user: &str) -> ServerFrame {
+    ServerFrame::error(codes::RESERVED_NAME, format!("`{}` is a reserved name", user.to_ascii_lowercase()))
 }
 
-/// `robot` in any letter case.
-pub fn is_robot(user: &str) -> bool {
-    user.eq_ignore_ascii_case(ROBOT)
+/// `robot` (the automatic signaller) or `seed` (its sender while a game is
+/// prepared, timetables spec P7), in any letter case.
+pub fn is_reserved(user: &str) -> bool {
+    user.eq_ignore_ascii_case(ROBOT) || user.eq_ignore_ascii_case(game::seed::SEED)
 }
 
 fn send_to(st: &State, game: &str, msg: ToGame) -> bool {
@@ -180,6 +182,20 @@ fn private_dir(path: &Path) -> Result<(), String> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// Remove half-built saves (`<id>.sqlite.seeding*`) a game left when it
+/// died with the front (a host crash): no game process can own one yet.
+fn sweep_half_built(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        if entry.file_name().to_str().is_some_and(|n| n.contains(".sqlite.seeding")) {
+            match std::fs::remove_file(entry.path()) {
+                Ok(()) => eprintln!("signalbox-server: removed the half-built {}", entry.path().display()),
+                Err(e) => eprintln!("signalbox-server: cannot remove {}: {e}", entry.path().display()),
+            }
+        }
+    }
+}
+
 async fn connect(socket: &Path, child: &mut Child) -> Result<UnixStream, String> {
     let deadline = Instant::now() + CONNECT_TIMEOUT;
     loop {
@@ -207,6 +223,7 @@ impl Supervisor {
     pub fn with_lessons(cfg: SupervisorConfig, layouts: Layouts, lessons: Lessons) -> Result<Arc<Supervisor>, String> {
         private_dir(&cfg.saves_dir)?;
         private_dir(&cfg.sockets_dir)?;
+        sweep_half_built(&cfg.saves_dir);
         let state = Mutex::new(State::default());
         Ok(Arc::new(Supervisor { cfg, layouts, lessons, state, next_conn: AtomicU64::new(0) }))
     }
@@ -407,8 +424,8 @@ impl Supervisor {
 
     /// Start a private tutorial of `lesson` for `user` (tutorial spec §3).
     fn start_lesson(self: &Arc<Self>, user: &str, conn: u64, lesson: String) {
-        if is_robot(user) {
-            return self.reply(user, conn, reserved_name());
+        if is_reserved(user) {
+            return self.reply(user, conn, reserved_name(user));
         }
         let Some(dir) = self.lessons.path(&lesson) else {
             return self.reply(user, conn, ServerFrame::error(codes::UNKNOWN_LESSON, format!("no lesson `{lesson}`")));
@@ -428,8 +445,8 @@ impl Supervisor {
     }
 
     fn create(self: &Arc<Self>, user: &str, conn: u64, layout: String, seed: Option<u64>, start: Option<String>) {
-        if is_robot(user) {
-            return self.reply(user, conn, reserved_name());
+        if is_reserved(user) {
+            return self.reply(user, conn, reserved_name(user));
         }
         let Some(world) = self.layouts.path(&layout) else {
             return self.reply(user, conn, ServerFrame::error(codes::UNKNOWN_LAYOUT, format!("no layout `{layout}`")));
@@ -457,8 +474,8 @@ impl Supervisor {
     }
 
     fn join(self: &Arc<Self>, user: &str, conn: u64, game: String) {
-        if is_robot(user) {
-            return self.reply(user, conn, reserved_name());
+        if is_reserved(user) {
+            return self.reply(user, conn, reserved_name(user));
         }
         if !valid_game_id(&game) {
             return self.reply(user, conn, ServerFrame::error(codes::UNKNOWN_GAME, format!("no game `{game}`")));
@@ -770,20 +787,29 @@ impl Supervisor {
         if let Some(t) = stderr {
             let _ = timeout(Duration::from_secs(1), t).await;
         }
+        let line = last_line.lock().expect("stderr lock").clone();
+        // A new game that failed or was stopped while it was being prepared
+        // has no save: it is not listed (timetables spec §3.4).
+        if matches!(start, Start::Create { .. }) {
+            let save = self.save_path(&id);
+            let code = status.and_then(|s| s.code());
+            let stopped = trouble.is_none() && code == Some(0) && !save.exists();
+            let failed = code == Some(i32::from(EXIT_NOT_PREPARED)) || game::seed::temp_path(&save).exists();
+            let too_slow = code == Some(i32::from(EXIT_SEED_TOO_SLOW));
+            if stopped || failed || too_slow {
+                game::seed::remove_partial(&save);
+                let why = match (stopped, line.is_empty(), trouble.clone()) {
+                    (true, _, _) => None,
+                    (false, false, _) => Some(line.clone()),
+                    (false, true, Some(t)) => Some(t),
+                    (false, true, None) => Some("the game process ended".into()),
+                };
+                return self.not_created(&id, too_slow, why);
+            }
+        }
         if trouble.is_none() && status.is_some_and(|s| s.success()) {
             self.finished(&id);
             return;
-        }
-        let line = last_line.lock().expect("stderr lock").clone();
-        // A new game that failed while it was being prepared has no save:
-        // it is not listed (timetables spec §3.4).
-        if matches!(start, Start::Create { .. }) {
-            let save = self.save_path(&id);
-            let too_slow = status.and_then(|s| s.code()) == Some(i32::from(EXIT_SEED_TOO_SLOW));
-            if too_slow || game::seed::temp_path(&save).exists() {
-                game::seed::remove_partial(&save);
-                return self.not_created(&id, too_slow, line);
-            }
         }
         let why = match (line.is_empty(), trouble) {
             (false, _) => line,
@@ -869,15 +895,25 @@ impl Supervisor {
     }
 
     /// A new game failed before it was ready (`too_slow`: its preparing ran
-    /// out of time, P8): it has no save and leaves the live table, and
-    /// whoever was waiting in it goes back to the lobby with why.
-    fn not_created(&self, id: &str, too_slow: bool, why: String) {
-        eprintln!("[{id}] not created: {why}");
-        let f = if too_slow {
-            let detail = why.split_once(&format!("{}: ", codes::SEED_TOO_SLOW)).map_or(why.as_str(), |(_, d)| d);
-            ServerFrame::error(codes::SEED_TOO_SLOW, format!("The game could not be prepared in time: {detail}. Try an earlier start."))
-        } else {
-            notice(Notice::GameCrashed)
+    /// out of time, P8; `why` is `None` when it was stopped, as the front
+    /// stops): it has no save and leaves the live table, and whoever was
+    /// waiting in it goes back to the lobby with why.
+    fn not_created(&self, id: &str, too_slow: bool, why: Option<String>) {
+        eprintln!("[{id}] not created: {}", why.as_deref().unwrap_or("stopped before it was ready"));
+        let detail = |why: &str, prefix: &str| {
+            let why = why.strip_prefix("signalbox-game: ").unwrap_or(why);
+            why.strip_prefix(&format!("{prefix}: ")).unwrap_or(why).to_string()
+        };
+        let f = match why {
+            Some(why) if too_slow => ServerFrame::error(
+                codes::SEED_TOO_SLOW,
+                format!("The game could not be prepared in time: {}. Try an earlier start.", detail(&why, codes::SEED_TOO_SLOW)),
+            ),
+            Some(why) => ServerFrame::error(
+                codes::NOT_CREATED,
+                format!("The game could not be prepared: {}.", detail(&why, PREPARING_FAILED)),
+            ),
+            None => ServerFrame::error(codes::NOT_CREATED, "The game was stopped before it was ready; create it again."),
         };
         {
             let mut st = self.lock();

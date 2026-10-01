@@ -102,6 +102,7 @@ fn arguments_parse_and_bad_ones_are_explained() {
     assert_eq!(SEED_BUDGET, Duration::from_secs(60), "timetables spec P8");
     assert_eq!(exit_status("seed_too_slow: preparing took too long"), EXIT_SEED_TOO_SLOW);
     assert_eq!(exit_status("create: bad world"), 1);
+    assert_eq!(exit_status("preparing failed: save: disk is full"), EXIT_NOT_PREPARED);
 }
 
 #[test]
@@ -563,4 +564,44 @@ async fn an_earlier_start_is_not_prepared() {
     write_frame(&mut sock, &ToGame::Shutdown).await.unwrap();
     assert_eq!(exit_code(&mut child).await, Some(0));
     assert_eq!(game::save::read_summary(&dir.join("g.sqlite")).unwrap().tick, 0, "a snapshot at tick 0 only");
+}
+
+/// A save failure while preparing (a full disk: here every command insert
+/// fails once the game is preparing) exits with `EXIT_NOT_PREPARED` and
+/// leaves nothing.
+#[tokio::test]
+async fn a_save_failure_while_preparing_exits_not_prepared_and_leaves_nothing() {
+    let dir = temp_dir("bin-seed-full");
+    let mut child = spawn(&create_args(&dir, &["--start", "23:59"]));
+    let mut sock = connect(&dir.join("g.sock")).await;
+    read_until(&mut sock, |m| preparing_of(m).flatten().is_some()).await;
+    let temp = game::seed::temp_path(&dir.join("g.sqlite"));
+    let c = rusqlite::Connection::open(&temp).unwrap();
+    c.busy_timeout(Duration::from_secs(5)).unwrap();
+    c.execute("CREATE TRIGGER full BEFORE INSERT ON commands BEGIN SELECT RAISE(FAIL, 'database or disk is full'); END", [])
+        .unwrap();
+    drop(c);
+    assert_eq!(exit_code(&mut child).await, Some(i32::from(EXIT_NOT_PREPARED)));
+    let err = stderr_of(&mut child).await;
+    let last = err.trim_end().lines().last().unwrap();
+    assert!(last.starts_with("signalbox-game: preparing failed: ") && last.contains("disk is full"), "{err}");
+    assert!(!dir.join("g.sqlite").exists() && !temp.exists());
+}
+
+/// The front's frames are held while a game is prepared, but not without
+/// end: past `MAX_HELD` the front is misbehaving and the creation fails.
+#[tokio::test]
+async fn a_front_that_floods_a_preparing_game_fails_the_creation() {
+    let dir = temp_dir("bin-seed-flood");
+    let mut child = spawn(&create_args(&dir, &["--start", "23:59"]));
+    let mut sock = connect(&dir.join("g.sock")).await;
+    read_until(&mut sock, |m| preparing_of(m).flatten().is_some()).await;
+    for _ in 0..=MAX_HELD {
+        if write_frame(&mut sock, &ToGame::Client { player: s("ann"), msg: ClientMsg::Resync }).await.is_err() {
+            break;
+        }
+    }
+    assert_eq!(exit_code(&mut child).await, Some(i32::from(EXIT_NOT_PREPARED)));
+    assert!(stderr_of(&mut child).await.contains("more than"));
+    assert!(!dir.join("g.sqlite").exists() && !game::seed::temp_path(&dir.join("g.sqlite")).exists());
 }

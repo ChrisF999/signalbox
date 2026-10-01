@@ -57,7 +57,7 @@ pub enum Denied {
     NoUsername,
     /// `groups` does not contain `signalbox-users`.
     NotInGroup,
-    /// The username is `robot` (any case), the name of the automatic
+    /// The username is `robot` or `seed` (any case), names of the automatic
     /// signaller; the supervisor would refuse it every game anyway.
     ReservedName,
 }
@@ -68,7 +68,7 @@ pub fn admit(preferred_username: Option<&str>, groups: &[String]) -> Result<Stri
     if !groups.iter().any(|g| g == REQUIRED_GROUP) {
         return Err(Denied::NotInGroup);
     }
-    if crate::supervisor::is_robot(name) {
+    if crate::supervisor::is_reserved(name) {
         return Err(Denied::ReservedName);
     }
     Ok(name.to_string())

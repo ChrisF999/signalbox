@@ -438,8 +438,8 @@ impl Game {
     /// `connect` and must NOT forward a `disconnect` for the old socket, or
     /// the replacing connection would be marked gone.
     pub fn connect(&mut self, player: &str) -> Vec<Out> {
-        if player == ROBOT {
-            return vec![error(player, codes::RESERVED_NAME, "`robot` is a reserved name")];
+        if player == ROBOT || player == crate::seed::SEED {
+            return vec![error(player, codes::RESERVED_NAME, &format!("`{player}` is a reserved name"))];
         }
         let spectator = self.spectator.clone();
         let p = self.players.entry(player.to_string()).or_insert_with(|| Player {

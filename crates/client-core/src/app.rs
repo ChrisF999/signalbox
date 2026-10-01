@@ -366,7 +366,7 @@ impl App {
                     self.to_lobby(Some(TUTORIAL_ENDED.into()));
                 } else if code == codes::GAME_STOPPED {
                     self.to_lobby(Some("The game stopped. Join it again to resume it.".into()));
-                } else if code == codes::SEED_TOO_SLOW {
+                } else if code == codes::SEED_TOO_SLOW || code == codes::NOT_CREATED {
                     // The game being prepared for us was not created.
                     self.to_lobby(Some(message));
                 } else if joining.is_some_and(|j| j.rejoin) {

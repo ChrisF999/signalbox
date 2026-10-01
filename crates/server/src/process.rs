@@ -38,6 +38,13 @@ pub const ACCEPT_TIMEOUT: Duration = Duration::from_secs(60);
 pub const SEED_BUDGET: Duration = Duration::from_secs(60);
 /// The exit status of a game process whose preparing took too long.
 pub const EXIT_SEED_TOO_SLOW: u8 = 3;
+/// The exit status of a game process whose preparing failed any other way
+/// (a save error, say); its error starts with `PREPARING_FAILED`.
+pub const EXIT_NOT_PREPARED: u8 = 4;
+pub const PREPARING_FAILED: &str = "preparing failed";
+/// Frames from the front held while a game is prepared, at most; more and
+/// the front is misbehaving: the creation fails.
+pub const MAX_HELD: usize = 1000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CreateArgs {
@@ -171,9 +178,16 @@ pub fn open_game(args: &Args) -> Result<Opened, String> {
             let meta = GameMeta { layout: c.layout_name.clone(), seed: c.seed };
             let start = c.start.as_deref().map(|s| parse_hms(s).ok_or_else(|| format!("bad start `{s}`"))).transpose()?;
             if let Some(start) = start.filter(|&t| seed::needs_seeding(&json, t).unwrap_or(false)) {
-                let mut s = Seeding::create(&args.save, &json, meta, start).map_err(|e| format!("create: {e}"))?;
+                let failed = |e: game::GameError| {
+                    seed::remove_partial(&args.save);
+                    format!("{PREPARING_FAILED}: create: {e}")
+                };
+                let mut s = Seeding::create(&args.save, &json, meta, start).map_err(failed)?;
                 if let Some(user) = &c.creator {
-                    s.set_creator(user).map_err(|e| format!("create: {e}"))?;
+                    if let Err(e) = s.set_creator(user) {
+                        s.abandon();
+                        return Err(format!("{PREPARING_FAILED}: create: {e}"));
+                    }
                 }
                 return Ok(Opened::Seeding(s));
             }
@@ -194,7 +208,13 @@ pub fn open_game(args: &Args) -> Result<Opened, String> {
 /// The process's exit status for the error `run` returned: `seed_too_slow`
 /// has its own, so the front can tell the lobby why the game is not there.
 pub fn exit_status(err: &str) -> u8 {
-    if err.starts_with(codes::SEED_TOO_SLOW) { EXIT_SEED_TOO_SLOW } else { 1 }
+    if err.starts_with(codes::SEED_TOO_SLOW) {
+        EXIT_SEED_TOO_SLOW
+    } else if err.starts_with(PREPARING_FAILED) {
+        EXIT_NOT_PREPARED
+    } else {
+        1
+    }
 }
 
 pub fn status_msg(st: &GameStatus) -> StatusMsg {
@@ -405,8 +425,11 @@ type Prepared = (Game, Vec<ToGame>);
 /// how far it has got (a `Status` with `preparing`, at once and then every
 /// second); the front's frames wait until the game is ready. The budget is
 /// real time, measured here: past it the half-built save is removed and the
-/// error starts with `seed_too_slow`. `Shutdown`, SIGTERM or the front
-/// going away stop it the same way, as `Ok(None)`: there is nothing to save.
+/// error starts with `seed_too_slow`; any other failure (a save error, a
+/// front sending more than `MAX_HELD` frames) starts with
+/// `PREPARING_FAILED`. `Shutdown`, SIGTERM or the front going away stop it
+/// the same way, as `Ok(None)`: there is nothing to save. One that comes
+/// as the seeding ends, too late to stop it, is held for the ready game.
 async fn prepare(
     seeding: Seeding,
     budget: Duration,
@@ -433,6 +456,9 @@ async fn prepare(
     });
     let mut held = Vec::new();
     let mut stopping = false;
+    // Shutdown or SIGTERM (not the front going away, which `serve` sees again).
+    let mut told_to_stop = false;
+    let mut flooded = false;
     let mut every = interval(STATUS_EVERY);
     let joined = loop {
         tokio::select! {
@@ -445,21 +471,33 @@ async fn prepare(
                 }
             }
             m = rx.recv(), if !stopping => match m {
-                Some(Ok(ToGame::Shutdown)) | Some(Err(_)) | None => stopping = true,
+                Some(Ok(ToGame::Shutdown)) => (stopping, told_to_stop) = (true, true),
+                Some(Err(_)) | None => stopping = true,
+                Some(Ok(_)) if held.len() >= MAX_HELD => (stopping, flooded) = (true, true),
                 Some(Ok(m)) => held.push(m),
             },
-            _ = term.recv() => stopping = true,
+            _ = term.recv() => (stopping, told_to_stop) = (true, true),
         }
         if stopping {
             stop.store(true, Ordering::Relaxed);
         }
     };
-    let (seeding, r) = joined.map_err(|e| format!("preparing: {e}"))?;
+    // A panic leaves the half-built save for the front to remove.
+    let (seeding, r) = joined.map_err(|e| format!("{PREPARING_FAILED}: {e}"))?;
     let elapsed = started.elapsed().as_secs_f64();
     match r {
+        Ok(_) if flooded => {
+            seeding.abandon();
+            Err(format!("{PREPARING_FAILED}: the front sent more than {MAX_HELD} frames while the game was prepared"))
+        }
         Ok(Progress::Reached) => {
             eprintln!("signalbox-game: prepared {} to {} in {elapsed:.1} s", fmt_hms(from_s), fmt_hms(to_s));
-            Ok(Some((seeding.finish().map_err(|e| format!("preparing: {e}"))?, held)))
+            let game = seeding.finish().map_err(|e| format!("{PREPARING_FAILED}: {e}"))?;
+            if told_to_stop {
+                // It finished before it could stop: save and exit once ready.
+                held.push(ToGame::Shutdown);
+            }
+            Ok(Some((game, held)))
         }
         Ok(Progress::Stopped) if stopping => {
             seeding.abandon();
@@ -478,7 +516,7 @@ async fn prepare(
         }
         Err(e) => {
             seeding.abandon();
-            Err(format!("preparing: {e}"))
+            Err(format!("{PREPARING_FAILED}: {e}"))
         }
     }
 }

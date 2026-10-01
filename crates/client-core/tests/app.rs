@@ -608,3 +608,16 @@ fn a_game_being_prepared_and_one_that_was_too_slow() {
     assert_eq!(app.preparing(), None);
     assert_eq!(app.lobby_note(), Some("The game could not be prepared in time."));
 }
+
+/// A game that could not be prepared, or was stopped first, was never
+/// created: back to the lobby with the front's words.
+#[test]
+fn a_game_that_was_not_created_returns_to_the_lobby() {
+    let (mut app, h) = open_app();
+    h.push(joined("g-one"));
+    app.tick(1.0);
+    h.push(ServerFrame::error(codes::NOT_CREATED, "The game was stopped before it was ready; create it again."));
+    app.tick(2.0);
+    assert!(app.game().is_none());
+    assert_eq!(app.lobby_note(), Some("The game was stopped before it was ready; create it again."));
+}

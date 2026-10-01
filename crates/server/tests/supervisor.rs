@@ -1200,13 +1200,127 @@ async fn a_crash_while_preparing_leaves_no_game() {
     rig.wait_for(&id, |g| g.preparing.is_some()).await;
     let pid = rig.sup.pid(&id).expect("a preparing game has a pid");
     kill(pid, "KILL");
-    until(&ann, |f| *f == notice(Notice::GameCrashed)).await;
+    let got = until(&ann, |f| error_code(f) == Some(codes::NOT_CREATED)).await;
+    let Some(ServerFrame::Lobby(LobbyReply::Error { message, .. })) = got.last() else { unreachable!() };
+    assert!(message.starts_with("The game could not be prepared"), "{message}");
+    gone(&rig, &id).await;
+    assert_eq!(std::fs::read_dir(rig.saves()).unwrap().count(), 0, "the half-built save is removed");
+}
+
+/// The game is out of the live table and the lobby.
+async fn gone(rig: &Rig, id: &str) {
     for _ in 0..100 {
         if rig.sup.live_count() == 0 {
             break;
         }
         sleep(Duration::from_millis(50)).await;
     }
+    assert_eq!(rig.sup.live_count(), 0);
     assert!(rig.sup.list_games().iter().all(|g| g.id != id), "{:?}", rig.sup.list_games());
-    assert_eq!(std::fs::read_dir(rig.saves()).unwrap().count(), 0, "the half-built save is removed");
+}
+
+fn rig_with_bin(name: &str, bin: impl FnOnce(&Path) -> PathBuf) -> Rig {
+    let root = temp_dir(name);
+    let layouts = Layouts::load(&layouts_dir(&root)).unwrap();
+    let cfg = SupervisorConfig {
+        game_bin: bin(&root),
+        saves_dir: root.join("data/saves"),
+        sockets_dir: root.join("data/sockets"),
+        empty_exit_s: 600,
+        admins: BTreeSet::new(),
+    };
+    Rig { sup: Supervisor::new(cfg, layouts).unwrap(), root }
+}
+
+/// Any failure while preparing (the game process exits with
+/// `EXIT_NOT_PREPARED`, as it does on a full disk) leaves no game listed.
+#[tokio::test]
+async fn any_failure_while_preparing_leaves_no_game() {
+    let rig = rig_with_bin("seed-fail", |root| {
+        let path = root.join("failing-game");
+        let code = server::process::EXIT_NOT_PREPARED;
+        std::fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\ncase \"$*\" in *--create*) echo 'signalbox-game: preparing failed: save: database or disk is full' >&2; exit {code};; *) exec {GAME_BIN} \"$@\";; esac\n"
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    });
+    let ann = rig.attach("ann");
+    rig.lobby(&ann, LobbyMsg::CreateGame { layout: s("twobox"), seed: Some(5), start: Some(s("23:00")) });
+    let got = until(&ann, |f| error_code(f) == Some(codes::NOT_CREATED)).await;
+    let Some(ServerFrame::Lobby(LobbyReply::Error { message, .. })) = got.last() else { unreachable!() };
+    assert!(message.contains("disk is full"), "{message}");
+    let id = joined_id(&got);
+    gone(&rig, &id).await;
+    assert_eq!(rig.sup.game_of("ann"), None);
+}
+
+/// SIGTERM while preparing: the game stops and saves nothing, so it is not
+/// listed and nobody is told to join it again to resume it.
+#[tokio::test]
+async fn a_game_stopped_while_preparing_is_not_listed() {
+    let rig = rig("seed-term", 600);
+    let ann = rig.attach("ann");
+    rig.lobby(&ann, LobbyMsg::CreateGame { layout: s("twobox"), seed: Some(5), start: Some(s("23:59")) });
+    let got = until(&ann, |f| matches!(f, ServerFrame::Lobby(LobbyReply::Joined { .. }))).await;
+    let id = joined_id(&got);
+    rig.wait_for(&id, |g| g.preparing.is_some()).await;
+    kill(rig.sup.pid(&id).unwrap(), "TERM");
+    let got = until(&ann, |f| error_code(f).is_some()).await;
+    let Some(ServerFrame::Lobby(LobbyReply::Error { code, message })) = got.last() else { unreachable!() };
+    assert_eq!(code, codes::NOT_CREATED);
+    assert!(!message.contains("resume"), "{message}");
+    gone(&rig, &id).await;
+    assert_eq!(std::fs::read_dir(rig.saves()).unwrap().count(), 0);
+}
+
+/// Half-built saves the front and a game left behind together (a host
+/// crash) are removed when the front starts; real saves are kept.
+#[tokio::test]
+async fn stale_half_built_saves_are_swept_at_startup() {
+    let root = temp_dir("seed-sweep");
+    let saves = root.join("data/saves");
+    std::fs::create_dir_all(&saves).unwrap();
+    drop(Game::create(&saves.join("g-keepkeepkeep.sqlite"), &std::fs::read_to_string(TWOBOX).unwrap(), GameMeta { layout: s("twobox"), seed: 1 }).unwrap());
+    for f in ["g-aaaaaaaaaaaa.sqlite.seeding", "g-aaaaaaaaaaaa.sqlite.seeding-wal", "g-aaaaaaaaaaaa.sqlite.seeding-shm"] {
+        std::fs::write(saves.join(f), "x").unwrap();
+    }
+    let layouts = Layouts::load(&layouts_dir(&root)).unwrap();
+    let cfg = SupervisorConfig {
+        game_bin: PathBuf::from(GAME_BIN),
+        saves_dir: saves.clone(),
+        sockets_dir: root.join("data/sockets"),
+        empty_exit_s: 600,
+        admins: BTreeSet::new(),
+    };
+    let _sup = Supervisor::new(cfg, layouts).unwrap();
+    let mut left: Vec<String> =
+        std::fs::read_dir(&saves).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+    left.sort();
+    assert!(left.iter().all(|f| !f.contains(".seeding")), "{left:?}");
+    assert!(left.contains(&s("g-keepkeepkeep.sqlite")), "{left:?}");
+}
+
+#[tokio::test]
+async fn the_seed_name_is_reserved_in_any_case() {
+    let rig = rig("seed-name", 600);
+    let ann = rig.attach("ann");
+    let id = create(&rig, &ann).await;
+    for name in ["seed", "Seed", "SEED"] {
+        let r = rig.attach(name);
+        rig.lobby(&r, LobbyMsg::CreateGame { layout: s("twobox"), seed: None, start: None });
+        let got = until(&r, |f| error_code(f).is_some()).await;
+        let Some(ServerFrame::Lobby(LobbyReply::Error { code, message })) = got.last() else { unreachable!() };
+        assert_eq!((code.as_str(), message.as_str()), (codes::RESERVED_NAME, "`seed` is a reserved name"));
+        rig.lobby(&r, LobbyMsg::Join { game: id.clone() });
+        expect_error(&r, codes::RESERVED_NAME).await;
+        assert_eq!(rig.sup.game_of(name), None, "{name}");
+    }
+    assert!(server::supervisor::is_reserved("Robot") && server::supervisor::is_reserved("sEEd"));
+    assert!(!server::supervisor::is_reserved("seeder"));
+    rig.sup.shutdown_all(Duration::from_secs(10)).await;
 }

@@ -47,4 +47,7 @@ pub mod codes {
     /// A game created with a later start could not be prepared within the
     /// time allowed (timetables spec P8); it was not created.
     pub const SEED_TOO_SLOW: &str = "seed_too_slow";
+    /// A game being prepared failed or was stopped before it was ready; it
+    /// was not created.
+    pub const NOT_CREATED: &str = "not_created";
 }
