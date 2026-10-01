@@ -19,6 +19,9 @@ pub struct Config {
     pub data_dir: PathBuf,
     /// Converted worlds, `<name>.json`.
     pub layouts_dir: PathBuf,
+    /// Lesson directories (`<id>/lesson.json` and `world.json`); missing
+    /// means no tutorials.
+    pub lessons_dir: PathBuf,
     /// Where browsers reach us, without a trailing `/`; the OIDC redirect
     /// URI is this + `/auth/callback`.
     pub public_url: String,
@@ -37,6 +40,7 @@ pub struct Config {
 pub const DEFAULT_ADDR: &str = "0.0.0.0:9160";
 pub const DEFAULT_DATA: &str = "/data";
 pub const DEFAULT_LAYOUTS: &str = "/opt/signalbox/layouts";
+pub const DEFAULT_LESSONS: &str = "/opt/signalbox/lessons";
 pub const DEFAULT_WEB: &str = "/opt/signalbox/web";
 pub const MIN_KEY_BYTES: usize = 64;
 
@@ -64,6 +68,7 @@ impl Config {
         let addr: SocketAddr = addr.parse().map_err(|_| format!("SIGNALBOX_ADDR `{addr}` is not host:port"))?;
         let data_dir = PathBuf::from(get("SIGNALBOX_DATA").unwrap_or_else(|| DEFAULT_DATA.into()));
         let layouts_dir = PathBuf::from(get("SIGNALBOX_LAYOUTS").unwrap_or_else(|| DEFAULT_LAYOUTS.into()));
+        let lessons_dir = PathBuf::from(get("SIGNALBOX_LESSONS").unwrap_or_else(|| DEFAULT_LESSONS.into()));
         let web_dir = PathBuf::from(get("SIGNALBOX_WEB").unwrap_or_else(|| DEFAULT_WEB.into()));
         let key_hex = get("SIGNALBOX_SESSION_KEY").ok_or("SIGNALBOX_SESSION_KEY is required (hex, at least 64 bytes)")?;
         let session_key = decode_hex(&key_hex).ok_or("SIGNALBOX_SESSION_KEY is not hex")?;
@@ -89,6 +94,6 @@ impl Config {
                 .ok_or("cannot find signalbox-game; set SIGNALBOX_GAME_BIN")?,
         };
         let admins = get("SIGNALBOX_ADMINS").map(|a| parse_admins(&a)).unwrap_or_default();
-        Ok(Config { addr, data_dir, layouts_dir, public_url, oidc, session_key, game_bin, web_dir, admins })
+        Ok(Config { addr, data_dir, layouts_dir, lessons_dir, public_url, oidc, session_key, game_bin, web_dir, admins })
     }
 }

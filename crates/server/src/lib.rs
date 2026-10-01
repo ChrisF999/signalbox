@@ -6,6 +6,7 @@
 pub mod assets;
 pub mod config;
 pub mod layouts;
+pub mod lessons;
 pub mod limit;
 pub mod oidc;
 pub mod outbox;
@@ -26,6 +27,7 @@ use tokio::task::JoinHandle;
 use crate::assets::WebAssets;
 use crate::config::Config;
 use crate::layouts::Layouts;
+use crate::lessons::Lessons;
 use crate::oidc::Oidc;
 use crate::session::Sessions;
 use crate::supervisor::{Supervisor, SupervisorConfig};
@@ -43,10 +45,11 @@ pub struct Running {
     server: JoinHandle<()>,
 }
 
-/// Start the front: data directories, layouts, supervisor, listener.
+/// Start the front: data directories, layouts, lessons, supervisor, listener.
 pub async fn start(cfg: Config) -> Result<Running, String> {
     let layouts = Layouts::load(&cfg.layouts_dir)?;
-    let sup = Supervisor::new(
+    let lessons = Lessons::load(&cfg.lessons_dir);
+    let sup = Supervisor::with_lessons(
         SupervisorConfig {
             game_bin: cfg.game_bin.clone(),
             saves_dir: cfg.data_dir.join("saves"),
@@ -55,6 +58,7 @@ pub async fn start(cfg: Config) -> Result<Running, String> {
             admins: cfg.admins.iter().cloned().collect(),
         },
         layouts,
+        lessons,
     )?;
     let oidc = match &cfg.oidc {
         Some(o) => Some(Arc::new(Oidc::new(o, &cfg.public_url)?)),

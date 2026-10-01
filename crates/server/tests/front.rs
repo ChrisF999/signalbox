@@ -245,3 +245,33 @@ async fn ws_without_an_upgrade_is_401_only_without_a_session() {
     assert!((400..500).contains(&r.status) && r.status != 401, "{}", r.status);
     f.running.stop().await;
 }
+
+/// Tutorial spec §3, end to end: the shipped lessons, over a real socket.
+#[tokio::test]
+async fn a_lesson_over_websockets() {
+    let f = front("lesson").await;
+    let mut ann = f.connect("ann").await;
+    ann.send(&lobby(LobbyMsg::ListLessons)).await.unwrap();
+    let Some(ServerFrame::Lobby(LobbyReply::Lessons { lessons })) = next(&mut ann).await else { panic!() };
+    let ids: Vec<&str> = lessons.iter().map(|l| l.id.as_str()).collect();
+    assert_eq!(ids, ["01-reading-the-panel", "02-setting-routes", "03-running-trains", "04-junctions-and-handovers"]);
+    ann.send(&lobby(LobbyMsg::StartLesson { lesson: s("02-setting-routes") })).await.unwrap();
+    let got = until(&mut ann, |f| matches!(f, ServerFrame::Game(ServerMsg::Lesson(_)))).await;
+    let Some(ServerFrame::Game(ServerMsg::Lesson(v))) = got.last() else { unreachable!() };
+    assert_eq!((v.title.as_str(), v.index, v.count), ("Setting & cancelling routes", 0, 10));
+    ann.send(&ClientFrame::Game(ClientMsg::LessonNext)).await.unwrap();
+    ann.send(&ClientFrame::Game(ClientMsg::LessonUi { tab: None, selected: Some(s("3")) })).await.unwrap();
+    until(&mut ann, |f| matches!(f, ServerFrame::Game(ServerMsg::Lesson(v)) if v.index == 2)).await;
+    ann.send(&lobby(LobbyMsg::ListGames)).await.unwrap();
+    let got = until(&mut ann, |f| matches!(f, ServerFrame::Lobby(LobbyReply::Games { .. }))).await;
+    assert!(matches!(got.last(), Some(ServerFrame::Lobby(LobbyReply::Games { games })) if games.is_empty()), "never listed");
+    ann.send(&lobby(LobbyMsg::Leave)).await.unwrap();
+    for _ in 0..200 {
+        if f.running.sup.live_count() == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(f.running.sup.live_count(), 0, "the tutorial ended with the leave");
+    f.running.stop().await;
+}

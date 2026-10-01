@@ -66,6 +66,12 @@ fn config_defaults_and_overrides() {
 }
 
 #[test]
+fn the_lessons_directory_defaults_to_the_images() {
+    assert_eq!(cfg(&with(&[])).unwrap().lessons_dir, PathBuf::from("/opt/signalbox/lessons"));
+    assert_eq!(cfg(&with(&[("SIGNALBOX_LESSONS", "/x")])).unwrap().lessons_dir, PathBuf::from("/x"));
+}
+
+#[test]
 fn config_problems_are_one_clear_line() {
     let err = |vars: &[(&str, &str)]| cfg(vars).unwrap_err();
     let mut no_key: Vec<(&str, &str)> = OIDC.to_vec();

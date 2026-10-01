@@ -30,11 +30,18 @@ use tokio::sync::{Notify, mpsc};
 use tokio::time::{Instant, sleep, timeout};
 
 use crate::layouts::{Layouts, new_game_id, valid_game_id};
+use crate::lessons::Lessons;
 use crate::outbox::{Outbox, Pushed};
 use crate::process::normalise_start;
 
-/// Game processes running at once, at most.
+/// Game processes running at once, at most (tutorials not counted).
 pub const MAX_LIVE_GAMES: usize = 8;
+/// Tutorial games running at once, at most (tutorial spec §3).
+pub const MAX_TUTORIALS: usize = 8;
+/// A tutorial whose player's socket closed waits this long for them to
+/// come back (a reload, a dropped connection) before it ends; leaving it
+/// from the lobby ends it at once.
+pub const TUTORIAL_EMPTY_EXIT_S: u64 = 60;
 /// How long a new game process has to start listening.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -71,7 +78,11 @@ enum Phase {
 }
 
 struct Entry {
+    /// The layout, or a tutorial's lesson id.
     layout: String,
+    /// A tutorial's player: nobody else may join it, it is never listed,
+    /// and it ends when they leave (tutorial spec §3).
+    owner: Option<String>,
     phase: Phase,
     tx: Option<mpsc::UnboundedSender<ToGame>>,
     status: Option<StatusMsg>,
@@ -91,11 +102,14 @@ struct State {
 enum Start {
     Create { world: PathBuf, layout: String, seed: u64, start: Option<String>, creator: String },
     Resume,
+    /// A tutorial of the lesson in this directory.
+    Lesson { dir: PathBuf },
 }
 
 pub struct Supervisor {
     cfg: SupervisorConfig,
     layouts: Layouts,
+    lessons: Lessons,
     state: Mutex<State>,
     next_conn: AtomicU64,
 }
@@ -181,10 +195,17 @@ async fn connect(socket: &Path, child: &mut Child) -> Result<UnixStream, String>
 
 impl Supervisor {
     /// Creates the saves and sockets directories (mode 0700) if needed.
+    /// No tutorials: see `with_lessons`.
     pub fn new(cfg: SupervisorConfig, layouts: Layouts) -> Result<Arc<Supervisor>, String> {
+        Supervisor::with_lessons(cfg, layouts, Lessons::default())
+    }
+
+    /// `new`, offering `lessons` as tutorials.
+    pub fn with_lessons(cfg: SupervisorConfig, layouts: Layouts, lessons: Lessons) -> Result<Arc<Supervisor>, String> {
         private_dir(&cfg.saves_dir)?;
         private_dir(&cfg.sockets_dir)?;
-        Ok(Arc::new(Supervisor { cfg, layouts, state: Mutex::new(State::default()), next_conn: AtomicU64::new(0) }))
+        let state = Mutex::new(State::default());
+        Ok(Arc::new(Supervisor { cfg, layouts, lessons, state, next_conn: AtomicU64::new(0) }))
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -285,11 +306,10 @@ impl Supervisor {
             ClientFrame::Lobby(LobbyMsg::CreateGame { layout, seed, start }) => self.create(user, conn, layout, seed, start),
             ClientFrame::Lobby(LobbyMsg::Join { game }) => self.join(user, conn, game),
             ClientFrame::Lobby(LobbyMsg::DeleteGame { game }) => self.delete_game(user, conn, game),
-            // Tutorials come with the lessons registry (Task 7).
-            ClientFrame::Lobby(LobbyMsg::ListLessons) => self.reply(user, conn, frame(LobbyReply::Lessons { lessons: vec![] })),
-            ClientFrame::Lobby(LobbyMsg::StartLesson { lesson }) => {
-                self.reply(user, conn, ServerFrame::error(codes::UNKNOWN_LESSON, format!("no lesson `{lesson}`")))
+            ClientFrame::Lobby(LobbyMsg::ListLessons) => {
+                self.reply(user, conn, frame(LobbyReply::Lessons { lessons: self.lessons.infos() }))
             }
+            ClientFrame::Lobby(LobbyMsg::StartLesson { lesson }) => self.start_lesson(user, conn, lesson),
         }
     }
 
@@ -302,10 +322,20 @@ impl Supervisor {
         }
     }
 
+    /// `user` leaves their game; a tutorial of theirs ends.
     fn leave(st: &mut State, user: &str) {
         if let Some(g) = st.clients.get_mut(user).and_then(|c| c.game.take()) {
             send_to(st, &g, ToGame::Disconnect { player: user.to_string() });
+            if st.games.get(&g).is_some_and(|e| e.owner.as_deref() == Some(user)) {
+                send_to(st, &g, ToGame::Shutdown);
+            }
         }
+    }
+
+    /// `game` is a tutorial of someone other than `user`: as far as they
+    /// know, it does not exist.
+    fn someone_elses_tutorial(st: &State, user: &str, game: &str) -> bool {
+        st.games.get(game).is_some_and(|e| e.owner.as_deref().is_some_and(|o| o != user))
     }
 
     fn enter(st: &mut State, user: &str, game: &str) {
@@ -320,18 +350,61 @@ impl Supervisor {
         if st.closing {
             return Err(ServerFrame::error(codes::TOO_MANY_GAMES, "the server is stopping"));
         }
-        let live = st.games.values().filter(|e| !matches!(e.phase, Phase::Crashed(_))).count();
+        let live = st.games.values().filter(|e| e.owner.is_none() && !matches!(e.phase, Phase::Crashed(_))).count();
         if live >= MAX_LIVE_GAMES {
             return Err(ServerFrame::error(codes::TOO_MANY_GAMES, format!("at most {MAX_LIVE_GAMES} games run at once")));
         }
         Ok(())
     }
 
-    fn insert_starting(st: &mut State, id: &str, layout: String) -> mpsc::UnboundedReceiver<ToGame> {
+    fn room_for_a_tutorial(st: &State) -> Result<(), ServerFrame> {
+        if st.closing {
+            return Err(ServerFrame::error(codes::TOO_MANY_GAMES, "the server is stopping"));
+        }
+        if st.games.values().filter(|e| e.owner.is_some()).count() >= MAX_TUTORIALS {
+            return Err(ServerFrame::error(codes::TOO_MANY_GAMES, format!("at most {MAX_TUTORIALS} tutorials run at once")));
+        }
+        Ok(())
+    }
+
+    fn insert_starting(st: &mut State, id: &str, layout: String, owner: Option<String>) -> mpsc::UnboundedReceiver<ToGame> {
         let (tx, rx) = mpsc::unbounded_channel();
         let kill = Arc::new(Notify::new());
-        st.games.insert(id.to_string(), Entry { layout, phase: Phase::Starting, tx: Some(tx), status: None, pid: None, kill });
+        let entry = Entry { layout, owner, phase: Phase::Starting, tx: Some(tx), status: None, pid: None, kill };
+        st.games.insert(id.to_string(), entry);
         rx
+    }
+
+    /// A new game id: no live game and no save has it.
+    fn fresh_id(&self, st: &State) -> String {
+        loop {
+            let id = new_game_id();
+            if !st.games.contains_key(&id) && !self.save_path(&id).exists() {
+                return id;
+            }
+        }
+    }
+
+    /// Start a private tutorial of `lesson` for `user` (tutorial spec §3).
+    fn start_lesson(self: &Arc<Self>, user: &str, conn: u64, lesson: String) {
+        if is_robot(user) {
+            return self.reply(user, conn, reserved_name());
+        }
+        let Some(dir) = self.lessons.path(&lesson) else {
+            return self.reply(user, conn, ServerFrame::error(codes::UNKNOWN_LESSON, format!("no lesson `{lesson}`")));
+        };
+        let mut st = self.lock();
+        let Some(c) = Self::current(&st, user, conn) else { return };
+        if let Err(f) = Self::room_for_a_tutorial(&st) {
+            push(&st, user, c, f);
+            return;
+        }
+        let id = self.fresh_id(&st);
+        Self::leave(&mut st, user);
+        let rx = Self::insert_starting(&mut st, &id, lesson, Some(user.to_string()));
+        Self::enter(&mut st, user, &id);
+        drop(st);
+        self.spawn_game(id, rx, Start::Lesson { dir });
     }
 
     fn create(self: &Arc<Self>, user: &str, conn: u64, layout: String, seed: Option<u64>, start: Option<String>) {
@@ -354,14 +427,9 @@ impl Supervisor {
             push(&st, user, c, f);
             return;
         }
-        let id = loop {
-            let id = new_game_id();
-            if !st.games.contains_key(&id) && !self.save_path(&id).exists() {
-                break id;
-            }
-        };
+        let id = self.fresh_id(&st);
         Self::leave(&mut st, user);
-        let rx = Self::insert_starting(&mut st, &id, layout.clone());
+        let rx = Self::insert_starting(&mut st, &id, layout.clone(), None);
         Self::enter(&mut st, user, &id);
         drop(st);
         let seed = seed.unwrap_or_else(rand::random);
@@ -378,6 +446,11 @@ impl Supervisor {
         {
             let mut st = self.lock();
             let Some(c) = Self::current(&st, user, conn) else { return };
+            // Someone else's tutorial does not exist, as far as you know.
+            if Self::someone_elses_tutorial(&st, user, &game) {
+                push(&st, user, c, ServerFrame::error(codes::UNKNOWN_GAME, format!("no game `{game}`")));
+                return;
+            }
             if c.game.as_deref() == Some(game.as_str()) {
                 // Already in it: leaving and entering again would look like
                 // an empty game to the game (pause, save). A fresh view is
@@ -399,6 +472,10 @@ impl Supervisor {
         let layout = read_summary(&path).map(|s| s.layout).unwrap_or_else(|_| "?".into());
         let mut st = self.lock();
         let Some(c) = Self::current(&st, user, conn) else { return };
+        if Self::someone_elses_tutorial(&st, user, &game) {
+            push(&st, user, c, ServerFrame::error(codes::UNKNOWN_GAME, format!("no game `{game}`")));
+            return;
+        }
         if matches!(st.games.get(&game).map(|e| &e.phase), Some(Phase::Starting | Phase::Running)) {
             // Someone resumed it meanwhile.
             Self::leave(&mut st, user);
@@ -415,7 +492,7 @@ impl Supervisor {
             return;
         }
         Self::leave(&mut st, user);
-        let rx = Self::insert_starting(&mut st, &game, layout);
+        let rx = Self::insert_starting(&mut st, &game, layout, None);
         Self::enter(&mut st, user, &game);
         drop(st);
         self.spawn_game(game, rx, Start::Resume);
@@ -440,6 +517,10 @@ impl Supervisor {
             let mut st = self.lock();
             let Some(c) = Self::current(&st, user, conn) else { return };
             let refuse = |code: &str, why: String| push(&st, user, c, ServerFrame::error(code, why));
+            // Tutorials keep no save and end on their own.
+            if st.games.get(&game).is_some_and(|e| e.owner.is_some()) {
+                return refuse(codes::UNKNOWN_GAME, format!("no game `{game}`"));
+            }
             match st.games.get(&game).map(|e| &e.phase) {
                 Some(Phase::Starting | Phase::Running) => {
                     return refuse(codes::GAME_RUNNING, format!("`{game}` is running; it can be deleted once it is saved"));
@@ -524,7 +605,7 @@ impl Supervisor {
             };
             out.insert(id.clone(), info);
         }
-        for (id, e) in &st.games {
+        for (id, e) in st.games.iter().filter(|(_, e)| e.owner.is_none()) {
             let base = out.remove(id);
             let areas_order: Vec<String> = match saves.get(id) {
                 Some(Ok(s)) => s.areas.clone(),
@@ -577,8 +658,16 @@ impl Supervisor {
         let socket = self.cfg.sockets_dir.join(format!("{id}.sock"));
         let _ = std::fs::remove_file(&socket);
         let mut cmd = Command::new(&self.cfg.game_bin);
-        cmd.arg("--save").arg(self.save_path(&id)).arg("--socket").arg(&socket);
-        cmd.arg("--empty-exit-s").arg(self.cfg.empty_exit_s.to_string());
+        match &start {
+            Start::Lesson { dir } => {
+                cmd.arg("--lesson").arg(dir).arg("--socket").arg(&socket);
+                cmd.arg("--empty-exit-s").arg(TUTORIAL_EMPTY_EXIT_S.min(self.cfg.empty_exit_s).to_string());
+            }
+            Start::Create { .. } | Start::Resume => {
+                cmd.arg("--save").arg(self.save_path(&id)).arg("--socket").arg(&socket);
+                cmd.arg("--empty-exit-s").arg(self.cfg.empty_exit_s.to_string());
+            }
+        }
         if let Start::Create { world, layout, seed, start, creator } = &start {
             cmd.arg("--create").arg("--layout").arg(world).arg("--layout-name").arg(layout).arg("--seed").arg(seed.to_string());
             if let Some(s) = start {
@@ -734,14 +823,20 @@ impl Supervisor {
         Self::evict(&mut st, id, &f);
     }
 
+    /// A game crashed: it is listed as crashed with `why`; a tutorial is
+    /// simply gone (nothing to resume).
     fn crashed(&self, id: &str, why: String) {
         eprintln!("[{id}] crashed: {why}");
         let mut st = self.lock();
-        let layout = st.games.get(id).map_or_else(|| "?".to_string(), |e| e.layout.clone());
-        st.games.insert(
-            id.to_string(),
-            Entry { layout, phase: Phase::Crashed(why), tx: None, status: None, pid: None, kill: Arc::new(Notify::new()) },
-        );
+        match st.games.remove(id) {
+            Some(e) if e.owner.is_some() => {}
+            e => {
+                let layout = e.map_or_else(|| "?".to_string(), |e| e.layout);
+                let kill = Arc::new(Notify::new());
+                let entry = Entry { layout, owner: None, phase: Phase::Crashed(why), tx: None, status: None, pid: None, kill };
+                st.games.insert(id.to_string(), entry);
+            }
+        }
         Self::evict(&mut st, id, &notice(Notice::GameCrashed));
     }
 

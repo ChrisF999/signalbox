@@ -268,6 +268,7 @@ fn config(name: &str, issuer: &str) -> Config {
         addr: "127.0.0.1:0".parse().unwrap(),
         data_dir: root.join("data"),
         layouts_dir: root.join("layouts"),
+        lessons_dir: root.join("lessons"),
         public_url: s("https://signalbox.test:50160"),
         oidc: Some(OidcConfig { issuer: s(issuer), client_id: s(CLIENT_ID), client_secret: s(CLIENT_SECRET) }),
         session_key: vec![9; 64],

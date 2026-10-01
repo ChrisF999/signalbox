@@ -14,6 +14,8 @@ use tokio::time::timeout;
 
 pub const TWOBOX: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../game/tests/fixtures/twobox.json");
 pub const GAME_BIN: &str = env!("CARGO_BIN_EXE_signalbox-game");
+/// The shipped lessons.
+pub const LESSONS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../lessons");
 
 pub fn s(x: &str) -> String {
     x.to_string()
@@ -32,6 +34,7 @@ pub fn dev_config(root: &Path, layouts_dir: PathBuf) -> Config {
         addr: "127.0.0.1:0".parse().unwrap(),
         data_dir: root.join("data"),
         layouts_dir,
+        lessons_dir: PathBuf::from(LESSONS),
         public_url: s("http://127.0.0.1"),
         oidc: None,
         session_key: vec![7; 64],

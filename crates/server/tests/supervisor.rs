@@ -11,8 +11,9 @@ use std::time::Duration;
 use game::{Game, GameMeta};
 use protocol::*;
 use server::layouts::{Layouts, new_game_id, valid_game_id, valid_layout_name};
+use server::lessons::Lessons;
 use server::outbox::{OUTBOX_CAP, Outbox, Pushed};
-use server::supervisor::{Attached, Supervisor, SupervisorConfig};
+use server::supervisor::{Attached, MAX_TUTORIALS, Supervisor, SupervisorConfig};
 use tokio::time::{sleep, timeout};
 
 const TWOBOX: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../game/tests/fixtures/twobox.json");
@@ -798,4 +799,179 @@ async fn deleting_checks_the_id_like_join() {
         expect_error(&root, codes::UNKNOWN_GAME).await;
     }
     assert!(victim.exists() && rig.saves().join("notes.sqlite").exists());
+}
+
+// ---- tutorials (tutorial spec §3) ----
+
+const LESSON_1: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../lessons/01-reading-the-panel");
+
+/// A lessons directory: lesson 1, a broken lesson, a name that is no id,
+/// and a stray file.
+fn lessons_dir(root: &Path) -> PathBuf {
+    let dir = root.join("lessons");
+    let one = dir.join("01-reading-the-panel");
+    std::fs::create_dir_all(&one).unwrap();
+    for f in ["lesson.json", "world.json"] {
+        std::fs::copy(Path::new(LESSON_1).join(f), one.join(f)).unwrap();
+    }
+    let broken = dir.join("02-broken");
+    std::fs::create_dir_all(&broken).unwrap();
+    std::fs::copy(Path::new(LESSON_1).join("world.json"), broken.join("world.json")).unwrap();
+    std::fs::write(broken.join("lesson.json"), r#"{"schema": 1, "title": "B", "area": "Nowhere", "start": "08:00", "steps": []}"#).unwrap();
+    std::fs::create_dir_all(dir.join("Not An Id")).unwrap();
+    std::fs::write(dir.join("README"), "ignored").unwrap();
+    dir
+}
+
+fn lesson_rig(name: &str) -> Rig {
+    let root = temp_dir(name);
+    let layouts = Layouts::load(&layouts_dir(&root)).unwrap();
+    let lessons = Lessons::load(&lessons_dir(&root));
+    let cfg = SupervisorConfig {
+        game_bin: PathBuf::from(GAME_BIN),
+        saves_dir: root.join("data/saves"),
+        sockets_dir: root.join("data/sockets"),
+        empty_exit_s: 600,
+        admins: BTreeSet::from([s("root")]),
+    };
+    Rig { sup: Supervisor::with_lessons(cfg, layouts, lessons).unwrap(), root }
+}
+
+/// Start lesson 1 as `sock`'s user; its id once the first `lesson` came.
+async fn start_lesson(rig: &Rig, sock: &Sock) -> String {
+    rig.lobby(sock, LobbyMsg::StartLesson { lesson: s("01-reading-the-panel") });
+    let got = until(sock, |f| matches!(f, ServerFrame::Game(ServerMsg::Lesson(_)))).await;
+    let Some(ServerFrame::Lobby(LobbyReply::Joined { game, .. })) = got.first() else { panic!("{got:?}") };
+    assert!(got.iter().any(|f| matches!(f, ServerFrame::Game(ServerMsg::Layout(l)) if l.area.as_deref() == Some("Saltmarsh"))));
+    game.clone()
+}
+
+async fn until_gone(rig: &Rig, id: &str) {
+    for _ in 0..200 {
+        if rig.sup.status(id).is_none() && rig.sup.pid(id).is_none() && rig.sup.live_count() == 0 {
+            return;
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+    panic!("tutorial {id} never ended");
+}
+
+#[test]
+fn only_valid_lessons_are_offered_and_each_one_left_out_says_why() {
+    let root = temp_dir("lessons-scan");
+    let dir = lessons_dir(&root);
+    let (lessons, left_out) = Lessons::scan(&dir);
+    assert_eq!(lessons.infos(), [LessonInfo { id: s("01-reading-the-panel"), title: s("Reading the panel"), steps: 10 }]);
+    assert_eq!(lessons.path("01-reading-the-panel"), Some(dir.join("01-reading-the-panel")));
+    assert_eq!((lessons.path("02-broken"), lessons.path("../lessons/01-reading-the-panel")), (None, None));
+    assert_eq!(left_out, [s("lesson 02-broken left out: lesson.json: a lesson has 1 to 60 steps")]);
+    let (none, why) = Lessons::scan(&root.join("absent"));
+    assert!(none.infos().is_empty());
+    assert_eq!(why.len(), 1);
+    assert!(why[0].starts_with("no lessons at "), "{why:?}");
+}
+
+#[tokio::test]
+async fn the_lobby_lists_lessons_and_refuses_unknown_ones() {
+    let rig = lesson_rig("lesson-lobby");
+    let ann = rig.attach("ann");
+    rig.lobby(&ann, LobbyMsg::ListLessons);
+    let f = next(&ann).await.unwrap();
+    let ServerFrame::Lobby(LobbyReply::Lessons { lessons }) = f else { panic!("{f:?}") };
+    assert_eq!(lessons.len(), 1);
+    rig.lobby(&ann, LobbyMsg::StartLesson { lesson: s("02-broken") });
+    expect_error(&ann, codes::UNKNOWN_LESSON).await;
+    let robot = rig.attach("Robot");
+    rig.lobby(&robot, LobbyMsg::StartLesson { lesson: s("01-reading-the-panel") });
+    expect_error(&robot, codes::RESERVED_NAME).await;
+}
+
+#[tokio::test]
+async fn a_tutorial_is_private_unlisted_and_ends_when_its_player_leaves() {
+    let rig = lesson_rig("lesson-private");
+    let ann = rig.attach("ann");
+    let id = start_lesson(&rig, &ann).await;
+    assert!(valid_game_id(&id));
+    assert!(rig.sup.list_games().is_empty(), "never listed");
+    let bob = rig.attach("bob");
+    rig.lobby(&bob, LobbyMsg::Join { game: id.clone() });
+    expect_error(&bob, codes::UNKNOWN_GAME).await;
+    rig.lobby(&bob, LobbyMsg::DeleteGame { game: id.clone() });
+    expect_error(&bob, codes::UNKNOWN_GAME).await;
+    let root = rig.attach("root");
+    rig.lobby(&root, LobbyMsg::DeleteGame { game: id.clone() });
+    expect_error(&root, codes::UNKNOWN_GAME).await;
+    assert_eq!(rig.sup.game_of("bob"), None);
+    rig.game_msg(&ann, ClientMsg::LessonNext);
+    until(&ann, |f| matches!(f, ServerFrame::Game(ServerMsg::Lesson(v)) if v.index == 1)).await;
+    rig.lobby(&ann, LobbyMsg::Leave);
+    until_gone(&rig, &id).await;
+    assert_eq!(std::fs::read_dir(rig.saves()).unwrap().count(), 0, "nothing saved");
+}
+
+#[tokio::test]
+async fn a_dropped_socket_can_come_back_to_its_tutorial() {
+    let rig = lesson_rig("lesson-back");
+    let ann = rig.attach("ann");
+    let id = start_lesson(&rig, &ann).await;
+    rig.game_msg(&ann, ClientMsg::LessonNext);
+    until(&ann, |f| matches!(f, ServerFrame::Game(ServerMsg::Lesson(v)) if v.index == 1)).await;
+    rig.sup.detach("ann", ann.me.conn);
+    let ann = rig.attach("ann");
+    rig.lobby(&ann, LobbyMsg::Join { game: id.clone() });
+    let got = until(&ann, |f| matches!(f, ServerFrame::Game(ServerMsg::Lesson(_)))).await;
+    let Some(ServerFrame::Game(ServerMsg::Lesson(v))) = got.last() else { unreachable!() };
+    assert_eq!(v.index, 1, "where ann left it");
+}
+
+#[tokio::test]
+async fn starting_another_game_ends_your_tutorial() {
+    let rig = lesson_rig("lesson-switch");
+    let ann = rig.attach("ann");
+    let id = start_lesson(&rig, &ann).await;
+    let game = create(&rig, &ann).await;
+    for _ in 0..200 {
+        if rig.sup.pid(&id).is_none() {
+            break;
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(rig.sup.pid(&id), None, "the tutorial ended");
+    assert_eq!(rig.sup.game_of("ann").as_deref(), Some(game.as_str()));
+}
+
+#[tokio::test]
+async fn tutorials_have_their_own_cap() {
+    let rig = lesson_rig("lesson-cap");
+    let mut socks = Vec::new();
+    for i in 0..MAX_TUTORIALS {
+        let sock = rig.attach(&format!("p{i}"));
+        start_lesson(&rig, &sock).await;
+        socks.push(sock);
+    }
+    let late = rig.attach("late");
+    rig.lobby(&late, LobbyMsg::StartLesson { lesson: s("01-reading-the-panel") });
+    let f = next(&late).await.unwrap();
+    let ServerFrame::Lobby(LobbyReply::Error { code, message }) = f else { panic!("{f:?}") };
+    assert_eq!((code.as_str(), message.as_str()), (codes::TOO_MANY_GAMES, "at most 8 tutorials run at once"));
+    create(&rig, &late).await;
+    assert_eq!(rig.sup.list_games().len(), 1, "a real game still starts, and only it is listed");
+}
+
+#[tokio::test]
+async fn a_crashed_tutorial_is_simply_gone() {
+    let rig = lesson_rig("lesson-crash");
+    let ann = rig.attach("ann");
+    let id = start_lesson(&rig, &ann).await;
+    let pid = loop {
+        if let Some(p) = rig.sup.pid(&id) {
+            break p;
+        }
+        sleep(Duration::from_millis(20)).await;
+    };
+    kill(pid, "KILL");
+    until(&ann, |f| matches!(f, ServerFrame::Game(ServerMsg::Notice(Notice::GameCrashed)))).await;
+    until_gone(&rig, &id).await;
+    assert!(rig.sup.list_games().is_empty(), "not listed as crashed");
+    assert_eq!(rig.sup.game_of("ann"), None);
 }

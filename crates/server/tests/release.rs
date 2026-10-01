@@ -16,6 +16,7 @@ async fn the_release_build_has_no_dev_login() {
         addr: "127.0.0.1:0".parse().unwrap(),
         data_dir: root.join("data"),
         layouts_dir: root.join("layouts"),
+        lessons_dir: root.join("lessons"),
         public_url: "http://127.0.0.1".into(),
         // Nothing listens on port 9: the provider is only asked on a login.
         oidc: Some(OidcConfig { issuer: "http://127.0.0.1:9/".into(), client_id: "sbx".into(), client_secret: "x".into() }),
