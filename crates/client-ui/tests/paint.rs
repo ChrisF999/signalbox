@@ -260,8 +260,9 @@ fn a_very_short_thin_leg_keeps_the_full_width() {
     r.cam.scale = 0.3;
     let w = r.w();
     let (c, rv) = (r.at(207.5, 0.0), r.at(215.0, 10.0));
-    let end = short(rv, c);
-    let from = c + (rv - c) * GAP;
+    // A leg no longer than two joint gaps is not pulled in at its joint (`leg_end`).
+    assert!((rv - c).length() <= JOINT_GAP_PX * 2.0, "setup: the whole leg is {} px", (rv - c).length());
+    let (end, from) = (rv, c + (rv - c) * GAP);
     assert!((end - from).length() < THIN_MIN_PX, "setup: the half-leg is {} px", (end - from).length());
     let d = r.idle();
     assert!(has(&lines_of(&d, TRACK_FREE, w), from, end), "full width");
