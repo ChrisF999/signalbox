@@ -144,14 +144,26 @@ fn wal(conn: &Connection) -> Result<(), SaveError> {
 impl SaveDb {
     /// A new save file; `path` must not exist yet.
     pub fn create(path: &Path, meta: &GameMeta, world_json: &str) -> Result<SaveDb, SaveError> {
+        let file: WorldFile = serde_json::from_str(world_json).map_err(|e| SaveError::Bad(format!("world: {e}")))?;
+        let areas: Vec<String> = file.areas.iter().map(|a| a.name.clone()).collect();
+        SaveDb::create_with(path, meta, world_json, &areas, &file.options.start_time)
+    }
+
+    /// `create` for a world already parsed: its area names in world order
+    /// and its `options.start_time` as written.
+    pub fn create_with(
+        path: &Path,
+        meta: &GameMeta,
+        world_json: &str,
+        areas: &[String],
+        start_time: &str,
+    ) -> Result<SaveDb, SaveError> {
         if path.exists() {
             return Err(SaveError::Bad(format!("{} already exists", path.display())));
         }
-        let file: WorldFile = serde_json::from_str(world_json).map_err(|e| SaveError::Bad(format!("world: {e}")))?;
         let conn = Connection::open(path)?;
         wal(&conn)?;
-        let areas: Vec<&str> = file.areas.iter().map(|a| a.name.as_str()).collect();
-        let areas = serde_json::to_string(&areas).expect("names serialise");
+        let areas = serde_json::to_string(areas).expect("names serialise");
         let now = now_text();
         let tx = conn.unchecked_transaction()?;
         tx.execute_batch(SCHEMA_SQL)?;
@@ -162,7 +174,7 @@ impl SaveDb {
             ("created", now.clone()),
             ("last_played", now),
             ("areas", areas),
-            ("start", file.options.start_time.clone()),
+            ("start", start_time.to_string()),
         ] {
             tx.execute("INSERT INTO meta (key, value) VALUES (?1, ?2)", params![key, value])?;
         }

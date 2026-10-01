@@ -303,6 +303,24 @@ async fn send_all(w: &mut OwnedWriteHalf, out: Vec<FromGame>) -> Result<(), ipc:
     Ok(())
 }
 
+/// Hand the heap's free pages back to the system. Opening a game frees
+/// several MB of parse buffers (the world JSON, its `WorldFile`) that glibc
+/// would otherwise keep for the life of the process: about 3 MB of RSS per
+/// Liverpool Street game. Elsewhere (musl, other systems) nothing.
+pub fn release_free_memory() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        unsafe extern "C" {
+            fn malloc_trim(pad: usize) -> std::ffi::c_int;
+        }
+        // SAFETY: malloc_trim only returns unused memory to the system; it
+        // is thread-safe and leaves every live allocation where it is.
+        unsafe {
+            malloc_trim(0);
+        }
+    }
+}
+
 /// Open the game, listen on the socket, serve one front until told to stop.
 pub async fn run(args: Args) -> Result<(), String> {
     let shell = match &args.lesson {
@@ -312,6 +330,7 @@ pub async fn run(args: Args) -> Result<(), String> {
         }
         None => Shell::new(open_game(&args)?, args.empty_exit),
     };
+    release_free_memory();
     let _ = std::fs::remove_file(&args.socket);
     let listener = UnixListener::bind(&args.socket).map_err(|e| format!("{}: {e}", args.socket.display()))?;
     serve(shell, listener, &args.socket).await

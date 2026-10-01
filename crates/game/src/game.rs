@@ -11,6 +11,7 @@ use signalbox_core::events::{Command, Event};
 use signalbox_core::ids::AreaId;
 use signalbox_core::robot;
 use signalbox_core::sim::{Sim, SimState};
+use signalbox_core::world::file::WorldFile;
 use signalbox_core::world::{LoadError, World};
 
 use crate::areas::{AreaMap, Visibility};
@@ -154,8 +155,12 @@ impl Game {
     /// A new game saved at `path`, which must not exist: world and meta are
     /// written, then a first snapshot at tick 0. Runs at 1x.
     pub fn create(path: &Path, world_json: &str, meta: GameMeta) -> Result<Game, GameError> {
-        let world = World::from_json(world_json)?;
-        let db = SaveDb::create(path, &meta, world_json)?;
+        // Parsed once: the save's meta comes from the same `WorldFile`.
+        let file: WorldFile = serde_json::from_str(world_json).map_err(|e| LoadError::Json(e.to_string()))?;
+        let areas: Vec<String> = file.areas.iter().map(|a| a.name.clone()).collect();
+        let start = file.options.start_time.clone();
+        let world = World::from_file(file)?;
+        let db = SaveDb::create_with(path, &meta, world_json, &areas, &start)?;
         let mut g = Game::new(world, meta);
         db.write_snapshot(&g.sim.snapshot())?;
         g.save = Some(db);

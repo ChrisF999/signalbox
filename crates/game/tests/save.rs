@@ -12,6 +12,7 @@ use game::{Game, GameError, ROBOT};
 use protocol::*;
 use rusqlite::Connection;
 use signalbox_core::events::Command;
+use signalbox_core::world::LoadError;
 
 fn s(x: &str) -> String {
     x.to_string()
@@ -91,6 +92,18 @@ fn create_refuses_an_existing_file() {
     let path = temp_save("exists");
     std::fs::write(&path, "").unwrap();
     assert!(matches!(Game::create(&path, &twobox_json(), meta()), Err(GameError::Save(_))));
+}
+
+/// The world is checked before anything is written: a bad one leaves no file.
+#[test]
+fn create_refuses_a_bad_world_without_writing() {
+    let path = temp_save("bad-world");
+    assert!(matches!(Game::create(&path, "{not json", meta()), Err(GameError::World(LoadError::Json(_)))));
+    assert!(!path.exists());
+    let unresolved = twobox_json().replacen("\"section\": \"", "\"section\": \"nowhere-", 1);
+    assert_ne!(unresolved, twobox_json());
+    assert!(matches!(Game::create(&path, &unresolved, meta()), Err(GameError::World(_))));
+    assert!(!path.exists());
 }
 
 #[test]
