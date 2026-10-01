@@ -372,12 +372,15 @@ impl Supervisor {
         Ok(())
     }
 
-    /// `user`'s own tutorials do not count: starting another ends them.
+    /// `user`'s own running tutorials do not count: starting another ends
+    /// them. Ending ones do, until their process exits, so a burst of
+    /// starts never runs more than `MAX_TUTORIALS` processes.
     fn room_for_a_tutorial(st: &State, user: &str) -> Result<(), ServerFrame> {
         if st.closing {
             return Err(ServerFrame::error(codes::TOO_MANY_GAMES, "the server is stopping"));
         }
-        if st.games.values().filter(|e| e.owner.as_deref().is_some_and(|o| o != user)).count() >= MAX_TUTORIALS {
+        let counted = st.games.values().filter(|e| e.owner.as_deref().is_some_and(|o| o != user || e.ending)).count();
+        if counted >= MAX_TUTORIALS {
             return Err(ServerFrame::error(codes::TOO_MANY_GAMES, format!("at most {MAX_TUTORIALS} tutorials run at once")));
         }
         Ok(())

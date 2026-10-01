@@ -1050,3 +1050,26 @@ async fn a_tutorial_that_fails_to_start_frees_its_slot() {
     assert_eq!(rig.sup.live_count(), 0);
     assert!(rig.sup.list_games().is_empty(), "not listed as crashed");
 }
+
+#[tokio::test]
+async fn a_burst_of_lesson_starts_never_runs_more_than_the_cap() {
+    let rig = lesson_rig("lesson-burst");
+    let ann = rig.attach("ann");
+    for _ in 0..MAX_TUTORIALS + 4 {
+        rig.lobby(&ann, LobbyMsg::StartLesson { lesson: s("01-reading-the-panel") });
+        // At most the cap, plus the one being replaced while it stops.
+        assert!(rig.sup.live_count() <= MAX_TUTORIALS + 1, "{} tutorial processes", rig.sup.live_count());
+    }
+    let got = drain_for(&ann, Duration::from_secs(1)).await;
+    assert!(got.iter().any(|f| error_code(f) == Some(codes::TOO_MANY_GAMES)), "some starts were refused");
+    // Once ann's stopping tutorials have exited, someone else gets a slot.
+    for _ in 0..300 {
+        if rig.sup.live_count() <= 1 {
+            break;
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+    assert!(rig.sup.live_count() <= 1, "ann's stopping tutorials never exited: {}", rig.sup.live_count());
+    let bob = rig.attach("bob");
+    start_lesson(&rig, &bob).await;
+}
