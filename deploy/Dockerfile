@@ -32,10 +32,17 @@ FROM debian:bookworm-slim AS wtt
 RUN apt-get update \
  && apt-get install -y --no-install-recommends poppler-utils \
  && rm -rf /var/lib/apt/lists/*
+# Exactly one PDF (any case of `.pdf`) is used; two, or any file there but
+# the PDF, README.md, .gitignore and a local wtt.bbox.html, stop the build
+# rather than fall back to the TS2 timetable unnoticed.
 COPY external/wtt/ /wtt/
-RUN set -eu; mkdir -p /out; set -- /wtt/*.pdf; \
-    if [ "$#" -gt 1 ]; then echo "external/wtt: more than one PDF" >&2; exit 1; fi; \
-    if [ -f "$1" ]; then sha256sum "$1"; pdftotext -bbox "$1" /out/wtt.bbox.html; \
+RUN set -eu; mkdir -p /out; cd /wtt; \
+    other=$(find . -mindepth 1 ! -iname '*.pdf' ! -name README.md ! -name .gitignore ! -name wtt.bbox.html | sort); \
+    if [ -n "$other" ]; then echo "external/wtt: not a WTT PDF: $(echo $other)" >&2; exit 1; fi; \
+    n=$(find . -maxdepth 1 -type f -iname '*.pdf' | wc -l); \
+    if [ "$n" -gt 1 ]; then echo "external/wtt: $n PDFs; keep exactly one" >&2; exit 1; fi; \
+    if [ "$n" -eq 1 ]; then pdf=$(find . -maxdepth 1 -type f -iname '*.pdf'); \
+      sha256sum "$pdf"; pdftotext -bbox "$pdf" /out/wtt.bbox.html; \
     else echo "external/wtt: no WTT; Drain keeps its TS2 timetable"; fi
 
 FROM rust:1.98-slim-bookworm AS build

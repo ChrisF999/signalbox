@@ -10,7 +10,8 @@ To build an image with it, put your copy here as the only PDF:
 
     external/wtt/wtt-7-waterloo-and-city-2017-10-09.pdf
 
-(any name ending `.pdf`; sha256
+(any name ending `.pdf` in any case; two PDFs, or any other file here but
+this README, `.gitignore` and a local `wtt.bbox.html`, stop the image build; sha256
 `7709d5b56564dd5b0d9acd7d27cb2668fc5a88407d6dae6f389a8e6fb592475b` for the
 copy this was written against). `deploy/Dockerfile` turns it into
 `pdftotext -bbox` text and converts Drain with `ts2-import --wtt`, which
