@@ -15,6 +15,7 @@ checks the `groups` claim). Nothing is on the public edge.
 | `authentik/signalbox-oidc-blueprint.yaml.example` | OAuth2 provider + application; rendered with the real secret into the vault |
 | `authentik/signalbox-access.yaml.example` | the `signalbox-users` group and its binding, for the stack's blueprints |
 | `smoke.sh` | checks a running front from outside |
+| `browser-check.sh`, `browser-check.py` | real-browser check of the web client's renderers against a throwaway dev-login front built from the checkout |
 
 ## Configuration
 
@@ -91,6 +92,8 @@ Follow `/opt/stack/apps/authentik/blueprints/README.md`. In order:
 4. Add `signalbox` to the README's list of vault-held OIDC blueprints.
 
 ## Build and run
+
+Before building the release image: `deploy/browser-check.sh` from the checkout being deployed; all three cases must say `ok`. It needs Docker and `mcr.microsoft.com/playwright/python:v1.55.0-noble`; it cannot run in Forge CI (the runner has no Docker and no internet).
 
 ```bash
 cd /home/skye-fi/projects/signalbox            # at the commit to deploy

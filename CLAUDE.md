@@ -29,6 +29,7 @@ scripts/cargo test -p signalbox-game --test lessons -- --nocapture   # every les
 scripts/cargo test --release -p signalbox-game --test seed_timing -- --ignored --nocapture --test-threads 1   # seeding cost; the real WTT at 07:30
 scripts/cargo test -p signalbox-server --features dev-auth --test client   # client-core over the real front
 scripts/wasm-build                                            # the browser client into target/web-dist/ (tools image on first use)
+deploy/browser-check.sh                                       # Chromium: WebGL2 fallback, WebGPU, no renderer (Docker, Playwright image)
 scripts/ci/test.sh                                            # the CI gate (native cargo, offline, -D warnings; builds the web client when wasm is present, always on the runner via SIGNALBOX_REQUIRE_WASM=1)
 
 scripts/cargo run -p sim-cli -- run crates/core/tests/fixtures/junction.json --robot --hours 1 --record /w/target/log.json
@@ -280,6 +281,7 @@ output is byte-identical for the same input.
 - `client-web` builds only for wasm32 (natively it is empty). WebGPU falls
   back to WebGL2 inside egui-wgpu. A socket that closes without opening is
   followed by `GET /ws`: 401 means the session is gone → `/auth/login`.
+- `deploy/browser-check.sh` proves the renderers in a real browser: plain headless Chromium has the WebGPU API but no adapter (the WebGL2 fallback), `--enable-unsafe-webgpu` gives WebGPU, `--disable-webgl` the explanation page; it puts the page into a game by sending `create_game` on the page's own socket (Playwright `route_web_socket`), and fails if the wasm was not served compressed.
 - Diagram geometry is `game::geometry::WorldGeometry`, read once from the
   world's `layout` (ts2-import writes it); points legs, signal facings and
   exit positions are found by walking up to 4 nodes to a drawn line. The
