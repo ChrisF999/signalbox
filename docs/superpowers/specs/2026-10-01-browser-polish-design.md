@@ -1,7 +1,7 @@
 # signalbox — browser polish pass (D1.2)
 
 Date: 2026-10-01
-Status: draft for owner review (every decision marked *proposed* needs the owner's OK). Amended 2026-10-01: the
+Status: approved by the owner 2026-10-01 (P1–P6, P9–P22; P7–P8 withdrawn; P18 amended, P22 conditional). Amended 2026-10-01: the
 Drain timetable is the real Waterloo & City WTT (§4), replacing the repeat timetable (P7, P8 withdrawn).
 License: GPL-2.0-or-later
 Builds on: `2026-10-01-panel-realism-design.md` (D1.1, deployed) and `2026-09-30-browser-client-design.md` (D1).
@@ -29,28 +29,28 @@ library's resume path and deploy scripts; its only server change is one game-pro
 | 2 | Drain timetable | ~~A "repeat timetable" option~~ → amended: the real LU Waterloo & City WTT No. 7 (9 Oct 2017), Mondays–Fridays only, one representative weekday; licence option (c): only the reader/converter is committed, never the PDF or anything made from it, the owner supplies the PDF locally and the image still gets the real timetable, CI tests a synthetic fixture; headcodes are the real train numbers (+ trip where a unique code is needed); replaces P7/P8, keeps P9 (§4.1) | owner, 2026-10-01 (amended the same day) |
 | 3 | Old Drain saves | Saves from before the realism pass show `L…` instead of `W…`; decide a migration that keeps determinism | owner, 2026-10-01 |
 | 4 | WebGL2 fallback | An automated real-browser check (Chromium via the Playwright image) in a CI-able deploy script | owner, 2026-10-01 |
-| P1 | What "legible" means | The measure in §3.1 over 66 renders (11 views × 3 zooms × 2 window sizes); the targets in §3.4 | **proposed — needs owner OK** |
-| P2 | Who wins a collision | Priority: headcodes (never moved), own signal numbers, ○A letters, line names, platform numbers, other labels, fringe signal numbers. A lower item moves or is hidden; nothing is ever drawn over another text | **proposed — needs owner OK** |
-| P3 | Nothing jumps while trains run | Placement depends only on the layout, the zoom and the settings: every berth's box is kept clear whether or not it holds a headcode, and a second (double-yellow) lamp's spot is kept clear on every signal. Panning never re-places anything | **proposed — needs owner OK** |
-| P4 | A signal number that does not fit | Tried at its own spot, six spots round its signal, then nudged by up to one text width or height; if no spot is clear of track, the first clear of text, lamps and boxes is used (it may touch the track: "tight"); otherwise it is hidden (its hover text still names it). An own number is never culled for a label | **proposed — needs owner OK** |
-| P5 | ○A at low zoom | Neither drawn nor clickable whenever signal numbers are too small to draw (below 7 px), for players as well as spectators; zoom in to use it. Its letter `A` moves outward (away from the track) and is dropped where it has no room; the button stays | **proposed — needs owner OK** |
-| P6 | Line names that collide | Nudged up or down by up to one line height; hidden where no nudge is clear. No per-layout position override this pass | **proposed — needs owner OK** |
+| P1 | What "legible" means | The measure in §3.1 over 66 renders (11 views × 3 zooms × 2 window sizes); the targets in §3.4 | **owner approved 2026-10-01** |
+| P2 | Who wins a collision | Priority: headcodes (never moved), own signal numbers, ○A letters, line names, platform numbers, other labels, fringe signal numbers. A lower item moves or is hidden; nothing is ever drawn over another text | **owner approved 2026-10-01** |
+| P3 | Nothing jumps while trains run | Placement depends only on the layout, the zoom and the settings: every berth's box is kept clear whether or not it holds a headcode, and a second (double-yellow) lamp's spot is kept clear on every signal. Panning never re-places anything | **owner approved 2026-10-01** |
+| P4 | A signal number that does not fit | Tried at its own spot, six spots round its signal, then nudged by up to one text width or height; if no spot is clear of track, the first clear of text, lamps and boxes is used (it may touch the track: "tight"); otherwise it is hidden (its hover text still names it). An own number is never culled for a label | **owner approved 2026-10-01** |
+| P5 | ○A at low zoom | Neither drawn nor clickable whenever signal numbers are too small to draw (below 7 px), for players as well as spectators; zoom in to use it. Its letter `A` moves outward (away from the track) and is dropped where it has no room; the button stays | **owner approved 2026-10-01** |
+| P6 | Line names that collide | Nudged up or down by up to one line height; hidden where no nudge is clear. No per-layout position override this pass | **owner approved 2026-10-01** |
 | P7 | ~~Where "repeat" lives~~ | Withdrawn: replaced by owner decision 2 as amended (§4) | withdrawn |
 | P8 | ~~Drain's pattern~~ | Withdrawn: replaced by owner decision 2 as amended (§4) | withdrawn |
 | P9 | Old saves' timetables | Unchanged: a save carries its world and its sim parts are frozen, so an old Drain save still ends at 06:43. New games get the WTT (when the image has it) | owner, 2026-10-01 (kept with decision 2 amended) |
-| P10 | Old saves' names | On every resume the game takes the display data (`layout`) from the current layout file when the saved network matches it exactly; in memory only, never written back | **proposed — needs owner OK** |
-| P11 | Where the browser check runs | `deploy/browser-check.sh` on ra (Docker + the Playwright image), run by the controller before every deploy and in this pass's final verification; not in Forge CI, whose runner has neither Docker nor internet | **proposed — needs owner OK** |
-| P12 | Simplifier start | The simplifier opens scrolled to the first train not yet finished, not to the first train of the day | **proposed — needs owner OK** |
-| P13 | Headcode boxes | Every berth's knock-out is as wide as the layout's longest booked headcode (at least today's 34 px): Gretz's 7-character numbers overflowed theirs onto the track and its neighbours (and the WTT's `202/163` would) | **proposed — needs owner OK** |
-| P14 | Reading the WTT | From `pdftotext -bbox` (every word with its box), not `-layout` text, whose 34 stacked fractions break their rows; anything that does not fit is an error naming the page (§4.2) | **proposed — needs owner OK** |
-| P15 | The weekday | Wednesday: the `TThX` variants without Monday's weekend moves (`MO`) or the Monday/Friday late depot run (`MFO`); 585 trips (§4.4) | **proposed — needs owner OK** |
-| P16 | Checks | Running times, train workings, trains in service and service intervals checked before converting; a failure stops the conversion (and the image build). Trains in service at 21:00 checked as **4**, not the printed 3 (the WTT's own workings give 4) (§4.3) | **proposed — needs owner OK** |
-| P17 | Places and what is left out | Waterloo Siding and Depot both map to Drain's roads 5/6/7, booked by the importer; the 10 empty moves and the empty-only trains 206 and 207 are left out; 203 stables at Bank 7 at 23:19¾ instead of running 23:22 to the depot; the last train's call in platform 26 is a timed pass (§4.4) | **proposed — needs owner OK** |
-| P18 | Headcode format | `<train>/<trip>`, e.g. `201/7` (5–7 characters) (§4.4) | **proposed — needs owner OK** |
-| P19 | Start and entries | The game starts at 05:40; 203 stands at Bank 8 from the start; depot trains appear in their road 10 minutes before they leave (§4.4) | **proposed — needs owner OK** |
-| P20 | Dwell | The WTT world's minimum dwell is 20–30 s (TS2 Drain: 20–120 s) (§4.4) | **proposed — needs owner OK** |
-| P21 | The PDF and the image | `external/wtt/` (git-ignored but for a README); a `wtt` Docker stage runs `pdftotext -bbox` when exactly one PDF is there, else Drain keeps its TS2 timetable; the layout keeps the name `drain`; the image stays private (§4.5) | **proposed — needs owner OK** |
-| P22 | Robot standing rule (core) | The robot may also hold a train at an automatic signal on plain line whose routes all end there; without it the WTT gridlocks at 06:52 (§4.6) | **proposed — needs owner OK** |
+| P10 | Old saves' names | On every resume the game takes the display data (`layout`) from the current layout file when the saved network matches it exactly; in memory only, never written back | **owner approved 2026-10-01** |
+| P11 | Where the browser check runs | `deploy/browser-check.sh` on ra (Docker + the Playwright image), run by the controller before every deploy and in this pass's final verification; not in Forge CI, whose runner has neither Docker nor internet | **owner approved 2026-10-01** |
+| P12 | Simplifier start | The simplifier opens scrolled to the first train not yet finished, not to the first train of the day | **owner approved 2026-10-01** |
+| P13 | Headcode boxes | Every berth's knock-out is as wide as the layout's longest booked headcode (at least today's 34 px): Gretz's 7-character numbers overflowed theirs onto the track and its neighbours (and the WTT's `202/163` would) | **owner approved 2026-10-01** |
+| P14 | Reading the WTT | From `pdftotext -bbox` (every word with its box), not `-layout` text, whose 34 stacked fractions break their rows; anything that does not fit is an error naming the page (§4.2) | **owner approved 2026-10-01** |
+| P15 | The weekday | Wednesday: the `TThX` variants without Monday's weekend moves (`MO`) or the Monday/Friday late depot run (`MFO`); 585 trips (§4.4) | **owner approved 2026-10-01** |
+| P16 | Checks | Running times, train workings, trains in service and service intervals checked before converting; a failure stops the conversion (and the image build). Trains in service at 21:00 checked as **4**, not the printed 3 (the WTT's own workings give 4) (§4.3) | **owner approved 2026-10-01** |
+| P17 | Places and what is left out | Waterloo Siding and Depot both map to Drain's roads 5/6/7, booked by the importer; the 10 empty moves and the empty-only trains 206 and 207 are left out; 203 stables at Bank 7 at 23:19¾ instead of running 23:22 to the depot; the last train's call in platform 26 is a timed pass (§4.4) | **owner approved 2026-10-01** |
+| P18 | Headcode format | Amended by the owner: each trip keeps a unique internal service code (`<train>/<trip>`, e.g. `201/7`), but the panel, berths, train list, simplifier and enquiry **display only the train number** (`201`), as LU train describers do (§4.4) | **owner approved 2026-10-01 (amended)** |
+| P19 | Start and entries | The game starts at 05:40; 203 stands at Bank 8 from the start; depot trains appear in their road 10 minutes before they leave (§4.4) | **owner approved 2026-10-01** |
+| P20 | Dwell | The WTT world's minimum dwell is 20–30 s (TS2 Drain: 20–120 s) (§4.4) | **owner approved 2026-10-01** |
+| P21 | The PDF and the image | `external/wtt/` (git-ignored but for a README); a `wtt` Docker stage runs `pdftotext -bbox` when exactly one PDF is there, else Drain keeps its TS2 timetable; the layout keeps the name `drain`; the image stays private (§4.5) | **owner approved 2026-10-01** |
+| P22 | Robot standing rule (core) | Conditional (owner): the robot-fixes branch (whole-itinerary robot planning, weighted entry delays) lands first; then re-run the whole-day WTT soak. Add this rule only if the Drain still gridlocks, and only if Liverpool Street's 3 h soak does not get worse (longest fringe wait, entries, lateness) (§4.6) | **owner approved 2026-10-01 (conditional)** |
 
 ## 3. Legibility (owner decision 1)
 
@@ -227,7 +227,7 @@ and refuses the file if any check fails:
 - **Trains in service** (the "snapshots"): 06:00 1, 09:00 5, 12:00 3, 15:00 3, 18:00 5, 21:00 **4**, 24:00 2. The
   printed table says 3 at 21:00, but the WTT's own workings give 4 (page 5: 201 finishes at 21:37, so 201, 202,
   203 and 205 all run at 21:00), and so does every trip; the table is taken to predate the revision that lengthened
-  the evening peak to 19:45. The check uses 4 (**proposed — needs owner OK**, P16).
+  the evening peak to 19:45. The check uses 4 (**owner approved 2026-10-01**, P16).
 - **Service intervals.** The mean interval between Bank departures: morning peak (07:30–09:30) 2¾ min, midday
   (11:00–15:30) 5, evening peak (16:30–19:45) 2¾, 19:45–21:30 3½, 21:30–23:30 6, 23:30–close 10, each within
   6 s. Real WTT: 165, 300, 165, 207, 363 and 600 s. The peaks' windows are chosen by the importer (the WTT does
