@@ -224,8 +224,9 @@ output is byte-identical for the same input.
   (aspects red/green or real, headcode enquiry, signal numbers) live behind
   `client_core::SettingsStore`, which `client-web` backs with `localStorage`
   (`LocalStore`). Nothing flashes except points moving, the selected entrance
-  and a cancelling route's lamp; the tutorial highlight is a calm pulse. Arrows and the ○A button are shapes: egui's
-  default fonts have no arrow glyphs.
+  and a cancelling route's lamp; the tutorial highlight is a calm pulse.
+  Arrows and the ○A button are shapes: egui's default fonts have no arrow
+  glyphs.
 - ○A (spec decision 6, amended) sits beside a controlled signal the player
   works and makes a set route stay set for following trains (real
   auto-working), not beside permanently automatic signals; there is none on
@@ -252,7 +253,8 @@ output is byte-identical for the same input.
   `unknown_game`), caps them separately (`MAX_TUTORIALS`, transiently +1 while
   a user replaces their own tutorial), starting anything ends the user's other
   tutorials, ends one when its player leaves, and gives a dropped socket 60 s
-  to come back.
+  to reconnect and rejoin (a page reload lands in the lobby, where tutorials
+  aren't listed, so the player starts again).
 - `Sim::offer_entry` (on-demand entries) and `Event::SignalPassed` exist for
   lessons; neither is logged state, and no converted world uses them.
 - Changing a lesson: `crates/game/tests/lessons.rs` plays every lesson through

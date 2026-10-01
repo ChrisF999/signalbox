@@ -1,7 +1,7 @@
 # signalbox — interactive tutorial (D1.2)
 
 Date: 2026-10-01
-Status: draft for review
+Status: approved (owner, 2026-10-01); implemented on branch tutorial
 License: GPL-2.0-or-later
 Builds on: C (server/protocol), D1 (browser client), D1.1 (panel realism)
 

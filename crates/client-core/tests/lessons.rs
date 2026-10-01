@@ -192,3 +192,49 @@ fn no_reports_while_disconnected_or_rejoining_and_the_restart_waits_for_the_link
     app.report_screen("simplifier");
     assert_eq!(game_msgs(h.take_sent()), [ClientMsg::LessonUi { tab: Some(s("simplifier")), selected: Some(s("W1")) }]);
 }
+
+#[test]
+fn a_stopped_tutorial_says_the_tutorial_ended() {
+    let (mut app, h) = in_lesson(1);
+    h.push(ServerFrame::error(codes::GAME_STOPPED, "the tutorial ended; start it again from the lobby"));
+    app.tick(0.2);
+    assert!(app.game().is_none());
+    assert_eq!(app.lobby_note(), Some("The tutorial ended. Start it again from Tutorials."));
+}
+
+#[test]
+fn a_failed_tutorial_rejoin_says_the_tutorial_ended() {
+    let (mut app, h) = in_lesson(1);
+    h.close();
+    app.tick(2.0);
+    app.tick(2.5);
+    h.open();
+    app.tick(2.6);
+    h.take_sent();
+    h.push(ServerFrame::error(codes::UNKNOWN_GAME, "no game `g-tut`"));
+    app.tick(2.7);
+    assert!(app.game().is_none());
+    assert_eq!(app.lobby_note(), Some("The tutorial ended. Start it again from Tutorials."));
+}
+
+#[test]
+fn normal_games_keep_their_stopped_and_rejoin_texts() {
+    let (mut app, h) = open_app();
+    h.push(ServerFrame::Lobby(LobbyReply::Joined { game: s("g-one"), you: s("ann") }));
+    app.tick(0.1);
+    h.push(ServerFrame::error(codes::GAME_STOPPED, "the game stopped; join it again to resume it"));
+    app.tick(0.2);
+    assert_eq!(app.lobby_note(), Some("The game stopped. Join it again to resume it."));
+
+    let (mut app, h) = open_app();
+    h.push(ServerFrame::Lobby(LobbyReply::Joined { game: s("g-one"), you: s("ann") }));
+    app.tick(0.1);
+    h.close();
+    app.tick(2.0);
+    app.tick(2.5);
+    h.open();
+    app.tick(2.6);
+    h.push(ServerFrame::error(codes::UNKNOWN_GAME, "no game `g-one`"));
+    app.tick(2.7);
+    assert_eq!(app.lobby_note(), Some("Could not rejoin the game: no game `g-one`"));
+}

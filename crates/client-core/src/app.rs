@@ -27,6 +27,8 @@ pub const REFUSED_S: f64 = 2.0;
 /// join goes unanswered for as long again (even a paused game answers it),
 /// the connection is dead though it never closed: reconnect as if it had.
 pub const WATCHDOG_S: f64 = 20.0;
+/// The lobby banner when a tutorial ends under the player (stopped, or gone on rejoin).
+const TUTORIAL_ENDED: &str = "The tutorial ended. Start it again from Tutorials.";
 
 /// The holder the view names for an area nobody holds (`game::ROBOT`).
 pub const ROBOT: &str = "robot";
@@ -359,7 +361,10 @@ impl App {
             }
             LobbyReply::Error { code, message } => {
                 let joining = self.joining.take();
-                if code == codes::GAME_STOPPED {
+                let tutorial = self.in_lesson();
+                if tutorial && (code == codes::GAME_STOPPED || joining.as_ref().is_some_and(|j| j.rejoin)) {
+                    self.to_lobby(Some(TUTORIAL_ENDED.into()));
+                } else if code == codes::GAME_STOPPED {
                     self.to_lobby(Some("The game stopped. Join it again to resume it.".into()));
                 } else if joining.is_some_and(|j| j.rejoin) {
                     self.to_lobby(Some(format!("Could not rejoin the game: {message}")));

@@ -39,8 +39,9 @@ pub const MAX_LIVE_GAMES: usize = 8;
 /// Tutorial games running at once, at most (tutorial spec §3).
 pub const MAX_TUTORIALS: usize = 8;
 /// A tutorial whose player's socket closed waits this long for them to
-/// come back (a reload, a dropped connection) before it ends; leaving it
-/// from the lobby ends it at once.
+/// reconnect and rejoin (a dropped connection) before it ends; a page
+/// reload lands in the lobby, where tutorials aren't listed, so it does not
+/// count. Leaving it from the lobby ends it at once.
 pub const TUTORIAL_EMPTY_EXIT_S: u64 = 60;
 /// How long a new game process has to start listening.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
