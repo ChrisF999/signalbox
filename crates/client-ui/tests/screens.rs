@@ -1274,3 +1274,54 @@ fn a_press_held_still_does_not_stop_the_fit_following() {
     r.frame();
     assert_ne!(r.ui.camera().unwrap(), before, "still follows the window");
 }
+
+/// Polish spec M11: + and - buttons and keys zoom in steps about the
+/// middle, and the diagram says how to move it until the player has.
+#[test]
+fn the_diagram_zooms_with_buttons_and_keys_and_says_how() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    let out = r.frame();
+    assert!(has_text(&out, client_ui::screens::VIEW_HINT));
+    let fit = r.ui.camera().unwrap().scale;
+    click_text(&mut r, &out, "+");
+    let zoomed = r.ui.camera().unwrap().scale;
+    assert!((zoomed / fit - client_ui::screens::ZOOM_STEP).abs() < 1e-4, "{fit} → {zoomed}");
+    r.events.push(Event::Key { key: Key::Minus, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::default() });
+    r.frame();
+    assert!((r.ui.camera().unwrap().scale - fit).abs() < 1e-3, "back out");
+    assert!(!has_text(&r.frame(), client_ui::screens::VIEW_HINT), "moved: the hint goes");
+    assert!((client_ui::screens::ZOOM_PER_POINT * 100.0).exp() < 1.2, "a wheel notch is a small step");
+}
+
+/// Polish spec M11 with H7: the zoom buttons sit inside the diagram, clear of
+/// each other and the top bar, at 1024 pt; zooming counts as moving the view
+/// (a resize no longer refits it) and Fit clears that.
+#[test]
+fn the_zoom_buttons_fit_at_1024_and_count_as_moving_the_view() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    r.size = vec2(1024.0, 700.0);
+    r.frame();
+    let out = r.frame();
+    let diagram = r.ui.diagram_rect().unwrap();
+    let (plus, minus) = (text_at(&out, "+"), text_at(&out, "-"));
+    assert!(!plus.intersects(minus), "{plus:?} over {minus:?}");
+    for b in [plus, minus] {
+        assert!(diagram.contains_rect(b), "{b:?} outside {diagram:?}");
+    }
+    for bar in ["Fit", "Hide panel", "Settings", "Leave", "Release area"] {
+        let at = text_at(&out, bar);
+        assert!(!at.intersects(plus) && !at.intersects(minus), "{bar} {at:?}");
+    }
+    let fit = r.ui.camera().unwrap();
+    click_text(&mut r, &out, "+");
+    let zoomed = r.ui.camera().unwrap();
+    assert!(zoomed.scale > fit.scale * 1.2, "the + was pressed: {fit:?} → {zoomed:?}");
+    r.size = vec2(900.0, 700.0);
+    r.frame();
+    let out = r.frame();
+    assert_eq!(r.ui.camera().unwrap(), zoomed, "a zoomed view is not refitted on a resize");
+    click_text(&mut r, &out, "Fit");
+    r.frame();
+    let refit = r.ui.camera().unwrap();
+    assert!(refit.scale < zoomed.scale, "Fit refits: {zoomed:?} → {refit:?}");
+}

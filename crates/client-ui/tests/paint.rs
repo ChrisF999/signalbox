@@ -68,7 +68,10 @@ impl Rig {
 
     fn of(layout: Layout, view: View) -> Rig {
         let sc = Scene::build(&layout).unwrap();
-        let cam = Camera::fit(sc.all.unwrap(), screen());
+        // Fitted, but no closer than the zoom where signal glyphs start to grow
+        // (polish spec M11): these tests check the glyphs at their base size.
+        let mut cam = Camera::fit(sc.all.unwrap(), screen());
+        cam.scale = cam.scale.min(GLYPH_FROM_SCALE);
         let names = Names::new(&layout);
         Rig { layout, sc, cam, view, names, aspects: AspectMode::RedGreen, numbers: true }
     }
@@ -801,7 +804,7 @@ fn a_numbers_other_spots_hug_the_track_then_mirror_it() {
     // Travel to the right: left of travel is up the screen.
     let (base, f) = (pos2(100.0, 100.0), vec2(1.0, 0.0));
     let disc = base + vec2(0.0, -POST_PX) + f * (HOOK_PX + LAMP_R);
-    let alts = number_alts(base, disc, f, 6.0, false);
+    let alts = number_alts(base, disc, f, 6.0, false, 1.0);
     let side = 3.0 + NUMBER_CLEAR_PX;
     assert_eq!(alts[0], (pos2(98.0, 100.0 - side), corner(vec2(-1.0, -1.0))), "behind the post, just clear of the track");
     assert_eq!(alts[0].1, Align2::RIGHT_BOTTOM);
@@ -810,7 +813,7 @@ fn a_numbers_other_spots_hug_the_track_then_mirror_it() {
     assert_eq!(alts[4], (pos2(98.0, 100.0 + side), Align2::RIGHT_TOP), "the other side of the track");
     assert_eq!(alts[5], (pos2(102.0, 100.0 + side), Align2::LEFT_TOP));
     // With a ○A, the spot ahead clears the button.
-    let with_auto = number_alts(base, disc, f, 6.0, true);
+    let with_auto = number_alts(base, disc, f, 6.0, true, 1.0);
     assert!(with_auto[1].0.x >= disc.x + client_ui::hit::AUTO_AHEAD_PX + AUTO_R);
 }
 
@@ -876,4 +879,20 @@ fn the_route_in_the_way_is_ringed_like_the_refusal() {
     assert!(ringed(&at(0.0), "W1") && ringed(&at(0.0), "W2"));
     assert_eq!(at(0.0), at(0.3), "steady");
     assert!(!ringed(&r.draw(None, &[], Some("W2"), 0.0), "W1"));
+}
+
+/// Polish spec M11: zoomed in past the track's widest, the signal glyphs
+/// grow with the zoom, up to twice their size; numbers too.
+#[test]
+fn signal_glyphs_grow_when_zoomed_in() {
+    assert_eq!((glyph(0.5), glyph(GLYPH_FROM_SCALE)), (1.0, 1.0));
+    assert!((glyph(GLYPH_FROM_SCALE * 1.5) - 1.5).abs() < 1e-5);
+    assert_eq!((glyph(100.0), glyph(f32::NAN)), (GLYPH_MAX, 1.0));
+    assert_eq!(number_px(GLYPH_FROM_SCALE * 2.0), Some(NUMBER_MAX_PX * 2.0));
+    let mut r = Rig::new(Some("West"));
+    r.cam.scale = GLYPH_FROM_SCALE * 2.0;
+    let d = r.idle();
+    assert!(circles(&d).iter().any(|k| close(k.0, r.disc("W1")) && k.1 == LAMP_R * 2.0), "{:?}", circles(&d));
+    let n = d.texts.iter().find(|t| t.text == "TAW1").unwrap();
+    assert_eq!(n.size, NUMBER_MAX_PX * 2.0);
 }

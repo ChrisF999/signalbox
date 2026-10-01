@@ -26,8 +26,16 @@ use crate::scene::Scene;
 
 /// Alarms and the connection banner.
 pub const ALARM: Color32 = Color32::from_rgb(0xFF, 0x5A, 0x5A);
-/// How far one wheel "line" (egui points of scroll) zooms.
-const ZOOM_PER_POINT: f32 = 1.0 / 200.0;
+/// How far one wheel "line" (egui points of scroll) zooms: about ×1.2 a
+/// notch (polish spec M11; it was ×1.8).
+pub const ZOOM_PER_POINT: f32 = 1.0 / 600.0;
+/// One press of the zoom buttons or keys.
+pub const ZOOM_STEP: f32 = 1.25;
+/// The zoom buttons: this big, this far in from the diagram's corner.
+const ZOOM_BUTTON: f32 = 26.0;
+const ZOOM_INSET: f32 = 8.0;
+/// Until the player first moves the view, the diagram says how.
+pub const VIEW_HINT: &str = "Drag to move · wheel, + or - to zoom · Fit shows it all";
 /// Simplifier columns, in points: headcode, lateness, from, to, at,
 /// platform, arrival, departure (wide enough for `BTHNLGR`, `ML_UP` and
 /// `05:03½`).
@@ -924,6 +932,19 @@ impl UiApp {
             cam.pan(drag);
             self.cam_moved = true;
         }
+        // Buttons and keys zoom about the middle (polish spec M11); not while
+        // typing in the simplifier's search.
+        let keys = if ui.ctx().egui_wants_keyboard_input() {
+            0
+        } else {
+            ui.input(|i| {
+                i32::from(i.key_pressed(Key::Plus) || i.key_pressed(Key::Equals)) - i32::from(i.key_pressed(Key::Minus))
+            })
+        };
+        if keys != 0 {
+            cam.zoom_at(rect, rect.center(), ZOOM_STEP.powi(keys));
+            self.cam_moved = true;
+        }
         if let Some(p) = resp.hover_pos() {
             let (scroll, zoom) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
             if scroll != 0.0 {
@@ -984,6 +1005,18 @@ impl UiApp {
             None => d,
         };
         paint::paint(&painter, d);
+        if !self.cam_moved {
+            painter.text(rect.left_bottom() + vec2(ZOOM_INSET, -ZOOM_INSET), Align2::LEFT_BOTTOM, VIEW_HINT, FontId::proportional(12.0), paint::LABEL);
+        }
+        // The zoom buttons, on top of the diagram (polish spec M11).
+        let corner = |k: f32| rect.right_top() + vec2(-(ZOOM_INSET + ZOOM_BUTTON) * k, ZOOM_INSET);
+        let plus = ui.put(Rect::from_min_size(corner(2.0) - vec2(4.0, 0.0), vec2(ZOOM_BUTTON, ZOOM_BUTTON)), egui::Button::new("+"));
+        let minus = ui.put(Rect::from_min_size(corner(1.0), vec2(ZOOM_BUTTON, ZOOM_BUTTON)), egui::Button::new("-"));
+        let steps = i32::from(plus.clicked()) - i32::from(minus.clicked());
+        if let (Some(c), true) = (self.cam.as_mut(), steps != 0) {
+            c.zoom_at(rect, rect.center(), ZOOM_STEP.powi(steps));
+            self.cam_moved = true;
+        }
         match click {
             // With the enquiry on, a headcode opens its window and nothing else.
             Some(Some(t)) => match self.core.headcode_at(&t).filter(|_| self.settings.enquiry) {

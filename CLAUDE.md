@@ -358,6 +358,9 @@ output is byte-identical for the same input.
 - The side panel can be hidden (top bar: Hide panel / Show panel) or dragged to 240 pt, where the simplifier
   scrolls sideways, header and all; an untouched Fit follows the window's size, a view the player has panned or
   zoomed is left alone (polish spec H7).
+- Zoom: ×1.2 a wheel notch, + and − buttons and keys ×1.25 (they count as moving the view; Fit clears that); signal
+  glyphs grow with the zoom once the track is at its widest, up to twice their size (`paint::glyph`, a function of
+  the zoom alone so placement never jumps; polish spec M11).
 
 ### Tutorials (`lessons/`, `game::lesson`)
 - Design: `docs/superpowers/specs/2026-10-01-tutorial-design.md`; decisions in

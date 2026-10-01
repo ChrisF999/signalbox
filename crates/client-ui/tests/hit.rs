@@ -99,7 +99,9 @@ fn the_auto_button_is_its_own_target() {
     let (sc, cam, screen) = setup(Some("West"));
     let w1 = sc.signals.iter().find(|s| s.name == "W1").unwrap();
     let c = auto_button(&cam, screen, w1).expect("W1 is a controlled signal with a route");
-    assert_eq!(c, signal_disc(&cam, screen, w1) + vec2(AUTO_AHEAD_PX, 0.0));
+    // Zoomed in past the track's widest, the button sits further out with
+    // the bigger glyphs (polish spec M11).
+    assert_eq!(c, signal_disc(&cam, screen, w1) + vec2(AUTO_AHEAD_PX * client_ui::paint::glyph(cam.scale), 0.0));
     assert_eq!(hit_test(&sc, None, &cam, screen, c), hit(Target::Auto(s("W1")), true));
     assert_eq!(hit_test(&sc, None, &cam, screen, signal_disc(&cam, screen, w1)), hit(Target::Signal(s("W1")), true));
     let mut l = layout_for(Some("West"));

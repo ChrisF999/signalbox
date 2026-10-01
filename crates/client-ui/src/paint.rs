@@ -86,6 +86,19 @@ pub const NUMBER_CLEAR_PX: f32 = 1.5;
 pub const AUTO_LETTER_PX: f32 = 9.0;
 pub const AUTO_LETTER_GAP_PX: f32 = 1.0;
 
+/// Signal glyphs (lamp, post, ○A, numbers, platform text) grow with the
+/// zoom once the track is at its widest, up to `GLYPH_MAX` times their size
+/// (polish spec M11): zoomed in, a signal is no longer a speck. A function of
+/// the zoom alone, so placement stays put (spec P3).
+pub const GLYPH_FROM_SCALE: f32 = TRACK_MAX_PX / TRACK_UNITS;
+pub const GLYPH_MAX: f32 = 2.0;
+
+/// How much bigger than their base size the signal glyphs are at `scale`.
+pub fn glyph(scale: f32) -> f32 {
+    let g = scale / GLYPH_FROM_SCALE;
+    if g.is_finite() { g.clamp(1.0, GLYPH_MAX) } else { 1.0 }
+}
+
 pub fn track_w(scale: f32) -> f32 {
     let w = TRACK_UNITS * scale;
     if w.is_finite() { w.clamp(TRACK_MIN_PX, TRACK_MAX_PX) } else { TRACK_MIN_PX }
@@ -93,7 +106,7 @@ pub fn track_w(scale: f32) -> f32 {
 
 /// Signal numbers' text size at this zoom; `None` when too small to read.
 pub fn number_px(scale: f32) -> Option<f32> {
-    let px = (NUMBER_UNITS * scale).min(NUMBER_MAX_PX);
+    let px = (NUMBER_UNITS * scale).min(NUMBER_MAX_PX * glyph(scale));
     (px >= NUMBER_MIN_PX).then_some(px)
 }
 
@@ -380,10 +393,12 @@ fn signal_shapes(d: &mut Drawing, s: &SignalMark, cam: &Camera, screen: Rect, st
     let routes: Vec<RouteState> =
         s.routes.iter().filter_map(|r| st.view.and_then(|v| v.routes.get(r)).map(|rv| rv.state)).collect();
     let disc = signal_disc(cam, screen, s);
+    let g = glyph(cam.scale);
+    let lamp = LAMP_R * g;
     if s.facing != Vec2::ZERO {
         let base = cam.to_screen(screen, s.base);
-        let top = base + left_of(s.facing) * POST_PX;
-        let hook = top + s.facing * HOOK_PX;
+        let top = base + left_of(s.facing) * (POST_PX * g);
+        let hook = top + s.facing * (HOOK_PX * g);
         // Fringe signals are grey whatever is set from them.
         let colour = if s.fringe {
             FRINGE
@@ -402,37 +417,37 @@ fn signal_shapes(d: &mut Drawing, s: &SignalMark, cam: &Camera, screen: Rect, st
     }
     let cancelling = routes.contains(&RouteState::Cancelling);
     if s.fringe {
-        d.shapes.push(Shape::circle_filled(disc, LAMP_R, FRINGE));
+        d.shapes.push(Shape::circle_filled(disc, lamp, FRINGE));
     } else if cancelling && !blink_on(st.time) {
         // Approach locking timing out: the lamp flashes red.
-        d.shapes.push(Shape::circle_stroke(disc, LAMP_R, Stroke::new(1.0, RED)));
+        d.shapes.push(Shape::circle_stroke(disc, lamp, Stroke::new(1.0, RED)));
     } else {
         let (first, second) = signal_lamps(aspect, st.aspects);
-        d.shapes.push(Shape::circle_filled(disc, LAMP_R, first));
+        d.shapes.push(Shape::circle_filled(disc, lamp, first));
         if let Some(c) = second {
-            d.shapes.push(Shape::circle_filled(disc + s.facing * (LAMP_R * 2.2), LAMP_R, c));
+            d.shapes.push(Shape::circle_filled(disc + s.facing * (lamp * 2.2), lamp, c));
         }
     }
     if st.selected == Some(s.name.as_str()) && blink_on(st.time) {
-        d.shapes.push(Shape::circle_stroke(disc, LAMP_R + 3.5, Stroke::new(2.0, SELECT)));
+        d.shapes.push(Shape::circle_stroke(disc, lamp + 3.5, Stroke::new(2.0, SELECT)));
     }
     if st.exits.contains(&ExitName::Signal(s.name.clone())) {
-        d.shapes.push(Shape::circle_stroke(disc, LAMP_R + 3.5, Stroke::new(2.0, SELECT)));
+        d.shapes.push(Shape::circle_stroke(disc, lamp + 3.5, Stroke::new(2.0, SELECT)));
     }
     if st.refused == Some(s.name.as_str()) || st.blocking == Some(s.name.as_str()) {
-        d.shapes.push(Shape::circle_stroke(disc, LAMP_R + 6.0, Stroke::new(2.0, REFUSED)));
+        d.shapes.push(Shape::circle_stroke(disc, lamp + 6.0, Stroke::new(2.0, REFUSED)));
     }
-    d.keep.rounds.push((disc, LAMP_R));
+    d.keep.rounds.push((disc, lamp));
     if s.facing != Vec2::ZERO {
         // A second yellow's spot, kept clear whatever is shown (spec P3).
-        d.keep.rounds.push((disc + s.facing * (LAMP_R * 2.2), LAMP_R));
+        d.keep.rounds.push((disc + s.facing * (lamp * 2.2), lamp));
     }
     if let (true, Some(size)) = (st.numbers, number_px(cam.scale)) {
         let side = if s.facing == Vec2::ZERO { vec2(0.0, -1.0) } else { left_of(s.facing) };
         let base = cam.to_screen(screen, s.base);
-        let alts = number_alts(base, disc, s.facing, track_w(cam.scale), auto_button(cam, screen, s).is_some());
+        let alts = number_alts(base, disc, s.facing, track_w(cam.scale), auto_button(cam, screen, s).is_some(), g);
         let text = TextItem {
-            at: disc + side * (LAMP_R + 2.0),
+            at: disc + side * (lamp + 2.0),
             anchor: anchor_towards(side),
             text: st.names.signal(&s.name),
             size,
@@ -446,17 +461,19 @@ fn signal_shapes(d: &mut Drawing, s: &SignalMark, cam: &Camera, screen: Rect, st
 /// A signal number's other spots, best first (spec §3.3): hugging the track
 /// behind the post, ahead of the lamp (past its ○A), one row further out
 /// behind and ahead, and the two spots on the other side of the track.
-/// `base` is the foot of the post and `disc` the lamp, on screen.
-pub fn number_alts(base: Pos2, disc: Pos2, facing: Vec2, track_w: f32, has_auto: bool) -> Vec<(Pos2, Align2)> {
+/// `base` is the foot of the post and `disc` the lamp, on screen; `g` the
+/// glyph size (`glyph`).
+pub fn number_alts(base: Pos2, disc: Pos2, facing: Vec2, track_w: f32, has_auto: bool, g: f32) -> Vec<(Pos2, Align2)> {
     let f = if facing == Vec2::ZERO { vec2(1.0, 0.0) } else { facing };
     let l = left_of(f);
     let side = track_w / 2.0 + NUMBER_CLEAR_PX;
-    let ahead = HOOK_PX + LAMP_R + if has_auto { AUTO_AHEAD_PX + AUTO_R } else { LAMP_R } + 2.0;
+    let (lamp, hook) = (LAMP_R * g, HOOK_PX * g);
+    let ahead = hook + lamp + if has_auto { (AUTO_AHEAD_PX + AUTO_R) * g } else { lamp } + 2.0;
     vec![
         (base + l * side - f * 2.0, corner(l - f)),
         (base + l * side + f * ahead, corner(l + f)),
-        (disc + l * (LAMP_R + 2.0) - f * (LAMP_R + 2.0), corner(l - f)),
-        (disc + l * (LAMP_R + 2.0) + f * (ahead - HOOK_PX - LAMP_R), corner(l + f)),
+        (disc + l * (lamp + 2.0) - f * (lamp + 2.0), corner(l - f)),
+        (disc + l * (lamp + 2.0) + f * (ahead - hook - lamp), corner(l + f)),
         (base - l * side - f * 2.0, corner(-l - f)),
         (base - l * side + f * 2.0, corner(-l + f)),
     ]
@@ -470,7 +487,7 @@ pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawi
     for p in &scene.platforms {
         let r = Rect::from_two_pos(to(p.rect.min), to(p.rect.max));
         d.shapes.push(Shape::rect_filled(r, CornerRadius::ZERO, PLATFORM));
-        let text = TextItem { at: r.center(), anchor: Align2::CENTER_CENTER, text: p.label.clone(), size: 9.0, colour: BG, monospace: false };
+        let text = TextItem { at: r.center(), anchor: Align2::CENTER_CENTER, text: p.label.clone(), size: 9.0 * glyph(cam.scale), colour: BG, monospace: false };
         d.movable_text(text, Role::Platform, Vec::new(), Some(r));
     }
     for t in &scene.tracks {
@@ -525,19 +542,20 @@ pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawi
             let on = st.view.is_some_and(|v| {
                 s.routes.iter().filter_map(|r| v.routes.get(r)).any(|rv| rv.auto_working && rv.state != RouteState::Cancelling)
             });
+            let auto_r = AUTO_R * glyph(cam.scale);
             // Blue where you can press it; a spectator's are grey, read-only.
             let colour = if s.operable { AUTO } else { FRINGE };
             d.shapes.push(if on {
-                Shape::circle_filled(c, AUTO_R, colour)
+                Shape::circle_filled(c, auto_r, colour)
             } else {
-                Shape::circle_stroke(c, AUTO_R, Stroke::new(1.5, colour))
+                Shape::circle_stroke(c, auto_r, Stroke::new(1.5, colour))
             });
-            d.keep.rounds.push((c, AUTO_R));
+            d.keep.rounds.push((c, auto_r));
             // The `A` outward, away from the track; else ahead, else on the inside.
             let ahead = if s.facing == Vec2::ZERO { vec2(1.0, 0.0) } else { s.facing };
             let out = left_of(ahead);
-            let gap = AUTO_R + AUTO_LETTER_GAP_PX;
-            let text = TextItem { at: c + out * gap, anchor: corner(out), text: "A".into(), size: AUTO_LETTER_PX, colour, monospace: true };
+            let gap = auto_r + AUTO_LETTER_GAP_PX;
+            let text = TextItem { at: c + out * gap, anchor: corner(out), text: "A".into(), size: AUTO_LETTER_PX * glyph(cam.scale), colour, monospace: true };
             let alts = vec![(c + ahead * gap, corner(ahead)), (c - out * gap, corner(-out))];
             d.movable_text(text, Role::AutoLetter, alts, None);
         }
@@ -593,7 +611,7 @@ fn highlight_shapes(d: &mut Drawing, scene: &Scene, cam: &Camera, screen: Rect, 
         match h {
             Highlight::Signal(s) | Highlight::Exit(ExitName::Signal(s)) => {
                 if let Some(m) = signal(s) {
-                    ring(d, signal_disc(cam, screen, m), LAMP_R + HIGHLIGHT_GAP_PX + 4.0);
+                    ring(d, signal_disc(cam, screen, m), LAMP_R * glyph(cam.scale) + HIGHLIGHT_GAP_PX + 4.0);
                 }
             }
             Highlight::Exit(ExitName::Node(n)) => {
@@ -628,7 +646,7 @@ fn highlight_shapes(d: &mut Drawing, scene: &Scene, cam: &Camera, screen: Rect, 
             }
             Highlight::Ui(u) => {
                 if let Some(c) = u.strip_prefix("auto:").and_then(signal).and_then(|m| auto_button(cam, screen, m)) {
-                    ring(d, c, AUTO_R + HIGHLIGHT_GAP_PX);
+                    ring(d, c, AUTO_R * glyph(cam.scale) + HIGHLIGHT_GAP_PX);
                 }
             }
         }
