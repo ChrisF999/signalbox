@@ -81,11 +81,12 @@ fn the_lobby_lists_games_and_layouts_and_sends_what_you_ask() {
         players: vec![s("bob")],
         error: None,
         creator: Some(s("bob")),
+        last_played: None,
         can_delete: false,
         preparing: None,
     };
     h.push(ServerFrame::Lobby(LobbyReply::Games { games: vec![info.clone()] }));
-    h.push(ServerFrame::Lobby(LobbyReply::Layouts { layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West")] }] }));
+    h.push(ServerFrame::Lobby(LobbyReply::Layouts { layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West")], title: String::new(), description: String::new() }], you: None }));
     app.tick(1.0);
     assert_eq!(app.games(), [info]);
     assert_eq!(app.layouts()[0].name, "twobox");
@@ -596,6 +597,7 @@ fn a_game_being_prepared_and_one_that_was_too_slow() {
         players: vec![],
         error: None,
         creator: Some(s("ann")),
+        last_played: None,
         can_delete: false,
         preparing: Some(prep),
     };
@@ -667,6 +669,7 @@ fn a_late_start_claims_after_preparing_not_during() {
         players: vec![],
         error: None,
         creator: Some(s("ann")),
+        last_played: None,
         can_delete: false,
         preparing: Some(prep),
     };

@@ -174,7 +174,7 @@ fn layouts_are_read_once_and_only_valid_names_count() {
     let root = temp_dir("layouts");
     let dir = layouts_dir(&root);
     let l = Layouts::load(&dir).unwrap();
-    assert_eq!(l.infos(), [LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")] }]);
+    assert_eq!(l.infos(), [LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")], title: s("Two boxes"), description: String::new() }]);
     assert_eq!(l.path("twobox"), Some(dir.join("twobox.json")));
     assert_eq!(l.path("../layouts/twobox"), None);
     assert_eq!(l.path("Bad Name"), None);
@@ -193,14 +193,25 @@ fn layouts_are_read_once_and_only_valid_names_count() {
     std::fs::write(dir.join("broken.json"), r#"{"areas": [{"name": "A"}"#).unwrap();
     let err = Layouts::load(&dir).unwrap_err();
     assert!(err.contains("broken.json") && !err.contains("no named areas"), "not JSON: {err}");
-    // Only the area names are read; everything else in the world is skipped.
+    // Only the area names, title and description are read; everything else in the world is skipped.
     std::fs::write(
         dir.join("broken.json"),
-        r#"{"title": "T", "areas": [{"name": "B", "seeds": ["x"]}, {"name": "A"}], "layout": {"lines": [[1, 2]]}, "areas_note": null}"#,
+        r#"{"title": "T", "areas": [{"name": "B", "seeds": ["x"]}, {"name": "A"}], "layout": {"lines": [[1, 2]], "description": "D"}, "areas_note": null}"#,
     )
     .unwrap();
     let l = Layouts::load(&dir).unwrap();
-    assert_eq!(l.infos()[0], LayoutInfo { name: s("broken"), areas: vec![s("B"), s("A")] });
+    assert_eq!(l.infos()[0], LayoutInfo { name: s("broken"), areas: vec![s("B"), s("A")], title: s("T"), description: s("D") });
+    // Display text never unlists a layout: a title or description that is not a string, or a layout that is not an object, reads as empty.
+    for odd in [
+        r#"{"title": 5, "areas": [{"name": "A"}], "layout": {"description": ["x"]}}"#,
+        r#"{"title": null, "areas": [{"name": "A"}], "layout": [1, {"description": "no"}]}"#,
+        r#"{"areas": [{"name": "A"}], "layout": "drawn"}"#,
+        r#"{"areas": [{"name": "A"}], "layout": null}"#,
+    ] {
+        std::fs::write(dir.join("broken.json"), odd).unwrap();
+        let l = Layouts::load(&dir).unwrap();
+        assert_eq!((l.infos()[0].title.as_str(), l.infos()[0].description.as_str()), ("", ""), "{odd}");
+    }
     std::fs::remove_file(dir.join("broken.json")).unwrap();
     assert!(Layouts::load(&root.join("absent")).is_err());
 }
@@ -287,7 +298,10 @@ async fn the_lobby_lists_layouts_and_saved_games() {
     rig.lobby(&ann, LobbyMsg::ListLayouts);
     assert_eq!(
         next(&ann).await.unwrap(),
-        ServerFrame::Lobby(LobbyReply::Layouts { layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")] }] })
+        ServerFrame::Lobby(LobbyReply::Layouts {
+            layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")], title: s("Two boxes"), description: String::new() }],
+            you: Some(s("ann")),
+        })
     );
     rig.lobby(&ann, LobbyMsg::ListGames);
     let Some(ServerFrame::Lobby(LobbyReply::Games { games })) = next(&ann).await else { panic!() };

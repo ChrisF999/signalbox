@@ -15,6 +15,7 @@ fn spec(boundaries: &[&str], areas: &[(&str, Vec<&str>)]) -> AreasFile {
     AreasFile {
         schema: 1,
         prefix: None,
+        description: None,
         boundaries: boundaries.iter().map(|s| s.to_string()).collect(),
         areas: areas
             .iter()
@@ -259,4 +260,18 @@ fn gretz_has_three_boxes() {
     );
     assert_eq!(w.layout["box_prefix"], "G");
     assert_eq!(w.layout["workstations"], json!({"Gretz": "A", "Tournan & Marles": "B", "Mortcerf & Coulommiers": "C"}));
+}
+
+/// Polish spec M14: a layout's one-line description reaches the world's
+/// `layout`, for the lobby; every shipped areas file has one.
+#[test]
+fn the_description_goes_into_the_layout() {
+    for name in ["liverpool-st", "drain", "gretz-armainvilliers"] {
+        let dir = env!("CARGO_MANIFEST_DIR");
+        let read = |p: String| std::fs::read_to_string(p).unwrap();
+        let mut w = ts2_import::convert(&read(format!("{dir}/tests/data/{name}.json"))).unwrap().world;
+        ts2_import::areas::apply(&mut w, &ts2_import::areas::parse(&read(format!("{dir}/../../layouts/{name}.areas.json"))).unwrap()).unwrap();
+        let d = w.layout["description"].as_str().unwrap_or_default();
+        assert!((20..=120).contains(&d.len()), "{name}: {d:?}");
+    }
 }

@@ -60,7 +60,10 @@ async fn the_lobby_and_a_game_over_websockets() {
     ann.send(&lobby(LobbyMsg::ListLayouts)).await.unwrap();
     assert_eq!(
         next(&mut ann).await.unwrap(),
-        ServerFrame::Lobby(LobbyReply::Layouts { layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")] }] })
+        ServerFrame::Lobby(LobbyReply::Layouts {
+            layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")], title: s("Two boxes"), description: String::new() }],
+            you: Some(s("ann")),
+        })
     );
     let id = create(&mut ann, "twobox").await;
     let mut bob = f.connect("bob").await;

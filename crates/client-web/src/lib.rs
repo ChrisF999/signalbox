@@ -24,6 +24,7 @@ use crate::transport::WebSocketTransport;
 struct WebApp {
     ui: UiApp,
     sent_to_login: bool,
+    sent_to_logout: bool,
 }
 
 impl eframe::App for WebApp {
@@ -33,6 +34,13 @@ impl eframe::App for WebApp {
             self.sent_to_login = true;
             if let Some(w) = web_sys::window() {
                 let _ = w.location().set_href("/auth/login");
+            }
+        }
+        // The lobby's Sign out (polish spec M14).
+        if self.ui.wants_logout() && !self.sent_to_logout {
+            self.sent_to_logout = true;
+            if let Some(w) = web_sys::window() {
+                let _ = w.location().set_href("/auth/logout");
             }
         }
     }
@@ -85,7 +93,7 @@ async fn run(canvas: web_sys::HtmlCanvasElement) -> Result<(), String> {
                 let settings = Box::new(LocalStore::new(SETTINGS_KEY));
                 let lessons = Box::new(LocalStore::new(LESSONS_KEY));
                 let ui = UiApp::with_stores(App::new(Box::new(transport), now), settings, lessons);
-                Ok(Box::new(WebApp { ui, sent_to_login: false }))
+                Ok(Box::new(WebApp { ui, sent_to_login: false, sent_to_logout: false }))
             }),
         )
         .await

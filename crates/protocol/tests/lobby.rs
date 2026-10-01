@@ -93,6 +93,7 @@ fn lobby_replies() {
                     players: vec![s("ann"), s("sam")],
                     error: None,
                     creator: None,
+                    last_played: None,
                     can_delete: false,
                     preparing: None,
                 },
@@ -105,6 +106,7 @@ fn lobby_replies() {
                     players: vec![],
                     error: Some(s("resume: bad snapshot")),
                     creator: Some(s("sam")),
+                    last_played: None,
                     can_delete: true,
                     preparing: None,
                 },
@@ -120,9 +122,18 @@ fn lobby_replies() {
     );
     check_server(
         ServerFrame::Lobby(LobbyReply::Layouts {
-            layouts: vec![LayoutInfo { name: s("drain"), areas: vec![s("Drain"), s("Lambeth")] }],
+            layouts: vec![LayoutInfo { name: s("drain"), areas: vec![s("Drain"), s("Lambeth")], title: String::new(), description: String::new() }],
+            you: None,
         }),
         json!({"type": "layouts", "layouts": [{"name": "drain", "areas": ["Drain", "Lambeth"]}]}),
+    );
+    // Polish spec M14: the signed-in name, a layout's title and description, when known.
+    check_server(
+        ServerFrame::Lobby(LobbyReply::Layouts {
+            layouts: vec![LayoutInfo { name: s("drain"), areas: vec![s("Bank")], title: s("W&C"), description: s("A shuttle") }],
+            you: Some(s("ann")),
+        }),
+        json!({"type": "layouts", "you": "ann", "layouts": [{"name": "drain", "areas": ["Bank"], "title": "W&C", "description": "A shuttle"}]}),
     );
     check_server(
         ServerFrame::Lobby(LobbyReply::Joined { game: s("g-abcdefgh2345"), you: s("ann") }),
@@ -247,6 +258,7 @@ fn a_preparing_game() {
         players: vec![],
         error: None,
         creator: Some(s("ann")),
+        last_played: None,
         can_delete: false,
         preparing: Some(Preparing { from: 20400.0, to: 27000.0 }),
     };

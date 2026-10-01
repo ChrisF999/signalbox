@@ -1,5 +1,6 @@
 {
   "schema": 1,
+  "description": "Gretz-Armainvilliers, east of Paris: a long main line and its branches, three signal boxes.",
   "prefix": "G",
   "boundaries": ["39,1V1", "39,1V2", "52,1"],
   "areas": [

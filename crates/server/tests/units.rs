@@ -156,10 +156,11 @@ fn the_placeholder_page_escapes_every_name() {
         players: vec![],
         error: Some("<b>bad</b>".into()),
         creator: None,
+        last_played: None,
         can_delete: false,
         preparing: None,
     }];
-    let page = index_page("a<b", &games, &[LayoutInfo { name: "drain".into(), areas: vec![] }]);
+    let page = index_page("a<b", &games, &[LayoutInfo { name: "drain".into(), areas: vec![], title: String::new(), description: String::new() }]);
     assert!(!page.contains("<script>") && !page.contains("<b>bad"), "{page}");
     assert!(page.contains("Hackney &amp; Bow: robot") && page.contains("Signed in as a&lt;b"), "{page}");
 }

@@ -21,21 +21,81 @@ pub fn new_game_id() -> String {
     format!("g-{tail}")
 }
 
-/// A world's area names, in world order. Only `areas[].name` is read:
-/// the rest of the world is skipped without being built, so the front never
+/// What the lobby shows of a world: its area names (in world order), its
+/// title and the layout's one-line description. Only those are read: the
+/// rest of the world is skipped without being built, so the front never
 /// holds a whole world in memory (Liverpool Street's is about 8 MB as a
-/// `serde_json::Value`).
-fn area_names(text: &str) -> Result<Vec<String>, serde_json::Error> {
+/// `serde_json::Value`). The title and description are display text: if one
+/// is missing or not a string it reads as empty and never unlists the layout.
+fn lobby_head(text: &str) -> Result<(Vec<String>, String, String), serde_json::Error> {
     #[derive(serde::Deserialize)]
     struct World {
         areas: Vec<Area>,
+        #[serde(default)]
+        title: serde_json::Value,
+        #[serde(default)]
+        layout: LayoutHead,
     }
     #[derive(serde::Deserialize)]
     struct Area {
         name: String,
     }
+    /// `layout` is the drawing and is large; only its `description` is kept,
+    /// and a `layout` that is not an object reads as none.
+    #[derive(Default)]
+    struct LayoutHead {
+        description: serde_json::Value,
+    }
+    impl<'de> serde::Deserialize<'de> for LayoutHead {
+        fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            use serde::de::{Error, IgnoredAny, MapAccess, SeqAccess, Visitor};
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = LayoutHead;
+                fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    f.write_str("any value")
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut m: A) -> Result<LayoutHead, A::Error> {
+                    let mut head = LayoutHead::default();
+                    while let Some(key) = m.next_key::<std::borrow::Cow<str>>()? {
+                        if key == "description" {
+                            head.description = m.next_value()?;
+                        } else {
+                            m.next_value::<IgnoredAny>()?;
+                        }
+                    }
+                    Ok(head)
+                }
+                fn visit_seq<A: SeqAccess<'de>>(self, mut s: A) -> Result<LayoutHead, A::Error> {
+                    while s.next_element::<IgnoredAny>()?.is_some() {}
+                    Ok(LayoutHead::default())
+                }
+                fn visit_bool<E: Error>(self, _: bool) -> Result<LayoutHead, E> {
+                    Ok(LayoutHead::default())
+                }
+                fn visit_i64<E: Error>(self, _: i64) -> Result<LayoutHead, E> {
+                    Ok(LayoutHead::default())
+                }
+                fn visit_u64<E: Error>(self, _: u64) -> Result<LayoutHead, E> {
+                    Ok(LayoutHead::default())
+                }
+                fn visit_f64<E: Error>(self, _: f64) -> Result<LayoutHead, E> {
+                    Ok(LayoutHead::default())
+                }
+                fn visit_str<E: Error>(self, _: &str) -> Result<LayoutHead, E> {
+                    Ok(LayoutHead::default())
+                }
+                fn visit_unit<E: Error>(self) -> Result<LayoutHead, E> {
+                    Ok(LayoutHead::default())
+                }
+            }
+            d.deserialize_any(V)
+        }
+    }
     let w: World = serde_json::from_str(text)?;
-    Ok(w.areas.into_iter().map(|a| a.name).collect())
+    let text_of = |v: &serde_json::Value| v.as_str().unwrap_or_default().to_string();
+    let (title, description) = (text_of(&w.title), text_of(&w.layout.description));
+    Ok((w.areas.into_iter().map(|a| a.name).collect(), title, description))
 }
 
 #[derive(Clone, Debug)]
@@ -58,11 +118,11 @@ impl Layouts {
                 continue;
             }
             let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            let areas = area_names(&text).map_err(|e| match e.is_data() {
+            let (areas, title, description) = lobby_head(&text).map_err(|e| match e.is_data() {
                 true => format!("{}: no named areas ({e})", path.display()),
                 false => format!("{}: {e}", path.display()),
             })?;
-            list.push(LayoutInfo { name: name.to_string(), areas });
+            list.push(LayoutInfo { name: name.to_string(), areas, title, description });
         }
         list.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(Layouts { dir: dir.to_path_buf(), list })

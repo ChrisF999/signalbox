@@ -379,7 +379,12 @@ impl App {
     fn lobby_reply(&mut self, r: LobbyReply) {
         match r {
             LobbyReply::Games { games } => self.games = games,
-            LobbyReply::Layouts { layouts } => self.layouts = layouts,
+            LobbyReply::Layouts { layouts, you } => {
+                self.layouts = layouts;
+                if you.is_some() {
+                    self.me = you;
+                }
+            }
             LobbyReply::Lessons { lessons } => self.lessons = lessons,
             LobbyReply::Joined { game, you } => {
                 self.joining = None;
@@ -540,6 +545,11 @@ impl App {
         if self.send(ClientFrame::Lobby(LobbyMsg::StartLesson { lesson: lesson.to_string() })) {
             self.joining = Some(Joining { game: None, rejoin: false });
         }
+    }
+
+    /// Your signed-in name, once the front has said it.
+    pub fn me(&self) -> Option<&str> {
+        self.me.as_deref()
     }
 
     pub fn lobby_note(&self) -> Option<&str> {

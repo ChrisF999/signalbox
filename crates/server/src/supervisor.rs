@@ -330,7 +330,7 @@ impl Supervisor {
                 self.reply(user, conn, frame(LobbyReply::Games { games: self.list_games_for(user) }))
             }
             ClientFrame::Lobby(LobbyMsg::ListLayouts) => {
-                self.reply(user, conn, frame(LobbyReply::Layouts { layouts: self.layouts.infos() }))
+                self.reply(user, conn, frame(LobbyReply::Layouts { layouts: self.layouts.infos(), you: Some(user.to_string()) }))
             }
             ClientFrame::Lobby(LobbyMsg::Leave) => {
                 {
@@ -729,6 +729,7 @@ impl Supervisor {
                     players: vec![],
                     error: None,
                     creator: s.creator.clone(),
+                    last_played: Some(s.last_played),
                     can_delete: false,
                     preparing: None,
                 },
@@ -741,6 +742,7 @@ impl Supervisor {
                     players: vec![],
                     error: Some(e.clone()),
                     creator: None,
+                    last_played: None,
                     can_delete: false,
                     preparing: None,
                 },
@@ -762,6 +764,7 @@ impl Supervisor {
                 players: vec![],
                 error: None,
                 creator: None,
+                last_played: None,
                 can_delete: false,
                 preparing: None,
             });

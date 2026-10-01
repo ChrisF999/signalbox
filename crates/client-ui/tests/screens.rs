@@ -44,7 +44,7 @@ impl Rig {
         let mut r = Rig { ctx: egui::Context::default(), ui, h, game, t: 0.0, events: vec![], lobby_sent: vec![], size: vec2(1280.0, 800.0), commands: vec![] };
         r.frame();
         r.lobby_sent.clear();
-        r.h.push(ServerFrame::Lobby(LobbyReply::Layouts { layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")] }] }));
+        r.h.push(ServerFrame::Lobby(LobbyReply::Layouts { layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")], title: String::new(), description: String::new() }], you: None }));
         r.frame();
         r
     }
@@ -157,6 +157,7 @@ fn the_lobby_lists_games_and_creates_one() {
         players: vec![s("bob")],
         error: Some(s("disk full")),
         creator: Some(s("bob")),
+        last_played: None,
         can_delete: false,
         preparing: None,
     };
@@ -185,6 +186,7 @@ fn deleting_a_game_asks_first() {
         players: vec![],
         error: None,
         creator: Some(s("ann")),
+        last_played: None,
         can_delete,
         preparing: None,
     };
@@ -716,6 +718,7 @@ fn a_game_being_prepared_says_so_in_the_lobby_and_while_waiting() {
         players: vec![],
         error: None,
         creator: Some(s("ann")),
+        last_played: None,
         can_delete: false,
         preparing: Some(Preparing { from: 20_400.0, to: 27_000.0 }),
     };
@@ -1478,4 +1481,52 @@ fn a_readable_fit_follows_the_window_and_the_fit_button_returns_to_it() {
     click_text(&mut r, &out, "Fit");
     r.frame();
     assert_eq!(r.ui.camera().unwrap(), resized, "Fit returns to the readable view");
+}
+
+/// Polish spec M14, M15: the lobby says what this is and who you are, signs
+/// out, describes the layout, explains a bad seed beside its field, and
+/// will not send the form until it is right.
+#[test]
+fn the_lobby_orients_a_newcomer_and_checks_the_form_in_place() {
+    let mut r = Rig::lobby(drawn_twobox());
+    r.h.push(ServerFrame::Lobby(LobbyReply::Layouts {
+        layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West")], title: s("Two boxes"), description: s("Two small boxes.") }],
+        you: Some(s("ann")),
+    }));
+    let saved = GameInfo {
+        id: s("g-abc"),
+        layout: s("twobox"),
+        state: GameState::Saved,
+        sim_time: 25_300.0,
+        areas: vec![],
+        players: vec![],
+        error: None,
+        creator: Some(s("bob")),
+        last_played: Some(1_790_865_900),
+        can_delete: false,
+        preparing: None,
+    };
+    r.h.push(ServerFrame::Lobby(LobbyReply::Games { games: vec![saved] }));
+    r.frame();
+    let out = r.frame();
+    for want in [client_ui::screens::LOBBY_INTRO, "Signed in as ann", "Two boxes", "Two small boxes.", "By", "bob", "2026-10-01 14:45 UTC"] {
+        assert!(has_text(&out, want), "{want} in {:?}", texts(&out));
+    }
+    let create = text_at(&out, "Create");
+    let seed = text_at(&out, "random").center();
+    r.click(seed, PointerButton::Primary);
+    r.events.push(Event::Text("x1".into()));
+    r.frame();
+    let out = r.frame();
+    assert!(has_text(&out, "a whole number, or blank for random"));
+    assert_eq!(text_at(&out, "Create"), create, "nothing moved");
+    r.click(create.center(), PointerButton::Primary);
+    assert!(r.lobby_sent.is_empty(), "not sent: {:?}", r.lobby_sent);
+    click_text(&mut r, &out, "Sign out");
+    assert!(r.ui.wants_logout());
+    // A wide window centres the column.
+    r.size = vec2(1920.0, 1080.0);
+    r.frame();
+    let out = r.frame();
+    assert!(text_at(&out, "signalbox").min.x > 400.0, "{:?}", text_at(&out, "signalbox"));
 }

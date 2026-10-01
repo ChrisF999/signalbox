@@ -24,6 +24,10 @@ pub struct AreasFile {
     #[serde(default)]
     pub boundaries: Vec<String>,
     pub areas: Vec<AreaSpec>,
+    /// One line for the lobby (polish spec M14), written into the world's
+    /// `layout` as `description`.
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -141,6 +145,9 @@ pub fn apply(world: &mut WorldFile, spec: &AreasFile) -> Result<Vec<AreaCount>, 
             spec.areas.iter().zip(letters).map(|(a, l)| (a.name.clone(), Value::String(l))).collect();
         layout.insert("box_prefix".into(), Value::String(prefix));
         layout.insert("workstations".into(), Value::Object(ws));
+        if let Some(d) = &spec.description {
+            layout.insert("description".into(), Value::String(d.clone()));
+        }
     }
     *world = out;
     Ok(counts)

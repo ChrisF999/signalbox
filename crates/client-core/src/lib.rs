@@ -4,6 +4,7 @@
 //! it in a browser.
 
 pub mod app;
+pub mod form;
 pub mod input;
 pub mod lessons;
 pub mod log;

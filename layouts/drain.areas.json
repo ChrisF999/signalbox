@@ -1,5 +1,6 @@
 {
   "schema": 1,
+  "description": "The Waterloo & City line: two stations and a shuttle between them. The gentlest place to start.",
   "prefix": "W",
   "boundaries": ["73", "84"],
   "areas": [

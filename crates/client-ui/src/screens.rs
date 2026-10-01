@@ -81,6 +81,13 @@ const CONFIRM_W: f32 = 96.0;
 /// Below this width the buttons wrap onto a row of their own rather than
 /// draw over the clock (1000 before Hide panel joined them, polish spec H7).
 const BAR_WRAP_W: f32 = 1100.0;
+/// The lobby's column, centred in a wide window (polish spec M14).
+const LOBBY_W: f32 = 900.0;
+/// The slot beside a form field for what is wrong with it (polish spec M15).
+const FORM_NOTE_W: f32 = 230.0;
+/// The lobby's first line (polish spec M14, U20).
+pub const LOBBY_INTRO: &str =
+    "Run a signal box: set routes for trains on real layouts, alone or with friends. New here? Start with the tutorial below.";
 /// The lobby's layout list, wide enough for every name, so Create never moves.
 const LAYOUT_COMBO_W: f32 = 180.0;
 /// Repaint at least this often (ms): clocks, flashing, reconnect timers.
@@ -122,6 +129,8 @@ pub struct UiApp {
     confirm_delete: Option<String>,
     /// Release area was pressed and awaits "Yes, release" (polish spec M10).
     confirm_release: bool,
+    /// Sign out was pressed: the shell goes to `/auth/logout` (polish spec M14).
+    wants_logout: bool,
     settings: Settings,
     /// Where the settings are kept between visits (none in most tests).
     store: Option<Box<dyn SettingsStore>>,
@@ -176,6 +185,7 @@ impl UiApp {
             new_game: NewGame::default(),
             confirm_delete: None,
             confirm_release: false,
+            wants_logout: false,
             settings: Settings::default(),
             store: None,
             side_tab: SideTab::default(),
@@ -250,6 +260,11 @@ impl UiApp {
         }
     }
 
+    /// Sign out was pressed: the shell should send the browser to `/auth/logout`.
+    pub fn wants_logout(&self) -> bool {
+        self.wants_logout
+    }
+
     /// The headcode whose enquiry window is open.
     pub fn enquiry(&self) -> Option<&str> {
         self.enquiry.as_deref()
@@ -299,116 +314,162 @@ impl UiApp {
         ui.ctx().request_repaint_after(Duration::from_millis(every));
     }
 
+    /// The lobby (polish spec M14, M15): a centred column with a line of
+    /// orientation, who you are and Sign out; the tutorials; the New game
+    /// form, each field's problem beside it and the front's answer in a
+    /// fixed line below (nothing shifts); the games with who made them and
+    /// when they were last played.
     fn lobby(&mut self, ui: &mut Ui) {
         egui::CentralPanel::default().show(ui, |ui| {
+            let side = ((ui.available_width() - LOBBY_W) / 2.0).max(0.0);
+            ui.horizontal_top(|ui| {
+                ui.add_space(side);
+                ui.vertical(|ui| {
+                    ui.set_max_width(LOBBY_W);
+                    self.lobby_column(ui);
+                });
+            });
+        });
+    }
+
+    fn lobby_column(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
             ui.heading("signalbox");
-            if let Some(n) = self.core.lobby_note() {
-                ui.label(RichText::new(n).color(ALARM));
-            }
-            ui.separator();
-            self.tutorials(ui);
-            ui.separator();
-            ui.label(RichText::new("New game").strong());
-            let layouts: Vec<String> = self.core.layouts().iter().map(|l| l.name.clone()).collect();
-            let areas: Vec<Vec<String>> = self.core.layouts().iter().map(|l| l.areas.clone()).collect();
-            if layouts.is_empty() {
-                ui.label("No layouts yet.");
-            } else {
-                self.new_game.layout = self.new_game.layout.min(layouts.len() - 1);
-                ui.horizontal(|ui| {
-                    egui::ComboBox::from_label("Layout").width(LAYOUT_COMBO_W).selected_text(layouts[self.new_game.layout].as_str()).show_ui(ui, |ui| {
-                        for (i, name) in layouts.iter().enumerate() {
-                            ui.selectable_value(&mut self.new_game.layout, i, name.as_str());
-                        }
-                    });
-                    // Where the creator starts (polish spec H2): an area to signal, or watching.
-                    let mine = &areas[self.new_game.layout];
-                    self.new_game.area = self.new_game.area.min(mine.len());
-                    let shown = |i: usize| if i == 0 { "watch".to_string() } else { mine[i - 1].clone() };
-                    ui.label("Signal");
-                    egui::ComboBox::from_id_salt("new_game_area").selected_text(shown(self.new_game.area)).show_ui(ui, |ui| {
-                        for i in 0..=mine.len() {
-                            ui.selectable_value(&mut self.new_game.area, i, shown(i));
-                        }
-                    });
-                    ui.label("Seed");
-                    ui.add(egui::TextEdit::singleline(&mut self.new_game.seed).desired_width(90.0).hint_text("random"));
-                    ui.label("Start");
-                    ui.add(egui::TextEdit::singleline(&mut self.new_game.start).desired_width(70.0).hint_text("HH:MM"));
-                    if ui.button("Create").clicked() {
-                        let seed = self.new_game.seed.trim().parse().ok();
-                        let start = Some(self.new_game.start.trim().to_string()).filter(|s| !s.is_empty());
-                        let area = self.new_game.area.checked_sub(1).map(|i| mine[i].clone());
-                        self.core.create_game_in(&layouts[self.new_game.layout], seed, start, area.as_deref());
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if let Some(me) = self.core.me() {
+                    if ui.button("Sign out").clicked() {
+                        self.wants_logout = true;
+                    }
+                    ui.label(format!("Signed in as {me}"));
+                }
+            });
+        });
+        ui.label(LOBBY_INTRO);
+        ui.separator();
+        self.tutorials(ui);
+        ui.separator();
+        ui.label(RichText::new("New game").strong());
+        let layouts = self.core.layouts().to_vec();
+        if layouts.is_empty() {
+            ui.label("No layouts yet.");
+        } else {
+            self.new_game.layout = self.new_game.layout.min(layouts.len() - 1);
+            let chosen = &layouts[self.new_game.layout];
+            let shown = |l: &protocol::LayoutInfo| if l.title.is_empty() { l.name.clone() } else { l.title.clone() };
+            ui.horizontal(|ui| {
+                ui.label("Layout");
+                egui::ComboBox::from_id_salt("new_game_layout").width(LAYOUT_COMBO_W).selected_text(shown(chosen)).show_ui(ui, |ui| {
+                    for (i, l) in layouts.iter().enumerate() {
+                        ui.selectable_value(&mut self.new_game.layout, i, shown(l));
                     }
                 });
-            }
-            ui.separator();
+                // Where the creator starts (polish spec H2): an area to signal, or watching.
+                let mine = &chosen.areas;
+                self.new_game.area = self.new_game.area.min(mine.len());
+                let area = |i: usize| if i == 0 { "watch".to_string() } else { mine[i - 1].clone() };
+                ui.label("Signal");
+                egui::ComboBox::from_id_salt("new_game_area").selected_text(area(self.new_game.area)).show_ui(ui, |ui| {
+                    for i in 0..=mine.len() {
+                        ui.selectable_value(&mut self.new_game.area, i, area(i));
+                    }
+                });
+            });
+            // The full title (a wide one is clipped in the list) and the one-line description.
+            let about = match (chosen.title.is_empty(), chosen.description.is_empty()) {
+                (false, false) => format!("{}: {}", chosen.title, chosen.description),
+                (false, true) => chosen.title.clone(),
+                _ => chosen.description.clone(),
+            };
+            ui.label(RichText::new(about).color(paint::LABEL));
+            let seed = client_core::form::seed(&self.new_game.seed);
+            let start = client_core::form::start(&self.new_game.start);
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Games").strong());
-                if ui.button("Refresh").clicked() {
-                    self.core.refresh();
+                ui.label("Seed").on_hover_text("The same seed gives the same delays and dwell times; blank for random.");
+                ui.add(egui::TextEdit::singleline(&mut self.new_game.seed).desired_width(90.0).hint_text("random"));
+                ui.add_sized([FORM_NOTE_W, 18.0], egui::Label::new(RichText::new(*seed.as_ref().err().unwrap_or(&"")).color(ALARM)));
+                ui.label("Start").on_hover_text("The time on the sim clock when the game begins; blank for the layout's own.");
+                ui.add(egui::TextEdit::singleline(&mut self.new_game.start).desired_width(70.0).hint_text("HH:MM"));
+                ui.add_sized([FORM_NOTE_W, 18.0], egui::Label::new(RichText::new(*start.as_ref().err().unwrap_or(&"")).color(ALARM)));
+            });
+            ui.horizontal(|ui| {
+                let ok = seed.is_ok() && start.is_ok();
+                if ui.add_enabled(ok, egui::Button::new("Create")).clicked() {
+                    if let (Ok(seed), Ok(start)) = (seed, start) {
+                        let area = self.new_game.area.checked_sub(1).map(|i| chosen.areas[i].clone());
+                        self.core.create_game_in(&chosen.name, seed, start, area.as_deref());
+                    }
                 }
             });
-            let games = self.core.games().to_vec();
-            if games.is_empty() {
-                ui.label("No games yet.");
-                return;
-            }
-            let mut join = None;
-            let mut delete = None;
-            egui::Grid::new("games").striped(true).show(ui, |ui| {
-                for h in ["Game", "Layout", "State", "Time", "Areas", "Players", ""] {
-                    ui.label(RichText::new(h).strong());
-                }
-                ui.end_row();
-                for g in &games {
-                    ui.label(&g.id);
-                    ui.label(&g.layout);
-                    let state = match g.state {
-                        GameState::Running if g.preparing.is_some() => {
-                            g.preparing.as_ref().map(client_core::text::preparing_text).unwrap_or_default()
-                        }
-                        GameState::Running => "running".to_string(),
-                        GameState::Saved => "saved".to_string(),
-                        GameState::Crashed => format!("crashed: {}", g.error.as_deref().unwrap_or("?")),
-                    };
-                    ui.label(state);
-                    ui.label(fmt_hms(g.sim_time));
-                    let areas: Vec<String> =
-                        g.areas.iter().map(|a| format!("{} ({})", a.name, a.holder.as_deref().unwrap_or("robot"))).collect();
-                    ui.label(areas.join(", "));
-                    ui.label(g.players.join(", "));
-                    ui.horizontal(|ui| {
-                        if ui.button(if g.state == GameState::Running { "Join" } else { "Resume" }).clicked() {
-                            join = Some(g.id.clone());
-                        }
-                        // Owner decision 13: the front re-checks all of it.
-                        if g.can_delete {
-                            if self.confirm_delete.as_deref() == Some(g.id.as_str()) {
-                                ui.label(RichText::new("Delete for good?").color(ALARM));
-                                if ui.button("Yes, delete").clicked() {
-                                    delete = Some(g.id.clone());
-                                }
-                                if ui.button("Cancel").clicked() {
-                                    self.confirm_delete = None;
-                                }
-                            } else if ui.button("Delete").clicked() {
-                                self.confirm_delete = Some(g.id.clone());
-                            }
-                        }
-                    });
-                    ui.end_row();
-                }
-            });
-            if let Some(id) = join {
-                self.core.join(&id);
-            }
-            if let Some(id) = delete {
-                self.confirm_delete = None;
-                self.core.delete_game(&id);
+        }
+        // The front's answers and the lobby's news, in a line that is always there.
+        ui.label(RichText::new(self.core.lobby_note().unwrap_or(" ")).color(ALARM));
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Games").strong());
+            if ui.button("Refresh").clicked() {
+                self.core.refresh();
             }
         });
+        let games = self.core.games().to_vec();
+        if games.is_empty() {
+            ui.label("No games yet.");
+            return;
+        }
+        let mut join = None;
+        let mut delete = None;
+        egui::Grid::new("games").striped(true).show(ui, |ui| {
+            for h in ["Game", "Layout", "By", "Last played", "State", "Time", "Areas", "Players", ""] {
+                ui.label(RichText::new(h).strong());
+            }
+            ui.end_row();
+            for g in &games {
+                ui.label(&g.id);
+                ui.label(&g.layout);
+                ui.label(g.creator.as_deref().unwrap_or("\u{2014}"));
+                ui.label(g.last_played.map(client_core::form::utc).unwrap_or_default());
+                let state = match g.state {
+                    GameState::Running if g.preparing.is_some() => {
+                        g.preparing.as_ref().map(client_core::text::preparing_text).unwrap_or_default()
+                    }
+                    GameState::Running => "running".to_string(),
+                    GameState::Saved => "saved".to_string(),
+                    GameState::Crashed => format!("crashed: {}", g.error.as_deref().unwrap_or("?")),
+                };
+                ui.label(state);
+                ui.label(fmt_hms(g.sim_time));
+                let areas: Vec<String> =
+                    g.areas.iter().map(|a| format!("{} ({})", a.name, a.holder.as_deref().unwrap_or("robot"))).collect();
+                ui.label(areas.join(", "));
+                ui.label(g.players.join(", "));
+                ui.horizontal(|ui| {
+                    if ui.button(if g.state == GameState::Running { "Join" } else { "Resume" }).clicked() {
+                        join = Some(g.id.clone());
+                    }
+                    // Owner decision 13: the front re-checks all of it.
+                    if g.can_delete {
+                        if self.confirm_delete.as_deref() == Some(g.id.as_str()) {
+                            ui.label(RichText::new("Delete for good?").color(ALARM));
+                            if ui.button("Yes, delete").clicked() {
+                                delete = Some(g.id.clone());
+                            }
+                            if ui.button("Cancel").clicked() {
+                                self.confirm_delete = None;
+                            }
+                        } else if ui.button("Delete").clicked() {
+                            self.confirm_delete = Some(g.id.clone());
+                        }
+                    }
+                });
+                ui.end_row();
+            }
+        });
+        if let Some(id) = join {
+            self.core.join(&id);
+        }
+        if let Some(id) = delete {
+            self.confirm_delete = None;
+            self.core.delete_game(&id);
+        }
     }
 
     /// The lobby's Tutorial list: each lesson, ticked once done here.

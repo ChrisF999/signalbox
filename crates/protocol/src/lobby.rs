@@ -46,7 +46,12 @@ pub enum LobbyMsg {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum LobbyReply {
     Games { games: Vec<GameInfo> },
-    Layouts { layouts: Vec<LayoutInfo> },
+    /// `you`: the signed-in name, for the lobby to show (polish spec M14).
+    Layouts {
+        layouts: Vec<LayoutInfo>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        you: Option<String>,
+    },
     /// You are in `game` as `you`; its layout and view follow.
     Joined { game: String, you: String },
     Error { code: String, message: String },
@@ -78,6 +83,9 @@ pub struct GameInfo {
     /// Who created it; `None` for saves from before owner decision 13.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub creator: Option<String>,
+    /// When it was last played, Unix seconds (saved games; polish spec M14).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_played: Option<u64>,
     /// Whether the user this list was sent to may delete it now.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub can_delete: bool,
@@ -108,6 +116,12 @@ pub struct AreaHolder {
 pub struct LayoutInfo {
     pub name: String,
     pub areas: Vec<String>,
+    /// The world's title and the layout's one-line description (polish spec
+    /// M14); empty when the file has none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
 }
 
 /// `"type"` tags of `LobbyMsg`.
