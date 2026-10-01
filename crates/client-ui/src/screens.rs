@@ -47,6 +47,12 @@ const SIMPLIFIER_WIDTH: f32 = {
 /// margins and a scroll bar, so the table never scrolls sideways (its
 /// header would slip off its columns) and the tabs never resize the panel.
 const SIDE_W: f32 = SIMPLIFIER_WIDTH + 24.0;
+/// The top bar's fixed widths (polish spec M5): the clock state (`paused`,
+/// `8×`) and the pause/resume button.
+const CLOCK_STATE_W: f32 = 52.0;
+const PAUSE_W: f32 = 64.0;
+/// The lobby's layout list, wide enough for every name, so Create never moves.
+const LAYOUT_COMBO_W: f32 = 180.0;
 /// Repaint at least this often (ms): clocks, flashing, reconnect timers.
 const REPAINT_MS: u64 = 250;
 /// While a tutorial highlight shows: often enough for a smooth 1 Hz pulse.
@@ -84,6 +90,8 @@ pub struct UiApp {
     new_game: NewGame,
     /// The game whose Delete was pressed and awaits "Yes, delete".
     confirm_delete: Option<String>,
+    /// Release area was pressed and awaits "Yes, release" (polish spec M10).
+    confirm_release: bool,
     settings: Settings,
     /// Where the settings are kept between visits (none in most tests).
     store: Option<Box<dyn SettingsStore>>,
@@ -124,6 +132,7 @@ impl UiApp {
             headcode: String::new(),
             new_game: NewGame::default(),
             confirm_delete: None,
+            confirm_release: false,
             settings: Settings::default(),
             store: None,
             side_tab: SideTab::default(),
@@ -257,7 +266,7 @@ impl UiApp {
             } else {
                 self.new_game.layout = self.new_game.layout.min(layouts.len() - 1);
                 ui.horizontal(|ui| {
-                    egui::ComboBox::from_label("Layout").selected_text(layouts[self.new_game.layout].as_str()).show_ui(ui, |ui| {
+                    egui::ComboBox::from_label("Layout").width(LAYOUT_COMBO_W).selected_text(layouts[self.new_game.layout].as_str()).show_ui(ui, |ui| {
                         for (i, name) in layouts.iter().enumerate() {
                             ui.selectable_value(&mut self.new_game.layout, i, name.as_str());
                         }
@@ -410,13 +419,16 @@ impl UiApp {
         let me = g.you.clone();
         let mut act: Vec<Box<dyn FnOnce(&mut App)>> = Vec::new();
         let mut settings = self.settings;
+        let mut confirm_release = self.confirm_release && holding;
+        let mut refit = false;
         egui::Panel::top("bar").show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
+            ui.horizontal(|ui| {
                 ui.label(RichText::new(title).strong());
                 if let Some(v) = &view {
                     let clock = ui.label(RichText::new(fmt_hms(v.sim_time)).monospace().size(16.0));
                     mark(ui, &clock, marked("clock"), now);
-                    let state = ui.label(if v.paused { "paused".to_string() } else { format!("{}×", v.speed) });
+                    let text = if v.paused { "paused".to_string() } else { format!("{}×", v.speed) };
+                    let state = ui.add_sized([CLOCK_STATE_W, 18.0], egui::Label::new(text));
                     if v.paused && v.vote.is_none() {
                         state.on_hover_text(if can_vote {
                             "Paused. Any voter can propose resume."
@@ -427,7 +439,7 @@ impl UiApp {
                     // Only voters get the buttons (owner decision 12).
                     if can_vote {
                         let pause = if v.paused { Proposal::Resume } else { Proposal::Pause };
-                        if ui.button(proposal_text(pause)).clicked() {
+                        if ui.add_sized([PAUSE_W, 18.0], egui::Button::new(proposal_text(pause))).clicked() {
                             act.push(Box::new(move |a| a.vote(pause)));
                         }
                         for x in [1u8, 2, 4, 8] {
@@ -436,7 +448,47 @@ impl UiApp {
                             }
                         }
                     }
-                    if let Some(vote) = &v.vote {
+                    // A tutorial keeps no score (tutorial spec §3).
+                    if let Some(score) = v.score.filter(|_| !lesson) {
+                        ui.label(format!("Penalty {score}"));
+                    }
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button("Leave").clicked() {
+                        act.push(Box::new(|a| a.leave()));
+                    }
+                    // A tutorial's player keeps the lesson's area. Releasing
+                    // asks first (polish spec M10).
+                    if holding && !lesson {
+                        if confirm_release {
+                            if ui.button("Cancel").clicked() {
+                                confirm_release = false;
+                            }
+                            if ui.button(RichText::new("Yes, release").color(ALARM)).clicked() {
+                                confirm_release = false;
+                                act.push(Box::new(|a| a.release()));
+                            }
+                        } else if ui.button("Release area").clicked() {
+                            confirm_release = true;
+                        }
+                    }
+                    let menu = ui.menu_button("Settings", |ui| {
+                        ui.label(RichText::new("Signal aspects").strong());
+                        ui.radio_value(&mut settings.aspects, AspectMode::RedGreen, "Red/green (panel)");
+                        ui.radio_value(&mut settings.aspects, AspectMode::Real, "Real aspects");
+                        ui.separator();
+                        ui.checkbox(&mut settings.enquiry, "Headcode enquiry");
+                        ui.checkbox(&mut settings.numbers, "Signal numbers");
+                    });
+                    mark(ui, &menu.response, marked("settings"), now);
+                    if ui.button("Fit").clicked() {
+                        refit = true;
+                    }
+                });
+            });
+            ui.horizontal_wrapped(|ui| {
+                match view.as_ref().and_then(|v| v.vote.as_ref()) {
+                    Some(vote) => {
                         ui.label(RichText::new(vote_text(vote)).color(paint::YELLOW));
                         // Polish spec M8: say yes or no explicitly.
                         if can_vote {
@@ -450,39 +502,13 @@ impl UiApp {
                             }
                         }
                     }
-                    // A tutorial keeps no score (tutorial spec §3).
-                    if let Some(score) = v.score.filter(|_| !lesson) {
-                        ui.label(format!("Penalty {score}"));
+                    // Polish spec H2: a spectator's clicks do nothing; say so where they look.
+                    None if !holding && !lesson => {
+                        let free = areas.iter().any(|a| view.as_ref().and_then(|v| v.holders.get(a)).is_none_or(|h| h == "robot"));
+                        let hint = if free { "You are watching. Claim an area to signal:" } else { "All areas are held; you are watching" };
+                        ui.label(RichText::new(hint).color(paint::YELLOW));
                     }
-                }
-                if ui.button("Fit").clicked() {
-                    self.fitted = None;
-                }
-                let menu = ui.menu_button("Settings", |ui| {
-                    ui.label(RichText::new("Signal aspects").strong());
-                    ui.radio_value(&mut settings.aspects, AspectMode::RedGreen, "Red/green (panel)");
-                    ui.radio_value(&mut settings.aspects, AspectMode::Real, "Real aspects");
-                    ui.separator();
-                    ui.checkbox(&mut settings.enquiry, "Headcode enquiry");
-                    ui.checkbox(&mut settings.numbers, "Signal numbers");
-                });
-                mark(ui, &menu.response, marked("settings"), now);
-                // A tutorial's player keeps the lesson's area.
-                if holding && !lesson {
-                    if ui.button("Release area").clicked() {
-                        act.push(Box::new(|a| a.release()));
-                    }
-                }
-                if ui.button("Leave").clicked() {
-                    act.push(Box::new(|a| a.leave()));
-                }
-            });
-            ui.horizontal_wrapped(|ui| {
-                // Polish spec H2: a spectator's clicks do nothing; say so where they look.
-                if !holding && !lesson {
-                    let free = areas.iter().any(|a| view.as_ref().and_then(|v| v.holders.get(a)).is_none_or(|h| h == "robot"));
-                    let hint = if free { "You are watching. Claim an area to signal:" } else { "All areas are held; you are watching" };
-                    ui.label(RichText::new(hint).color(paint::YELLOW));
+                    None => {}
                 }
                 ui.label("Players:");
                 for area in &areas {
@@ -495,6 +521,10 @@ impl UiApp {
                 }
             });
         });
+        self.confirm_release = confirm_release;
+        if refit {
+            self.fitted = None;
+        }
         self.set_settings(settings);
         for f in act {
             f(&mut self.core);

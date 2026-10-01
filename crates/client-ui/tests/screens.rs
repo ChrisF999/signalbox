@@ -922,3 +922,55 @@ fn a_vote_waits_for_named_players_who_agree_or_decline() {
     assert!(has_text(&out, "Vote passed: 4×"), "{:?}", texts(&out));
     assert_eq!(r.game.clock().speed, 4);
 }
+
+fn text_at(out: &FullOutput, want: &str) -> Rect {
+    texts(out).into_iter().find(|(t, _)| t == want).unwrap_or_else(|| panic!("no {want:?} in {:?}", texts(out))).1
+}
+
+/// Polish spec M5: the bar's buttons stay put while a vote opens, the
+/// clock pauses and the title changes; the pause button keeps its place.
+#[test]
+fn the_top_bar_does_not_move_under_the_pointer() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    r.game.connect("bob");
+    r.game.handle("bob", ClientMsg::Claim { area: s("East") });
+    for _ in 0..3 {
+        r.frame();
+    }
+    let out = r.frame();
+    let (leave, fit, pause) = (text_at(&out, "Leave"), text_at(&out, "Fit"), text_at(&out, "pause"));
+    click_text(&mut r, &out, "pause");
+    for _ in 0..3 {
+        r.frame();
+    }
+    let out = r.frame();
+    assert!(has_text(&out, "waiting for bob"), "{:?}", texts(&out));
+    assert_eq!((text_at(&out, "Leave"), text_at(&out, "Fit")), (leave, fit), "a vote opened");
+    assert!(text_at(&out, "Vote: pause — waiting for bob, 30 s left").min.y > leave.max.y, "on the second row");
+    r.game.handle("bob", ClientMsg::Vote { proposal: Proposal::Pause });
+    for _ in 0..3 {
+        r.frame();
+    }
+    let out = r.frame();
+    assert_eq!((text_at(&out, "Leave"), text_at(&out, "Fit")), (leave, fit), "paused");
+    assert!((text_at(&out, "resume").center().x - pause.center().x).abs() < 1.0, "the same button, the same place");
+}
+
+/// Polish spec M10: Release area asks first.
+#[test]
+fn releasing_an_area_asks_first() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    let out = r.frame();
+    click_text(&mut r, &out, "Release area");
+    let out = r.frame();
+    assert!(r.ui.core.game().unwrap().area().is_some(), "not yet");
+    click_text(&mut r, &out, "Cancel");
+    let out = r.frame();
+    click_text(&mut r, &out, "Release area");
+    let out = r.frame();
+    click_text(&mut r, &out, "Yes, release");
+    for _ in 0..3 {
+        r.frame();
+    }
+    assert_eq!(r.ui.core.game().unwrap().area(), None);
+}

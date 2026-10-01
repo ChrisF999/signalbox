@@ -340,6 +340,8 @@ output is byte-identical for the same input.
   (it fits the simplifier).
 - The diagram shows a pointing hand over what you can work and ends hover text with what a click does
   (`App::hint`); a left click on your points opens their menu and never swings them (polish spec M3, U9).
+- The top bar never reflows (polish spec M5): buttons right-aligned in a fixed order, fixed-width clock controls, the vote on
+  the second row; Release area asks first (M10).
 
 ### Tutorials (`lessons/`, `game::lesson`)
 - Design: `docs/superpowers/specs/2026-10-01-tutorial-design.md`; decisions in
