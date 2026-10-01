@@ -95,6 +95,13 @@ impl App {
         }
     }
 
+    /// The headcode shown at `target`, if it is a berth holding one: what a
+    /// click opens the enquiry for (realism spec §3). Never routes.
+    pub fn headcode_at(&self, target: &Target) -> Option<String> {
+        let Target::Berth(b) = target else { return None };
+        self.game.as_ref()?.bot.view()?.berths.get(b).cloned()
+    }
+
     /// Hover text.
     pub fn describe(&self, target: &Target) -> String {
         let Some(g) = self.game.as_ref() else { return String::new() };

@@ -1,7 +1,7 @@
 //! Words for the screen: times, commands, refusals, notices, votes.
 //! Signals are named as the screen shows them (`Names`).
 
-use protocol::{ExitName, Notice, PlayerCommand, PointsPos, Proposal, Rejection, VoteView};
+use protocol::{ExitName, Notice, PlayerCommand, PointsPos, Proposal, Rejection, TrainState, VoteView};
 
 use crate::names::Names;
 
@@ -73,6 +73,16 @@ pub fn notice_text(n: &Notice, names: &Names) -> (String, bool) {
         Notice::Replaced => ("This login was opened somewhere else".to_string(), true),
         Notice::GameCrashed => ("The game stopped unexpectedly".to_string(), true),
         Notice::Error { message, .. } => (format!("Error: {message}"), true),
+    }
+}
+
+/// A train-list state in words.
+pub fn train_state_text(s: TrainState) -> &'static str {
+    match s {
+        TrainState::AtPlatform => "at platform",
+        TrainState::InArea => "in area",
+        TrainState::Approaching => "approaching",
+        TrainState::Due => "due",
     }
 }
 
