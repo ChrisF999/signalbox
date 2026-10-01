@@ -10,6 +10,9 @@ use signalbox_core::robot::soak;
 use signalbox_core::sim::Sim;
 
 /// Worlds without bands draw exactly as they did before bands existed.
+/// (Re-pinned once, deliberately, when terminating trains began to keep
+/// their headcodes in the platform starter's berth: that changes describer
+/// state, not the draws; the pre-change hash was 0x2cfa948fb4334461.)
 #[test]
 fn worlds_without_bands_hash_as_before() {
     let w = load_with("terminus", |v| {
@@ -19,7 +22,7 @@ fn worlds_without_bands_hash_as_before() {
     .unwrap();
     let mut sim = Sim::new(w, 11);
     soak(&mut sim, 3600.0);
-    assert_eq!(sim.state_hash(), 0x2cfa948fb4334461);
+    assert_eq!(sim.state_hash(), 0xf18e905cfc5053e9);
 }
 
 use rand::SeedableRng;

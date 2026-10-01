@@ -66,6 +66,9 @@ struct Metrics {
     rounds: u32,
     robot_total: Duration,
     robot_max: Duration,
+    /// "headcode@time" of trains seen standing in a platform facing buffers
+    /// with their headcode in no berth at all (checked every robot round).
+    unlabelled: Vec<String>,
 }
 
 fn pct(v: &[i64], p: f64) -> i64 {
@@ -83,8 +86,9 @@ impl Metrics {
         let late: Vec<i64> = r.arrival_late_s.iter().map(|&l| l.max(0)).collect();
         let late_only: Vec<i64> = r.arrival_late_s.iter().copied().filter(|&l| l > 0).collect();
         format!(
-            "due {} entered {} never {} | entry late p50 {} p90 {} max {} | arrivals {} late {} (late p50 {} p90 {}) all p50 {} p90 {} | \
+            "unlabelled {} | due {} entered {} never {} | entry late p50 {} p90 {} max {} | arrivals {} late {} (late p50 {} p90 {}) all p50 {} p90 {} | \
              wrong platforms {} | penalties {} | robot rounds {} mean {:.1} us max {:.1} ms",
+            self.unlabelled.len(),
             r.entries_due,
             r.entries_due_entered,
             r.entries_due - r.entries_due_entered,
@@ -109,7 +113,20 @@ impl Metrics {
 fn measure(world: World, seed: u64, hours: f64) -> Metrics {
     let mut sim = Sim::new(world, seed);
     let (mut rounds, mut total, mut max) = (0u32, Duration::ZERO, Duration::ZERO);
+    let mut unlabelled = Vec::new();
     let report = soak_with(&mut sim, hours * 3600.0, |s| {
+        let net = &s.world().net;
+        for t in s.trains() {
+            let (seg, dir) = t.head();
+            if t.speed != 0.0 || net.platforms_on[seg.idx()].is_empty() {
+                continue;
+            }
+            // Facing buffers (no signal ahead): a terminal road.
+            let terminal = net.first_signal_ahead(seg, dir, t.head_m, 3000.0, s.points()).is_none();
+            if terminal && !s.describer().berths.iter().any(|b| b.as_deref() == Some(t.headcode.as_str())) {
+                unlabelled.push(format!("{}@{}", t.headcode, s.now_s()));
+            }
+        }
         let t0 = Instant::now();
         let c = commands(s);
         let dt = t0.elapsed();
@@ -118,7 +135,7 @@ fn measure(world: World, seed: u64, hours: f64) -> Metrics {
         max = max.max(dt);
         c
     });
-    Metrics { report, rounds, robot_total: total, robot_max: max }
+    Metrics { report, rounds, robot_total: total, robot_max: max, unlabelled }
 }
 
 /// The owner's seeded three-hour Liverpool Street run, printed (no asserts).
@@ -128,11 +145,16 @@ fn liverpool_street_metrics() {
     let m = measure(liverpool_world(), LIVERPOOL_SEED, 3.0);
     println!("liverpool-st seed {LIVERPOOL_SEED}: {}", m.summary());
     println!("{:?}", m.report);
+    let mut seen: Vec<&str> = m.unlabelled.iter().map(|u| u.split('@').next().unwrap()).collect();
+    seen.dedup();
+    println!("unlabelled {:?} first {:?}", seen, m.unlabelled.first());
 }
 
 /// Liverpool Street with its options stripped to what converters wrote
 /// before delay bands: it must run bit-identically to before bands existed.
 /// No signaller (the robot's choices may change; saves replay commands).
+/// Re-pinned once, deliberately, when entries queued at a boundary began to
+/// keep their own headcodes (describer state only; was 0x6437f3c3617813e5).
 #[test]
 fn liverpool_street_without_bands_hashes_as_before() {
     let text = std::fs::read_to_string(format!("{}/tests/data/liverpool-st.json", env!("CARGO_MANIFEST_DIR"))).unwrap();
@@ -143,5 +165,5 @@ fn liverpool_street_without_bands_hashes_as_before() {
     let world = World::from_json(&v.to_string()).unwrap();
     let mut sim = Sim::new(world, LIVERPOOL_SEED);
     sim.run_for(3600.0);
-    assert_eq!(sim.state_hash(), 0x6437f3c3617813e5);
+    assert_eq!(sim.state_hash(), 0x6bb8e97d75323f5e);
 }

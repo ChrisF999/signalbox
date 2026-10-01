@@ -322,6 +322,42 @@ impl Network {
         None
     }
 
+    /// Where the line ahead of `from_along` ends at a buffer stop within
+    /// `max_dist` with no signal facing us on the way: the signal facing back
+    /// out nearest the buffers (a terminal platform's starter), which a train
+    /// standing there will face once it reverses. `None` otherwise.
+    pub fn terminal_signal(
+        &self,
+        seg: SegmentId,
+        dir: Dir,
+        from_along: f64,
+        max_dist: f64,
+        pts: &impl PointsView,
+    ) -> Option<SignalId> {
+        let (steps, end) = self.walk_ahead(seg, dir, from_along, max_dist, pts);
+        if !matches!(self.nodes[end?.node.idx()].kind, NodeKind::BufferStop) {
+            return None;
+        }
+        let mut found = None;
+        for (i, st) in steps.iter().enumerate() {
+            let sg = &self.segments[st.seg.idx()];
+            let mut here: Vec<(f64, SignalId)> = self.signals_on[st.seg.idx()]
+                .iter()
+                .copied()
+                .map(|s| (sg.along(self.signals[s.idx()].at.offset_m, st.dir), s))
+                .filter(|&(a, _)| if i == 0 { a > st.from_along } else { a >= st.from_along })
+                .collect();
+            here.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
+            for (_, s) in here {
+                if self.signals[s.idx()].at.dir == st.dir {
+                    return None;
+                }
+                found = Some(s);
+            }
+        }
+        found
+    }
+
     /// Sections within `dist` metres in rear of a point facing `at.dir`.
     pub fn sections_in_rear(&self, at: Position, dist: f64, pts: &impl PointsView) -> Vec<SectionId> {
         let back = at.dir.rev();

@@ -19,6 +19,17 @@ use crate::timetable::{EndAction, EntryStart, draw_delay, earliest_delay_s};
 use crate::trains::{Dwell, Train};
 use crate::world::World;
 
+/// The berth a train at `along` on `seg` facing `dir` is described in: the
+/// first signal ahead's, or, on a road ending at buffers with no signal
+/// ahead, the berth of the platform starter facing back out (see
+/// `Network::terminal_signal`), where a terminating train stays shown.
+fn berth_ahead(net: &Network, seg: SegmentId, dir: Dir, along: f64, pts: &PointsTable) -> Option<BerthId> {
+    match net.first_signal_ahead(seg, dir, along, SIGNAL_SEARCH_M, pts) {
+        Some((n, _)) => net.signals[n.idx()].berth,
+        None => net.terminal_signal(seg, dir, along, SIGNAL_SEARCH_M, pts).and_then(|n| net.signals[n.idx()].berth),
+    }
+}
+
 /// Seconds of sim time per tick.
 pub const TICK_S: f64 = 0.1;
 /// Seconds a train stands after a SPAD before its driver carries on.
@@ -400,9 +411,13 @@ impl Sim {
             EntryStart::Boundary(n) => self.world.net.boundary_berth(n),
             EntryStart::At(_) => None,
         };
+        // The fringe berth shows the first entry waiting there; later ones
+        // follow as earlier ones enter (see `spawn`).
         match fringe {
-            Some(b) => self.st.describer.interpose(b, &self.world.services[e.service.idx()].headcode),
-            None => vec![],
+            Some(b) if self.st.describer.get(b).is_none() => {
+                self.st.describer.interpose(b, &self.world.services[e.service.idx()].headcode)
+            }
+            _ => vec![],
         }
     }
 
@@ -455,21 +470,25 @@ impl Sim {
         let headcode = w.services[e.service.idx()].headcode.clone();
         let mut ev = vec![Event::TrainEntered { train: id, headcode: headcode.clone() }];
         let (hs, hd) = t.head();
-        let next = w
-            .net
-            .first_signal_ahead(hs, hd, t.head_m, SIGNAL_SEARCH_M, &self.st.points)
-            .and_then(|(s, _)| w.net.signals[s.idx()].berth);
-        match e.start {
-            EntryStart::Boundary(n) => {
-                if let Some(b) = w.net.boundary_berth(n) {
-                    ev.extend(self.st.describer.step(b, next));
+        let next = berth_ahead(&w.net, hs, hd, t.head_m, &self.st.points);
+        // The entering train takes its own headcode with it (the fringe
+        // berth may show another waiting entry), and the fringe berth then
+        // shows the next entry still waiting at that boundary, if any.
+        if let EntryStart::Boundary(n) = e.start {
+            if let Some(b) = w.net.boundary_berth(n) {
+                if self.st.describer.get(b) == Some(headcode.as_str()) {
+                    ev.extend(self.st.describer.cancel(b));
+                }
+                let waiting = self.st.pending.iter().map(|p| &w.entries[p.entry]).find(|x| x.start == e.start);
+                if let Some(x) = waiting {
+                    if self.st.describer.get(b).is_none() {
+                        ev.extend(self.st.describer.interpose(b, &w.services[x.service.idx()].headcode));
+                    }
                 }
             }
-            EntryStart::At(_) => {
-                if let Some(b) = next {
-                    ev.extend(self.st.describer.interpose(b, &headcode));
-                }
-            }
+        }
+        if let Some(b) = next {
+            ev.extend(self.st.describer.interpose(b, &headcode));
         }
         self.st.trains.push(t);
         ev
@@ -554,9 +573,10 @@ impl Sim {
                 t.last_passed_aspect = Some(aspect);
                 t.last_passed_aspects = net.signals[s.idx()].aspects;
                 if let Some(b) = net.signals[s.idx()].berth {
-                    let next = net
-                        .first_signal_ahead(sw.seg, sw.dir, a, SIGNAL_SEARCH_M, pts)
-                        .and_then(|(n, _)| net.signals[n.idx()].berth);
+                    // Into a terminal road, the headcode goes to the platform
+                    // starter's berth and stays there while the train stands
+                    // (forming changes it in place; stabling keeps it).
+                    let next = berth_ahead(net, sw.seg, sw.dir, a, pts);
                     ev.extend(self.st.describer.step(b, next));
                 }
             }
