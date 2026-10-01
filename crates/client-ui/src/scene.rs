@@ -4,6 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use client_core::names::shown_headcode;
 use client_core::select;
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 use protocol::{ExitName, Layout};
@@ -82,6 +83,8 @@ pub struct BerthMark {
     pub offset_px: Vec2,
     pub fringe: bool,
     pub operable: bool,
+    /// Its box's width on screen: the layout's longest headcode fits.
+    pub width_px: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -198,6 +201,10 @@ impl Scene {
             set.into_iter().map(str::to_string).collect()
         };
         let mut sc = Scene::default();
+        // Every berth box fits the longest headcode the layout books, as it is
+        // displayed (spec P18: the WTT's `202/163` shows as `202`).
+        let chars = l.simplifier.iter().map(|r| shown_headcode(&l.display_headcodes, &r.headcode).chars().count()).max().unwrap_or(0).max(4);
+        let berth_w = crate::hit::berth_width(chars);
         for line in &g.lines {
             let (Some(a), Some(b), Some(&(section, from, to))) = (pt(line.x1, line.y1), pt(line.x2, line.y2), seg_of.get(line.segment.as_str()))
             else {
@@ -274,6 +281,7 @@ impl Scene {
                         offset_px,
                         fringe: other_area(&b.area),
                         operable: b.operable,
+                        width_px: berth_w,
                     });
                 }
             }
@@ -325,6 +333,7 @@ impl Scene {
                     offset_px: inward(at).map_or(BOUNDARY_BERTH_OFFSET_PX, |d| d * BERTH_BACK_PX),
                     fringe: other_area(&b.area),
                     operable: b.operable,
+                    width_px: berth_w,
                 });
             }
         }

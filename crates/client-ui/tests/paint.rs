@@ -503,8 +503,9 @@ fn controlled_signals_carry_a_blue_auto_button_hollow_off_filled_on() {
     let c = r.disc("W1") + vec2(client_ui::hit::AUTO_AHEAD_PX, 0.0);
     let d = r.idle();
     assert!(circles(&d).contains(&(c, AUTO_R, Color32::TRANSPARENT, AUTO)), "hollow: {:?}", circles(&d));
-    let a = d.texts.iter().find(|t| t.text == "A" && t.at == c + vec2(AUTO_R + 2.0, 0.0)).unwrap();
-    assert_eq!((a.colour, a.anchor), (AUTO, Align2::LEFT_CENTER));
+    // Its `A` outward, above the circle, away from the track (polish spec P5).
+    let a = d.texts.iter().find(|t| t.text == "A" && close(t.at, c + vec2(0.0, -(AUTO_R + AUTO_LETTER_GAP_PX)))).unwrap();
+    assert_eq!((a.colour, a.anchor), (AUTO, Align2::CENTER_BOTTOM));
     r.view.routes.insert(s("W1-A"), RouteView { state: RouteState::Locked, auto_working: false });
     assert!(circles(&r.idle()).contains(&(c, AUTO_R, Color32::TRANSPARENT, AUTO)), "hollow while set normally");
     r.view.routes.insert(s("W1-A"), RouteView { state: RouteState::Locked, auto_working: true });
@@ -751,4 +752,88 @@ fn a_lesson_highlight_outlines_what_it_names_and_pulses() {
     assert_eq!(highlight_colour(0.25).a(), 255);
     assert_eq!(highlight_colour(0.75).a(), 89);
     assert_eq!(highlight_colour(1.25), highlight_colour(0.25));
+}
+
+// ---- the polish pass: placement data, ○A threshold, berth width ----
+
+/// Polish spec P5: no ○A, drawn or hit, while numbers are too small to draw.
+#[test]
+fn no_auto_button_below_the_number_threshold() {
+    let mut r = Rig::new(Some("West"));
+    let w1 = r.sc.signals.iter().find(|s| s.name == "W1").unwrap().clone();
+    assert!(client_ui::hit::auto_button(&r.cam, screen(), &w1).is_some());
+    r.cam.scale = 0.3; // numbers 4.8 px: hidden
+    let d = r.idle();
+    assert!(circles(&d).iter().all(|k| k.2 != AUTO && k.3 != AUTO), "no ○A circles: {:?}", circles(&d));
+    assert!(d.texts.iter().all(|t| t.text != "A"), "no letters");
+    assert_eq!(client_ui::hit::auto_button(&r.cam, screen(), &w1), None, "nothing to click either");
+}
+
+/// `draw` lists what may move and what must be kept clear (polish spec §3.3).
+#[test]
+fn draw_records_movable_texts_and_what_to_keep_clear() {
+    use client_ui::labels::Role;
+    let r = Rig::new(Some("West"));
+    let d = r.idle();
+    let role_of = |text: &str| d.movable.iter().find(|m| d.texts[m.text].text == text).map(|m| m.role);
+    assert_eq!(role_of("TAW1"), Some(Role::Number));
+    assert_eq!(d.movable.iter().filter(|m| m.role == Role::AutoLetter).count(), 3, "W1, A and W2");
+    let w1 = d.movable.iter().find(|m| d.texts[m.text].text == "TAW1").unwrap();
+    assert_eq!(w1.alts.len(), 6, "six other spots for a number");
+    assert!(d.movable.iter().all(|m| d.texts[m.text].text != "1E01"), "headcodes never move");
+    // Every drawn track line is a bar; every lamp and ○A a round; every berth and exit a box.
+    assert!(d.keep.bars.len() >= r.sc.tracks.len());
+    assert!(d.keep.rounds.iter().any(|&(c, rad)| close(c, r.disc("W1")) && rad == LAMP_R));
+    let auto = r.disc("W1") + vec2(client_ui::hit::AUTO_AHEAD_PX, 0.0);
+    assert!(d.keep.rounds.iter().any(|&(c, rad)| close(c, auto) && rad == AUTO_R));
+    assert_eq!(d.keep.boxes.len(), r.sc.berths.len() + r.sc.exits.len(), "every berth, empty or not, and every exit");
+    let east = Rig::new(Some("East")).idle();
+    let fringe = east.movable.iter().find(|m| east.texts[m.text].text == "TAA").map(|m| m.role);
+    assert_eq!(fringe, Some(Role::FringeNumber), "West's A on East's fringe");
+}
+
+#[test]
+fn a_numbers_other_spots_hug_the_track_then_mirror_it() {
+    use client_ui::labels::corner;
+    // Travel to the right: left of travel is up the screen.
+    let (base, f) = (pos2(100.0, 100.0), vec2(1.0, 0.0));
+    let disc = base + vec2(0.0, -POST_PX) + f * (HOOK_PX + LAMP_R);
+    let alts = number_alts(base, disc, f, 6.0, false);
+    let side = 3.0 + NUMBER_CLEAR_PX;
+    assert_eq!(alts[0], (pos2(98.0, 100.0 - side), corner(vec2(-1.0, -1.0))), "behind the post, just clear of the track");
+    assert_eq!(alts[0].1, Align2::RIGHT_BOTTOM);
+    assert_eq!(alts[1].1, Align2::LEFT_BOTTOM, "ahead of the lamp");
+    assert!(alts[1].0.x > disc.x + LAMP_R);
+    assert_eq!(alts[4], (pos2(98.0, 100.0 + side), Align2::RIGHT_TOP), "the other side of the track");
+    assert_eq!(alts[5], (pos2(102.0, 100.0 + side), Align2::LEFT_TOP));
+    // With a ○A, the spot ahead clears the button.
+    let with_auto = number_alts(base, disc, f, 6.0, true);
+    assert!(with_auto[1].0.x >= disc.x + client_ui::hit::AUTO_AHEAD_PX + AUTO_R);
+}
+
+/// Gretz's headcodes are 7 characters: every berth box fits the longest
+/// headcode the layout books, and never shrinks below `BERTH_W`.
+#[test]
+fn berth_boxes_fit_the_longest_headcode() {
+    use client_ui::hit::{BERTH_W, berth_width};
+    assert_eq!(berth_width(4), BERTH_W);
+    assert!(berth_width(7) > 7.0 * 6.6, "{}", berth_width(7));
+    let r = Rig::new(Some("West"));
+    assert!(r.sc.berths.iter().all(|b| b.width_px == BERTH_W), "twobox's headcodes are 4 characters");
+    let mut l = layout_for(Some("West"));
+    l.simplifier.push(SimplifierRow { headcode: "W118400".into(), origin: None, destination: None, calls: vec![] });
+    let sc = Scene::build(&l).unwrap();
+    assert!(sc.berths.iter().all(|b| b.width_px == berth_width(7)));
+}
+
+/// Spec P13 with P18: boxes are sized for display headcodes, not the longer
+/// unique ones (`202/163` shows as `202`, which fits `BERTH_W`).
+#[test]
+fn berth_boxes_fit_display_headcodes() {
+    use client_ui::hit::BERTH_W;
+    let mut l = layout_for(Some("West"));
+    l.simplifier.push(SimplifierRow { headcode: "202/163".into(), origin: None, destination: None, calls: vec![] });
+    l.display_headcodes.insert(s("202/163"), s("202"));
+    let sc = Scene::build(&l).unwrap();
+    assert!(sc.berths.iter().all(|b| b.width_px == BERTH_W), "`202`, not `202/163`");
 }

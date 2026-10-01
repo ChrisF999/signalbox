@@ -8,8 +8,8 @@ use egui::{Pos2, Rect, vec2};
 use protocol::View;
 
 use crate::camera::Camera;
-use crate::paint::{AUTO_R, HOOK_PX, LAMP_R, POST_PX, left_of};
-use crate::scene::{Scene, SignalMark, project};
+use crate::paint::{AUTO_R, HOOK_PX, LAMP_R, POST_PX, left_of, number_px};
+use crate::scene::{BerthMark, Scene, SignalMark, project};
 
 /// How near (pixels) the pointer must be to a signal, exit, points or track.
 pub const HIT_PX: f32 = 8.0;
@@ -35,9 +35,10 @@ pub fn signal_disc(cam: &Camera, screen: Rect, s: &SignalMark) -> Pos2 {
 }
 
 /// Where a controlled signal's ○A button is: `AUTO_AHEAD_PX` ahead of its
-/// lamp (past a second yellow); `None` for signals without one.
+/// lamp (past a second yellow); `None` for signals without one, and for
+/// every signal while numbers are too small to draw (polish spec P5).
 pub fn auto_button(cam: &Camera, screen: Rect, s: &SignalMark) -> Option<Pos2> {
-    if !s.auto_button {
+    if !s.auto_button || number_px(cam.scale).is_none() {
         return None;
     }
     let ahead = if s.facing == egui::Vec2::ZERO { vec2(1.0, 0.0) } else { s.facing };
@@ -47,7 +48,23 @@ pub fn auto_button(cam: &Camera, screen: Rect, s: &SignalMark) -> Option<Pos2> {
 /// How far ahead of its lamp a signal's ○A button sits.
 pub const AUTO_AHEAD_PX: f32 = 16.0;
 
-/// The berth box on screen.
+/// One headcode character at `paint::HEADCODE_PX` in egui's monospace font,
+/// and the knock-out's margin round the text.
+pub const HEADCODE_CHAR_PX: f32 = 6.7;
+pub const BERTH_PAD_PX: f32 = 6.0;
+
+/// A berth box wide enough for headcodes of `chars` characters, never
+/// narrower than `BERTH_W` (Gretz's are 7 or 8 characters long).
+pub fn berth_width(chars: usize) -> f32 {
+    BERTH_W.max(chars as f32 * HEADCODE_CHAR_PX + BERTH_PAD_PX)
+}
+
+/// A berth's box on screen, as wide as the layout's longest headcode.
+pub fn berth_box(cam: &Camera, screen: Rect, b: &BerthMark) -> Rect {
+    Rect::from_center_size(cam.to_screen(screen, b.at) + b.offset_px, vec2(b.width_px, BERTH_H))
+}
+
+/// A `BERTH_W` box at `at` moved by `offset_px`, on screen.
 pub fn berth_rect(cam: &Camera, screen: Rect, at: Pos2, offset_px: egui::Vec2) -> Rect {
     Rect::from_center_size(cam.to_screen(screen, at) + offset_px, vec2(BERTH_W, BERTH_H))
 }
@@ -82,7 +99,7 @@ pub fn hit_test(scene: &Scene, view: Option<&View>, cam: &Camera, screen: Rect, 
         scene
             .berths
             .iter()
-            .find(|b| filled(&b.name) == want_filled && berth_rect(cam, screen, b.at, b.offset_px).contains(p))
+            .find(|b| filled(&b.name) == want_filled && berth_box(cam, screen, b).contains(p))
             .map(|b| Hit { target: Target::Berth(b.name.clone()), clickable: b.operable })
     };
     if let Some(h) = berth(true) {

@@ -1,8 +1,14 @@
 //! Placing the diagram's texts (polish spec §3.3), on hand-made drawings
 //! with a fixed-advance measure: 6 px a character, 10 px high.
 
+mod common;
+
+use client_core::{AspectMode, Names};
+use client_ui::camera::Camera;
 use client_ui::labels::*;
-use client_ui::paint::{Drawing, LABEL, TextItem};
+use client_ui::paint::{Drawing, LABEL, PaintState, TextItem, draw};
+use client_ui::scene::Scene;
+use common::*;
 use egui::{Align2, Pos2, Rect, Vec2, pos2, vec2};
 
 fn measure(t: &TextItem) -> Vec2 {
@@ -191,4 +197,45 @@ fn audit_counts_overlaps_covered_texts_and_tight_numbers() {
     let a = audit(&d, &mut measure);
     assert_eq!((a.overlaps, a.covered, a.tight), (1, 1, 2));
     assert_eq!(a.shown.get("Number"), Some(&2));
+}
+
+/// Placement keeps to what the layout and zoom give (spec P3): the same
+/// plan after a pan, and with or without a train in a berth.
+#[test]
+fn a_plan_depends_on_neither_pan_nor_trains() {
+    let l = layout_for(None);
+    let sc = Scene::build(&l).unwrap();
+    let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 600.0));
+    let names = Names::new(&l);
+    let (mut empty, mut busy) = (view_for(None), view_for(None));
+    empty.berths.clear();
+    busy.berths.insert("BW1".into(), "1A01".into());
+    let plan_at = |cam: &Camera, v: &protocol::View| {
+        let st = PaintState {
+            view: Some(v),
+            selected: None,
+            exits: &[],
+            refused: None,
+            time: 0.0,
+            aspects: AspectMode::RedGreen,
+            numbers: true,
+            names: &names,
+            highlight: &[],
+        };
+        plan(&draw(&sc, cam, screen, &st), &mut measure)
+    };
+    let cam = Camera::fit(sc.all.unwrap(), screen);
+    let mut panned = cam;
+    panned.pan(vec2(37.0, -21.0));
+    let a = plan_at(&cam, &empty);
+    let close = |x: &Plan, y: &Plan| {
+        x.spots.len() == y.spots.len()
+            && x.spots.iter().zip(&y.spots).all(|(p, q)| match (p, q) {
+                (Some((o, a)), Some((u, b))) => a == b && (*o - *u).length() < 1e-3,
+                (None, None) => true,
+                _ => false,
+            })
+    };
+    assert!(close(&a, &plan_at(&panned, &empty)), "a pan changes nothing");
+    assert!(close(&a, &plan_at(&cam, &busy)), "a train in a berth changes nothing");
 }

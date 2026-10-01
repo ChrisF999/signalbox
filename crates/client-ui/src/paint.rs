@@ -11,8 +11,8 @@ use egui::{Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Shape, St
 use protocol::{Aspect, ExitName, Held, Highlight, PointsPos, RouteState, SectionView, View};
 
 use crate::camera::Camera;
-use crate::hit::{auto_button, berth_rect, signal_disc};
-use crate::labels::{KeepClear, Movable};
+use crate::hit::{AUTO_AHEAD_PX, auto_button, berth_box, signal_disc};
+use crate::labels::{KeepClear, Movable, Role, corner};
 use crate::scene::{PointsMark, Run, Scene, SignalMark, TrackLine};
 
 pub const BG: Color32 = Color32::from_rgb(0x00, 0x00, 0x00);
@@ -80,6 +80,11 @@ pub const ARROW_MIN_RUN_PX: f32 = 60.0;
 pub const ARROW_MAX_STOPS: usize = 1024;
 /// Labels: text size in pixels.
 pub const LABEL_PX: f32 = 11.0;
+/// A signal number's other spots stand this far clear of the track's edge.
+pub const NUMBER_CLEAR_PX: f32 = 1.5;
+/// The ○A button's `A`: text size, and its gap from the circle.
+pub const AUTO_LETTER_PX: f32 = 9.0;
+pub const AUTO_LETTER_GAP_PX: f32 = 1.0;
 
 pub fn track_w(scale: f32) -> f32 {
     let w = TRACK_UNITS * scale;
@@ -157,6 +162,14 @@ pub struct Drawing {
     pub movable: Vec<Movable>,
     /// What those texts must keep clear of.
     pub keep: KeepClear,
+}
+
+impl Drawing {
+    /// Add a text that `labels::plan` may move to one of `alts` or hide.
+    fn movable_text(&mut self, t: TextItem, role: Role, alts: Vec<(Pos2, Align2)>, within: Option<Rect>) {
+        self.movable.push(Movable { text: self.texts.len(), role, alts, within });
+        self.texts.push(t);
+    }
 }
 
 /// What changes from frame to frame.
@@ -256,6 +269,7 @@ fn track_shapes(d: &mut Drawing, t: &TrackLine, to: &dyn Fn(Pos2) -> Pos2, st: &
     let held = |name: &str| section(name).is_some_and(|s| s.held != Held::Free);
     let (a, b) = trimmed(t, to(t.a), to(t.b));
     bar(&mut d.shapes, a, b, w, track_colour(section(&t.section)), t.fringe);
+    d.keep.bars.push((a, b, w));
     // End of overlap: an end of an overlap section where nothing held goes on.
     if section(&t.section).is_some_and(|s| s.held == Held::Overlap) {
         for (end, meets) in [(a, &t.a_meets), (b, &t.b_meets)] {
@@ -406,17 +420,44 @@ fn signal_shapes(d: &mut Drawing, s: &SignalMark, cam: &Camera, screen: Rect, st
     if st.refused == Some(s.name.as_str()) {
         d.shapes.push(Shape::circle_stroke(disc, LAMP_R + 6.0, Stroke::new(2.0, REFUSED)));
     }
+    d.keep.rounds.push((disc, LAMP_R));
+    if s.facing != Vec2::ZERO {
+        // A second yellow's spot, kept clear whatever is shown (spec P3).
+        d.keep.rounds.push((disc + s.facing * (LAMP_R * 2.2), LAMP_R));
+    }
     if let (true, Some(size)) = (st.numbers, number_px(cam.scale)) {
         let side = if s.facing == Vec2::ZERO { vec2(0.0, -1.0) } else { left_of(s.facing) };
-        d.texts.push(TextItem {
+        let base = cam.to_screen(screen, s.base);
+        let alts = number_alts(base, disc, s.facing, track_w(cam.scale), auto_button(cam, screen, s).is_some());
+        let text = TextItem {
             at: disc + side * (LAMP_R + 2.0),
             anchor: anchor_towards(side),
             text: st.names.signal(&s.name),
             size,
             colour: if s.fringe { FRINGE } else { LABEL },
             monospace: true,
-        });
+        };
+        d.movable_text(text, if s.fringe { Role::FringeNumber } else { Role::Number }, alts, None);
     }
+}
+
+/// A signal number's other spots, best first (spec §3.3): hugging the track
+/// behind the post, ahead of the lamp (past its ○A), one row further out
+/// behind and ahead, and the two spots on the other side of the track.
+/// `base` is the foot of the post and `disc` the lamp, on screen.
+pub fn number_alts(base: Pos2, disc: Pos2, facing: Vec2, track_w: f32, has_auto: bool) -> Vec<(Pos2, Align2)> {
+    let f = if facing == Vec2::ZERO { vec2(1.0, 0.0) } else { facing };
+    let l = left_of(f);
+    let side = track_w / 2.0 + NUMBER_CLEAR_PX;
+    let ahead = HOOK_PX + LAMP_R + if has_auto { AUTO_AHEAD_PX + AUTO_R } else { LAMP_R } + 2.0;
+    vec![
+        (base + l * side - f * 2.0, corner(l - f)),
+        (base + l * side + f * ahead, corner(l + f)),
+        (disc + l * (LAMP_R + 2.0) - f * (LAMP_R + 2.0), corner(l - f)),
+        (disc + l * (LAMP_R + 2.0) + f * (ahead - HOOK_PX - LAMP_R), corner(l + f)),
+        (base - l * side - f * 2.0, corner(-l - f)),
+        (base - l * side + f * 2.0, corner(-l + f)),
+    ]
 }
 
 pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawing {
@@ -427,13 +468,17 @@ pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawi
     for p in &scene.platforms {
         let r = Rect::from_two_pos(to(p.rect.min), to(p.rect.max));
         d.shapes.push(Shape::rect_filled(r, CornerRadius::ZERO, PLATFORM));
-        d.texts.push(TextItem { at: r.center(), anchor: Align2::CENTER_CENTER, text: p.label.clone(), size: 9.0, colour: BG, monospace: false });
+        let text = TextItem { at: r.center(), anchor: Align2::CENTER_CENTER, text: p.label.clone(), size: 9.0, colour: BG, monospace: false };
+        d.movable_text(text, Role::Platform, Vec::new(), Some(r));
     }
     for t in &scene.tracks {
         track_shapes(&mut d, t, &to, st, w);
     }
     for p in &scene.points {
         points_shapes(&mut d.shapes, p, &to, st, track_colour(section(&p.section)), w);
+        for leg in [p.toe, p.normal, p.reverse].into_iter().flatten() {
+            d.keep.bars.push((to(p.at), to(leg), w));
+        }
     }
     for r in &scene.runs {
         run_arrows(&mut d.shapes, r, &to, w, screen);
@@ -449,12 +494,16 @@ pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawi
             TRACK_FREE
         };
         d.shapes.push(Shape::rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.5, colour), StrokeKind::Middle));
+        d.keep.boxes.push(r);
     }
     // Headcodes in the track, on a black knock-out; an empty berth is not
     // drawn. Before the signals, so a disc or ○A beside one stays whole.
     for b in &scene.berths {
+        let r = berth_box(cam, screen, b);
+        // Every berth's box is kept clear, holding a headcode or not, so
+        // nothing moves as trains run (spec P3).
+        d.keep.boxes.push(r);
         let Some(h) = st.view.and_then(|v| v.berths.get(&b.name)) else { continue };
-        let r = berth_rect(cam, screen, b.at, b.offset_px);
         d.shapes.push(Shape::rect_filled(r, CornerRadius::ZERO, BG));
         d.texts.push(TextItem {
             at: r.center(),
@@ -481,26 +530,29 @@ pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawi
             } else {
                 Shape::circle_stroke(c, AUTO_R, Stroke::new(1.5, colour))
             });
+            d.keep.rounds.push((c, AUTO_R));
+            // The `A` outward, away from the track; else ahead, else on the inside.
             let ahead = if s.facing == Vec2::ZERO { vec2(1.0, 0.0) } else { s.facing };
-            d.texts.push(TextItem {
-                at: c + vec2(if ahead.x < 0.0 { -(AUTO_R + 2.0) } else { AUTO_R + 2.0 }, 0.0),
-                anchor: if ahead.x < 0.0 { Align2::RIGHT_CENTER } else { Align2::LEFT_CENTER },
-                text: "A".into(),
-                size: 9.0,
-                colour,
-                monospace: true,
-            });
+            let out = left_of(ahead);
+            let gap = AUTO_R + AUTO_LETTER_GAP_PX;
+            let text = TextItem { at: c + out * gap, anchor: corner(out), text: "A".into(), size: AUTO_LETTER_PX, colour, monospace: true };
+            let alts = vec![(c + ahead * gap, corner(ahead)), (c - out * gap, corner(-out))];
+            d.movable_text(text, Role::AutoLetter, alts, None);
         }
     }
     for l in &scene.labels {
         let at = to(l.at);
         match l.arrow {
-            None => d.texts.push(TextItem { at, anchor: Align2::LEFT_TOP, text: l.text.clone(), size: LABEL_PX, colour: LABEL, monospace: false }),
+            None => {
+                let text = TextItem { at, anchor: Align2::LEFT_TOP, text: l.text.clone(), size: LABEL_PX, colour: LABEL, monospace: false };
+                d.movable_text(text, Role::Label, Vec::new(), None);
+            }
             // A line name: the arrow at the point, pointing out; the text on the other side.
             Some(dir) => {
                 d.shapes.push(arrow(at + dir * (ARROW_PX / 2.0), dir, LABEL));
                 let (anchor, gap) = if dir.x < 0.0 { (Align2::LEFT_CENTER, 3.0) } else { (Align2::RIGHT_CENTER, -3.0) };
-                d.texts.push(TextItem { at: at + vec2(gap, 0.0), anchor, text: l.text.clone(), size: LABEL_PX, colour: LABEL, monospace: false });
+                let text = TextItem { at: at + vec2(gap, 0.0), anchor, text: l.text.clone(), size: LABEL_PX, colour: LABEL, monospace: false };
+                d.movable_text(text, Role::LineName, Vec::new(), None);
             }
         }
     }
@@ -554,7 +606,7 @@ fn highlight_shapes(d: &mut Drawing, scene: &Scene, cam: &Camera, screen: Rect, 
             }
             Highlight::Berth(b) => {
                 if let Some(m) = scene.berths.iter().find(|m| m.name == *b) {
-                    boxed(d, berth_rect(cam, screen, m.at, m.offset_px));
+                    boxed(d, berth_box(cam, screen, m));
                 }
             }
             Highlight::Section(s) => {
