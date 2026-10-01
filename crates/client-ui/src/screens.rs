@@ -7,6 +7,7 @@
 
 use std::time::Duration;
 
+use client_core::names::shown_headcode;
 use client_core::simplifier::{self, Line};
 use client_core::text::{fmt_hms, proposal_text, train_state_text, vote_text};
 use client_core::trains::train_list;
@@ -43,10 +44,24 @@ const SIMPLIFIER_WIDTH: f32 = {
     }
     w
 };
-/// The side panel's least width: the simplifier's columns plus the panel's
-/// margins and a scroll bar, so the table never scrolls sideways (its
-/// header would slip off its columns) and the tabs never resize the panel.
-const SIDE_W: f32 = SIMPLIFIER_WIDTH + 24.0;
+/// The side panel's margins and a scroll bar, beside the simplifier.
+const SIDE_PAD: f32 = 24.0;
+/// The side panel's least width, and its width with the shortest headcodes:
+/// the simplifier's columns and `SIDE_PAD`, so the tabs never resize the panel.
+const SIDE_W: f32 = SIMPLIFIER_WIDTH + SIDE_PAD;
+
+/// The simplifier's columns with the Train column at least `train_w` wide
+/// (polish spec H3: Gretz's 8-character headcodes fit, not `W118...`).
+pub fn simplifier_columns(train_w: f32) -> [f32; 8] {
+    let mut c = SIMPLIFIER_COLUMNS;
+    c[0] = c[0].max(train_w.ceil());
+    c
+}
+
+/// The columns and the gaps between them.
+pub fn table_width(cols: &[f32; 8]) -> f32 {
+    cols.iter().sum::<f32>() + CELL_GAP * (cols.len() - 1) as f32
+}
 /// The enquiry window opens this far right of and below where it was asked for.
 const ENQUIRY_OFFSET_PX: f32 = 16.0;
 /// The top bar's fixed widths (polish spec M5): the clock state (`paused`,
@@ -116,6 +131,8 @@ pub struct UiApp {
     /// The game drawn last frame; another (or the lobby) forgets the
     /// enquiry, the search and the simplifier lines.
     shown_game: Option<String>,
+    /// The simplifier's columns for the layout shown (polish spec H3).
+    simplifier_cols: [f32; 8],
     /// The simplifier's lines (each marked if it is its row's first) for
     /// (layout generation, search).
     simplifier_lines: Option<((u64, String), Vec<(Line, bool)>)>,
@@ -153,6 +170,7 @@ impl UiApp {
             enquiry: None,
             enquiry_at: None,
             shown_game: None,
+            simplifier_cols: SIMPLIFIER_COLUMNS,
             simplifier_lines: None,
             placement: None,
             simplifier_scroll: None,
@@ -403,7 +421,15 @@ impl UiApp {
 
     fn game(&mut self, ui: &mut Ui, now: f64) {
         self.top_bar(ui, now);
-        egui::Panel::right("side").default_size(SIDE_W).min_size(SIDE_W).show(ui, |ui| self.side(ui, now));
+        // The panel starts as wide as the simplifier for the longest headcode it
+        // shows (polish spec H3, U3); keyed by that width, so it resets when the
+        // longest headcode changes (ruling D8) and is otherwise draggable.
+        self.simplifier_cols = simplifier_columns(self.train_column_w(ui));
+        let side_w = table_width(&self.simplifier_cols) + SIDE_PAD;
+        egui::Panel::right(egui::Id::new(("side", side_w.round() as i32)))
+            .default_size(side_w)
+            .min_size(SIDE_W)
+            .show(ui, |ui| self.side(ui, now));
         // After the side panel, so a tab clicked this frame is told at once.
         let tab = match self.side_tab {
             SideTab::Trains => "trains",
@@ -559,6 +585,19 @@ impl UiApp {
         for f in act {
             f(&mut self.core);
         }
+    }
+
+    /// How wide the simplifier's Train column must be for the longest
+    /// headcode the layout shows, as displayed (the same set as the berth
+    /// boxes' width, `Scene::build`), in the monospace font.
+    fn train_column_w(&self, ui: &Ui) -> f32 {
+        let Some(l) = self.core.game().and_then(|g| g.layout()) else { return 0.0 };
+        let rows = l.simplifier.iter().map(|r| shown_headcode(&l.display_headcodes, &r.headcode));
+        let Some(longest) = rows.chain(l.display_headcodes.values().map(String::as_str)).max_by_key(|h| h.chars().count()) else {
+            return 0.0;
+        };
+        let font = egui::TextStyle::Monospace.resolve(ui.style());
+        ui.fonts_mut(|f| f.layout_no_wrap(longest.to_string(), font, Color32::WHITE).size().x) + 2.0
     }
 
     /// In a tutorial the lesson box on top; then the train list or the
@@ -719,7 +758,9 @@ impl UiApp {
         }
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 4.0;
         let header = ["Train", "Late", "From", "To", "At", "Plat", "Arr", "Dep"];
-        simplifier_row(ui, row_h, header.map(|h| RichText::new(h).strong()));
+        let cols = self.simplifier_cols;
+        let names = g.names();
+        simplifier_row(ui, row_h, header.map(|h| RichText::new(h).strong()), &cols, Default::default());
         let mut area = egui::ScrollArea::vertical().id_salt("simplifier").max_height(height);
         if let Some(line) = self.simplifier_scroll.take() {
             area = area.vertical_scroll_offset(line as f32 * (row_h + ui.spacing().item_spacing.y));
@@ -738,7 +779,19 @@ impl UiApp {
                     RichText::new(&line.arr),
                     RichText::new(&line.dep),
                 ];
-                simplifier_row(ui, row_h, cells);
+                // Every cell's whole text on hover, places by name (polish spec H3, M2).
+                let place = |p: &str| if p.is_empty() { String::new() } else { names.place(p).to_string() };
+                let hovers = [
+                    names.headcode(&line.headcode).to_string(),
+                    String::new(),
+                    place(&line.from),
+                    place(&line.to),
+                    place(&line.place),
+                    line.platform.clone(),
+                    String::new(),
+                    String::new(),
+                ];
+                simplifier_row(ui, row_h, cells, &cols, hovers);
             }
         });
     }
@@ -972,14 +1025,18 @@ fn mark(ui: &Ui, r: &Response, on: bool, now: f64) {
     }
 }
 
-/// One simplifier line in fixed-width cells.
-fn simplifier_row(ui: &mut Ui, row_h: f32, cells: [RichText; 8]) {
+/// One simplifier line in the cells `cols` give, each with its hover text
+/// (none where empty).
+fn simplifier_row(ui: &mut Ui, row_h: f32, cells: [RichText; 8], cols: &[f32; 8], hovers: [String; 8]) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = CELL_GAP;
-        for (text, w) in cells.into_iter().zip(SIMPLIFIER_COLUMNS) {
+        for ((text, w), hover) in cells.into_iter().zip(*cols).zip(hovers) {
             ui.allocate_ui_with_layout(vec2(w, row_h), Layout::left_to_right(Align::Center), |ui| {
                 ui.set_min_width(w);
-                ui.add(egui::Label::new(text).truncate());
+                let r = ui.add(egui::Label::new(text).truncate());
+                if !hover.is_empty() {
+                    r.on_hover_text(hover);
+                }
             });
         }
     });

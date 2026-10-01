@@ -1092,3 +1092,29 @@ fn each_enquiry_click_places_the_window_beside_it() {
     r.frame();
     assert_ne!(win(&r), before, "a click while open moves the window");
 }
+
+fn converted(name: &str) -> signalbox_core::world::World {
+    let dir = env!("CARGO_MANIFEST_DIR");
+    let read = |p: String| std::fs::read_to_string(p).unwrap();
+    let mut w = ts2_import::convert(&read(format!("{dir}/../ts2-import/tests/data/{name}.json"))).unwrap().world;
+    ts2_import::areas::apply(&mut w, &ts2_import::areas::parse(&read(format!("{dir}/../../layouts/{name}.areas.json"))).unwrap()).unwrap();
+    signalbox_core::world::World::from_file(w).unwrap()
+}
+
+/// Polish spec H3: Gretz's headcodes (up to 8 characters) fit the simplifier's
+/// Train column (the panel starts wider for them); none is cut short.
+#[test]
+fn the_simplifier_fits_the_layouts_longest_headcode() {
+    let mut r = Rig::in_game(converted("gretz-armainvilliers"), Some("Gretz"));
+    let out = r.frame();
+    click_text(&mut r, &out, "SIMPLIFIER");
+    r.frame();
+    let out = r.frame();
+    let side = side_texts(&r, &out);
+    let l = r.ui.core.game().unwrap().layout().unwrap().clone();
+    let most = l.simplifier.iter().map(|x| x.headcode.chars().count()).max().unwrap();
+    assert_eq!(most, 8, "Gretz's longest, `W118412a`");
+    assert!(side.iter().any(|t| t.chars().count() == most && l.simplifier.iter().any(|x| x.headcode == *t)), "{side:?}");
+    assert!(side.iter().all(|t| !t.ends_with('…')), "nothing cut short: {side:?}");
+    assert!(1280.0 - r.ui.diagram_rect().unwrap().max.x > 398.0, "the panel grew");
+}
