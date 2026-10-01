@@ -1111,10 +1111,47 @@ fn the_simplifier_fits_the_layouts_longest_headcode() {
     r.frame();
     let out = r.frame();
     let side = side_texts(&r, &out);
+    // `galley.text()` is the unshortened text: what was cut short is `galley.elided`.
+    let right = r.ui.diagram_rect().unwrap().max.x;
+    let cut: Vec<String> = out
+        .shapes
+        .iter()
+        .filter_map(|c| match &c.shape {
+            Shape::Text(t) if t.galley.elided && t.pos.x >= right => Some(t.galley.text().to_string()),
+            _ => None,
+        })
+        .collect();
     let l = r.ui.core.game().unwrap().layout().unwrap().clone();
     let most = l.simplifier.iter().map(|x| x.headcode.chars().count()).max().unwrap();
     assert_eq!(most, 8, "Gretz's longest, `W118412a`");
     assert!(side.iter().any(|t| t.chars().count() == most && l.simplifier.iter().any(|x| x.headcode == *t)), "{side:?}");
-    assert!(side.iter().all(|t| !t.ends_with('…')), "nothing cut short: {side:?}");
+    assert!(cut.iter().all(|t| !l.simplifier.iter().any(|x| x.headcode == *t)), "no headcode cut short: {cut:?}");
     assert!(1280.0 - r.ui.diagram_rect().unwrap().max.x > 398.0, "the panel grew");
+}
+
+/// Polish spec H3, M2: a cell's whole text shows on hover, places by name.
+#[test]
+fn a_simplifier_cell_shows_its_whole_text_on_hover() {
+    let mut r = Rig::in_game(converted("gretz-armainvilliers"), Some("Gretz"));
+    let out = r.frame();
+    click_text(&mut r, &out, "SIMPLIFIER");
+    r.frame();
+    let out = r.frame();
+    let right = r.ui.diagram_rect().unwrap().max.x;
+    let l = r.ui.core.game().unwrap().layout().unwrap().clone();
+    let names = r.ui.core.game().unwrap().names();
+    // A drawn cell whose text is a place code with a name different from the code.
+    let (code, at) = texts(&out)
+        .into_iter()
+        .filter(|(t, at)| at.min.x >= right && l.places.contains_key(t) && names.place(t) != t)
+        .map(|(t, at)| (t, at.center()))
+        .next()
+        .expect("a place cell");
+    let name = names.place(&code).to_string();
+    r.events.push(Event::PointerMoved(at));
+    let mut seen = false;
+    for _ in 0..10 {
+        seen |= has_text(&r.frame(), &name);
+    }
+    assert!(seen, "hover over {code} shows {name}");
 }

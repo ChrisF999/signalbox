@@ -133,6 +133,8 @@ pub struct UiApp {
     shown_game: Option<String>,
     /// The simplifier's columns for the layout shown (polish spec H3).
     simplifier_cols: [f32; 8],
+    /// The Train column's width for (game, layout generation): it changes only with the layout.
+    train_col: Option<((String, u64), f32)>,
     /// The simplifier's lines (each marked if it is its row's first) for
     /// (layout generation, search).
     simplifier_lines: Option<((u64, String), Vec<(Line, bool)>)>,
@@ -171,6 +173,7 @@ impl UiApp {
             enquiry_at: None,
             shown_game: None,
             simplifier_cols: SIMPLIFIER_COLUMNS,
+            train_col: None,
             simplifier_lines: None,
             placement: None,
             simplifier_scroll: None,
@@ -424,7 +427,17 @@ impl UiApp {
         // The panel starts as wide as the simplifier for the longest headcode it
         // shows (polish spec H3, U3); keyed by that width, so it resets when the
         // longest headcode changes (ruling D8) and is otherwise draggable.
-        self.simplifier_cols = simplifier_columns(self.train_column_w(ui));
+        let key = self.core.game().map(|g| (g.id.clone(), g.layout_gen()));
+        let train_w = match (&self.train_col, key) {
+            (Some((k, w)), Some(key)) if *k == key => *w,
+            (_, Some(key)) => {
+                let w = self.train_column_w(ui);
+                self.train_col = Some((key, w));
+                w
+            }
+            (_, None) => 0.0,
+        };
+        self.simplifier_cols = simplifier_columns(train_w);
         let side_w = table_width(&self.simplifier_cols) + SIDE_PAD;
         egui::Panel::right(egui::Id::new(("side", side_w.round() as i32)))
             .default_size(side_w)

@@ -344,8 +344,8 @@ output is byte-identical for the same input.
   ○A buttons exist (drawn and hit) only where numbers are drawn.
   `tests/legibility.rs` is the acceptance measurement (`--nocapture` prints it).
 - `hit_test` takes the view as well as the scene; points and exits win over
-  an empty berth under the pointer. The
-  side panel starts as wide as the simplifier for the layout's longest displayed headcode (polish spec H3).
+  an empty berth under the pointer. The side panel starts as wide as the simplifier for the layout's longest
+  displayed headcode (polish spec H3).
 - The diagram shows a pointing hand over what you can work and ends hover text with what a click does
   (`App::hint`); a left click on your points opens their menu and never swings them (polish spec M3, U9).
 - The headcode enquiry window opens 16 px right of and below the pointer (egui keeps it on screen), with a labelled
