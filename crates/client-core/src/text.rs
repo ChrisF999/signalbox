@@ -41,9 +41,17 @@ pub fn command_text(c: &PlayerCommand, names: &Names) -> String {
         PlayerCommand::SetAutoWorking { entrance, on } => {
             format!("auto-working {} at {}", if *on { "on" } else { "off" }, names.signal(entrance))
         }
-        PlayerCommand::SwingPoints { points, to } => format!("swing {points} {}", pos_text(*to)),
-        PlayerCommand::Interpose { berth, headcode } => format!("interpose {headcode} in {berth}"),
-        PlayerCommand::CancelBerth { berth } => format!("cancel berth {berth}"),
+        PlayerCommand::SwingPoints { points, to } => format!("swing {} {}", names.points(points), pos_text(*to)),
+        PlayerCommand::Interpose { berth, headcode } => format!("interpose {headcode} at {}", berth_words(names, berth)),
+        PlayerCommand::CancelBerth { berth } => format!("cancel the headcode at {}", berth_words(names, berth)),
+    }
+}
+
+/// A berth in a sentence: its signal's name, `the edge berth` at a boundary.
+fn berth_words(names: &Names, berth: &str) -> String {
+    match names.berth(berth).as_str() {
+        "edge" => "the edge berth".to_string(),
+        b => b.to_string(),
     }
 }
 
@@ -69,12 +77,12 @@ pub fn notice_text(n: &Notice, names: &Names) -> (String, bool) {
         }
         Notice::NotYourArea { area } => (format!("Not your area: that is in {area}"), true),
         Notice::Spad { signal, train } => (format!("SPAD: {} passed {} at danger", names.headcode(train), names.signal(signal)), true),
-        Notice::Collision { section } => (format!("COLLISION on {section}"), true),
+        Notice::Collision { section } => (format!("COLLISION: {}", names.track(section)), true),
         Notice::Late { train, place, platform, late_s } => {
-            (format!("{} at {place} {platform}, {} min late", names.headcode(train), late_s / 60), false)
+            (format!("{} at {} {platform}, {} min late", names.headcode(train), names.place(place), late_s / 60), false)
         }
         Notice::WrongPlatform { train, place, platform, expected } => {
-            (format!("{} at {place} platform {platform}, booked {expected}", names.headcode(train)), true)
+            (format!("{} at {} platform {platform}, booked {expected}", names.headcode(train), names.place(place)), true)
         }
         Notice::Handover { headcode, from_area } => {
             (format!("{} offered from {from_area}", names.headcode(headcode)), false)

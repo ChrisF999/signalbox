@@ -125,5 +125,6 @@ pub fn build_layout(w: &World, map: &AreaMap, vis: &Visibility, you: &str, geo: 
         workstations: Default::default(),
         simplifier: vec![],
         display_headcodes: Default::default(),
+        places: Default::default(),
     }
 }

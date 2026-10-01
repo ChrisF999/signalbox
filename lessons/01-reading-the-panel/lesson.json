@@ -19,7 +19,7 @@
       "wait_for": {"continue": {}}
     },
     {
-      "say": "The ochre block is platform 1 at Saltmarsh station; its number is written on it. You can point at any part of the track to read its name and whether a train is on it.",
+      "say": "The ochre block is platform 1 at Saltmarsh station; its number is written on it. You can point at any part of the track to read whether a train is on it, and at which platform.",
       "highlight": [{"platform": {"place": "SLT", "platform": "1"}}],
       "wait_for": {"continue": {}}
     },

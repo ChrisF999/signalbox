@@ -46,6 +46,7 @@ fn screen(berths: Vec<BerthInfo>, routes: Vec<RouteInfo>) -> Layout {
         workstations: BTreeMap::new(),
         simplifier: vec![],
         display_headcodes: Default::default(),
+        places: Default::default(),
     }
 }
 

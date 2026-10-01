@@ -113,6 +113,8 @@ pub struct Display {
     pub workstations: BTreeMap<String, String>,
     /// Headcode → display headcode, where they differ.
     pub display_headcodes: BTreeMap<String, String>,
+    /// Place code → name (polish spec M2).
+    pub places: BTreeMap<String, String>,
     spectator: Vec<SimplifierRow>,
     by_area: Vec<Vec<SimplifierRow>>,
 }
@@ -122,11 +124,18 @@ pub fn display_headcodes(w: &World) -> BTreeMap<String, String> {
     w.services.iter().filter(|s| s.display != s.headcode).map(|s| (s.headcode.clone(), s.display.clone())).collect()
 }
 
+/// Place code → name, from the world's `layout` JSON (`places`, written by
+/// ts2-import); empty when missing, and entries that are not text are skipped.
+pub fn places(w: &World) -> BTreeMap<String, String> {
+    let Some(m) = w.layout.get("places").and_then(|v| v.as_object()) else { return BTreeMap::new() };
+    m.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect()
+}
+
 impl Display {
     pub fn from_world(w: &World) -> Display {
         let (box_prefix, workstations) = prefixes(w);
         let by_area = (0..w.net.areas.len()).map(|a| simplifier(w, Some(AreaId::from_idx(a)))).collect();
-        Display { box_prefix, workstations, display_headcodes: display_headcodes(w), spectator: simplifier(w, None), by_area }
+        Display { box_prefix, workstations, display_headcodes: display_headcodes(w), places: places(w), spectator: simplifier(w, None), by_area }
     }
 
     /// The simplifier for `area` (a spectator's for `None`).
@@ -143,5 +152,6 @@ impl Display {
         l.workstations = self.workstations.clone();
         l.simplifier = self.simplifier(area).to_vec();
         l.display_headcodes = self.display_headcodes.clone();
+        l.places = self.places.clone();
     }
 }

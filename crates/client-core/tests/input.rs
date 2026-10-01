@@ -75,7 +75,7 @@ fn fringe_and_spectators_get_hover_only() {
     t.app.click(&sig("C"));
     assert_eq!(t.app.game().unwrap().selected(), None, "C is East's, seen on West's fringe");
     assert!(t.app.menu(&Target::Points(s("P"))).is_empty());
-    assert_eq!(t.app.describe(&Target::Points(s("P"))), "Points P (East): normal");
+    assert_eq!(t.app.describe(&Target::Points(s("P"))), "Points TBP (East): normal");
     let mut spec = Table::new("sam", None);
     spec.app.click(&sig("W1"));
     assert_eq!(spec.app.game().unwrap().selected(), None);
@@ -93,7 +93,7 @@ fn right_click_cancels_a_route_and_swings_points() {
     let mut t = Table::new("eve", Some("East"));
     assert_eq!(
         t.app.menu(&Target::Points(s("P"))),
-        [MenuItem { label: s("Swing P reverse"), cmd: PlayerCommand::SwingPoints { points: s("P"), to: PointsPos::Reverse } }]
+        [MenuItem { label: s("Swing TBP reverse"), cmd: PlayerCommand::SwingPoints { points: s("P"), to: PointsPos::Reverse } }]
     );
     assert!(t.app.menu(&sig("C")).is_empty(), "no route set from C");
     t.app.click(&sig("C"));
@@ -149,7 +149,7 @@ fn berths_interpose_a_typed_headcode_and_cancel_it() {
     t.pump();
     t.run(0.5);
     assert_eq!(t.view().berths.get("BA").map(String::as_str), Some("2Z99"));
-    assert_eq!(t.app.describe(&Target::Berth(s("BA"))), "Berth BA: 2Z99");
+    assert_eq!(t.app.describe(&Target::Berth(s("BA"))), "Berth TAA: 2Z99");
     assert_eq!(
         t.app.menu(&Target::Berth(s("BA"))),
         [MenuItem { label: s("Cancel 2Z99"), cmd: PlayerCommand::CancelBerth { berth: s("BA") } }]
@@ -166,7 +166,7 @@ fn berths_show_display_headcodes() {
     t.run(0.5);
     let mut l = t.layout().clone();
     l.display_headcodes.insert(s("2Z99"), s("299"));
-    assert_eq!(select::describe_berth(&l, t.view(), "BA"), "Berth BA: 299");
+    assert_eq!(select::describe_berth(&l, t.view(), "BA"), "Berth TAA: 299");
     assert_eq!(select::berth_menu(&l, t.view(), "BA")[0].label, "Cancel 299");
 }
 
@@ -205,6 +205,7 @@ fn auto_layout() -> Layout {
         workstations: BTreeMap::new(),
         simplifier: vec![],
         display_headcodes: Default::default(),
+        places: Default::default(),
     }
 }
 
@@ -372,8 +373,8 @@ fn the_train_list_puts_platforms_first_then_by_booked_time() {
 #[test]
 fn hover_describes_track_and_names_other_areas() {
     let t = Table::new("ann", Some("West"));
-    assert_eq!(t.app.describe(&Target::Section(s("TW1"))), "Track TW1: clear");
-    assert_eq!(t.app.describe(&Target::Section(s("TP"))), "Track TP (East): clear");
+    assert_eq!(t.app.describe(&Target::Section(s("TW1"))), "Track: clear");
+    assert_eq!(t.app.describe(&Target::Section(s("TP"))), "Track (East): clear");
     assert_eq!(t.app.describe(&Target::Exit(s("W"))), "Exit W");
     assert_eq!(t.app.describe(&sig("nowhere")), "Signal nowhere");
 }

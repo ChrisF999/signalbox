@@ -295,7 +295,9 @@ output is byte-identical for the same input.
   wasm32-unknown-unknown); the server turns on `thread_rng`.
 - The look follows `docs/superpowers/specs/2026-10-01-panel-realism-design.md`
   (IECC conventions): signals are shown as `<box><workstation><number>`
-  (`client_core::Names`; display only, wire names stay plain). Settings
+  (`client_core::Names`; display only, wire names stay plain). Points are shown the same way
+  with a `P` (`LAP153`), berths by their signal, track only by the platform on it (polish spec M1); place codes by the
+  names ts2-import writes into `layout.places` (M2): tables keep codes and show names on hover. Settings
   (aspects red/green or real, headcode enquiry, signal numbers) live behind
   `client_core::SettingsStore`, which `client-web` backs with `localStorage`
   (`LocalStore`). Nothing flashes except points moving, the selected entrance

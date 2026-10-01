@@ -42,7 +42,7 @@
       "wait_for": {"continue": {}}
     },
     {
-      "say": "The lesson has cancelled its route. Points can also be moved by hand when no route holds them. Right-click the points P1 (where the line splits before the platforms) and choose 'Swing P1 reverse'. Reverse leads to platform 2.",
+      "say": "The lesson has cancelled its route. Points can also be moved by hand when no route holds them. Right-click the points HP1 (where the line splits before the platforms) and choose 'Swing HP1 reverse'. Reverse leads to platform 2.",
       "highlight": [{"points": "P1"}],
       "do": [{"cancel_route": {"entrance": "3"}}],
       "wait_for": {"points": {"name": "P1", "position": "reverse"}}

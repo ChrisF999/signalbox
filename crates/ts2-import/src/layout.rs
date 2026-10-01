@@ -1,4 +1,5 @@
-//! Diagram geometry for clients, in TS2 scene coordinates.
+//! Diagram geometry for clients, in TS2 scene coordinates, and the names of
+//! TS2's places (polish spec M2: `LIVST` is LIVERPOOL STREET).
 
 use serde_json::{Value, json};
 
@@ -7,6 +8,7 @@ use crate::ts2::{Item, Ts2};
 
 pub fn build(ts2: &Ts2, g: &Graph) -> Value {
     let (mut lines, mut points, mut signals, mut platforms, mut labels) = (vec![], vec![], vec![], vec![], vec![]);
+    let mut places = serde_json::Map::new();
     for (id, it) in &ts2.track_items {
         match it {
             Item::LineItem(l) | Item::InvisibleLinkItem(l) => {
@@ -30,6 +32,9 @@ pub fn build(ts2: &Ts2, g: &Graph) -> Value {
             Item::Place(p) => {
                 if let Some(name) = &p.name {
                     labels.push(json!({"text": name, "x": p.x, "y": p.y}));
+                    if let Some(code) = p.place_code.as_ref().filter(|c| !c.is_empty()) {
+                        places.entry(code.clone()).or_insert_with(|| json!(name));
+                    }
                 }
             }
             Item::TextItem(t) => {
@@ -40,5 +45,5 @@ pub fn build(ts2: &Ts2, g: &Graph) -> Value {
             Item::EndItem(_) => {}
         }
     }
-    json!({"source": "ts2", "lines": lines, "points": points, "signals": signals, "platforms": platforms, "labels": labels})
+    json!({"source": "ts2", "lines": lines, "points": points, "signals": signals, "platforms": platforms, "labels": labels, "places": places})
 }

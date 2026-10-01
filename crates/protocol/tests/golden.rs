@@ -145,6 +145,7 @@ fn small_layout() -> Layout {
         workstations: BTreeMap::new(),
         simplifier: vec![],
         display_headcodes: Default::default(),
+        places: Default::default(),
     }
 }
 

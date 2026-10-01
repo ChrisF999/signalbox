@@ -49,3 +49,13 @@ fn conversion_is_deterministic() {
     let b = serde_json::to_string(&ts2_import::convert(&data("liverpool-st")).unwrap().world).unwrap();
     assert_eq!(a, b);
 }
+
+/// Polish spec M2: the converted layout names TS2's places by their codes.
+#[test]
+fn places_are_named_in_the_layout() {
+    let w = ts2_import::convert(&data("liverpool-st")).unwrap().world;
+    assert_eq!(w.layout["places"]["LIVST"], "LIVERPOOL STREET");
+    assert_eq!(w.layout["places"]["HAKNYNM"], "HACKNEY DOWNS");
+    let w = ts2_import::convert(&data("gretz-armainvilliers")).unwrap().world;
+    assert!(w.layout["places"].as_object().unwrap().keys().all(|k| !k.is_empty()), "places without a code are only labels");
+}

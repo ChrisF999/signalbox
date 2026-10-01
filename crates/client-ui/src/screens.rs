@@ -561,7 +561,12 @@ impl UiApp {
                         (Some(p), None) => p.clone(),
                         (None, _) => "—".to_string(),
                     };
-                    ui.label(next);
+                    // Codes in the table; the place's name on hover (polish spec M2).
+                    let place = r.next_place.as_deref().map(|p| g.names().place(p).to_string());
+                    let cell = ui.label(next);
+                    if let Some(name) = place {
+                        cell.on_hover_text(name);
+                    }
                     ui.label(r.booked.map_or(String::new(), |b| fmt_hms(b)[..5].to_string()));
                     ui.label(if r.late_s > 0 { format!("+{}", r.late_s / 60) } else { String::new() });
                     ui.end_row();
@@ -636,9 +641,11 @@ impl UiApp {
                 ui.label("Not in the simplifier for this area");
             }
             for r in &e.rows {
-                ui.label(format!("{} to {}", r.origin.as_deref().unwrap_or("?"), r.destination.as_deref().unwrap_or("?")));
+                let names = g.names();
+                let place = |p: Option<&str>| p.map_or("?", |p| names.place(p)).to_string();
+                ui.label(format!("{} to {}", place(r.origin.as_deref()), place(r.destination.as_deref())));
                 for line in simplifier::lines(r) {
-                    ui.label(format!("{} {} {} {}", line.place, line.platform, line.arr, line.dep));
+                    ui.label(format!("{} {} {} {}", names.place(&line.place), line.platform, line.arr, line.dep));
                 }
             }
         });

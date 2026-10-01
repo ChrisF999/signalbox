@@ -328,12 +328,12 @@ fn notices_are_logged_with_alarms_and_the_log_is_bounded() {
         ]
     );
     for i in 0..(LOG_CAP + 50) {
-        h.push(notice(Notice::Collision { section: format!("T{i}") }));
+        h.push(notice(Notice::Error { code: s("x"), message: format!("e{i}") }));
     }
     app.tick(3.0);
     let log = app.game().unwrap().log();
     assert_eq!(log.len(), LOG_CAP);
-    assert_eq!(log.entries().last().unwrap().text, format!("COLLISION on T{}", LOG_CAP + 49));
+    assert_eq!(log.entries().last().unwrap().text, format!("Error: e{}", LOG_CAP + 49));
 }
 
 #[test]
@@ -385,6 +385,7 @@ fn layout(you: &str) -> ServerFrame {
         workstations: BTreeMap::new(),
         simplifier: vec![],
         display_headcodes: Default::default(),
+        places: Default::default(),
     }))
 }
 

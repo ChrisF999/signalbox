@@ -147,7 +147,8 @@ pub fn points_menu(l: &Layout, v: &View, points: &str) -> Vec<MenuItem> {
         PointsPos::Normal => PointsPos::Reverse,
         PointsPos::Reverse => PointsPos::Normal,
     };
-    vec![MenuItem { label: format!("Swing {points} {}", pos_text(to)), cmd: PlayerCommand::SwingPoints { points: points.to_string(), to } }]
+    let label = format!("Swing {} {}", Names::new(l).points(points), pos_text(to));
+    vec![MenuItem { label, cmd: PlayerCommand::SwingPoints { points: points.to_string(), to } }]
 }
 
 /// Cancelling a berth's headcode; interposing needs a headcode typed in,
@@ -211,21 +212,26 @@ pub fn describe_signal(l: &Layout, v: &View, signal: &str) -> String {
 
 pub fn describe_points(l: &Layout, v: &View, points: &str) -> String {
     let area = l.points.iter().find(|p| p.name == points).map(|p| area_note(l, &p.area)).unwrap_or_default();
+    let shown = Names::new(l).points(points);
     match v.points.get(points) {
         Some(p) => format!(
-            "Points {points}{area}: {}{}{}",
+            "Points {shown}{area}: {}{}{}",
             pos_text(p.position),
             if p.moving { ", moving" } else { "" },
             if p.locked { ", locked" } else { "" }
         ),
-        None => format!("Points {points}{area}"),
+        None => format!("Points {shown}{area}"),
     }
 }
 
 pub fn describe_berth(l: &Layout, v: &View, berth: &str) -> String {
     let area = l.berths.iter().find(|b| b.name == berth).map(|b| area_note(l, &b.area)).unwrap_or_default();
     let held = v.berths.get(berth).map_or("empty", |h| shown_headcode(&l.display_headcodes, h));
-    format!("Berth {berth}{area}: {held}")
+    let what = match Names::new(l).berth(berth).as_str() {
+        "edge" => "Edge berth".to_string(),
+        b => format!("Berth {b}"),
+    };
+    format!("{what}{area}: {held}")
 }
 
 pub fn describe_section(l: &Layout, v: &View, section: &str) -> String {
@@ -237,5 +243,5 @@ pub fn describe_section(l: &Layout, v: &View, section: &str) -> String {
         Some(_) => "clear",
         None => "?",
     };
-    format!("Track {section}{area}: {state}")
+    format!("{}{area}: {state}", Names::new(l).track(section))
 }

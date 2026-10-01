@@ -136,6 +136,18 @@ fn display_headcodes_go_into_every_layout() {
     assert_eq!(l.display_headcodes, map(&[("1E01", s("E1"))]), "whatever the area");
 }
 
+/// Polish spec M2: place names from the world's `layout` reach every layout.
+#[test]
+fn place_names_reach_the_layout() {
+    let w = twobox_mut(|j| j["layout"] = json!({"places": {"EST": "EASTON", "NST": 7}}));
+    assert_eq!(game::display::places(&w), map(&[("EST", s("EASTON"))]), "a name that is not text is skipped");
+    let mut g = Game::new(w, GameMeta { layout: s("twobox"), seed: 1 });
+    let outs = g.connect("ann");
+    let Some(ServerMsg::Layout(l)) = outs.iter().map(|o| &o.1).find(|m| matches!(m, ServerMsg::Layout(_))) else { panic!() };
+    assert_eq!(l.places, map(&[("EST", s("EASTON"))]));
+    assert!(game::display::places(&twobox()).is_empty());
+}
+
 /// The three boxes of Liverpool Street, as shipped.
 #[test]
 fn liverpool_street_has_its_prefixes_and_a_simplifier_per_box() {

@@ -44,6 +44,10 @@ pub struct Layout {
     /// the train list, the simplifier, the enquiry and the log show this.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub display_headcodes: BTreeMap<String, String>,
+    /// Place code → its name (`LIVST` → `LIVERPOOL STREET`, polish spec M2),
+    /// where the world gives one.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub places: BTreeMap<String, String>,
 }
 
 /// One service in the simplifier: where it runs from and to, and its calls

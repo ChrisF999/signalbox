@@ -289,7 +289,7 @@ fn right_click_opens_the_menu_for_what_is_under_the_pointer() {
     let ba = r.at(200.0, 0.0) - vec2(client_ui::scene::BERTH_BACK_PX, 0.0);
     r.click(ba, PointerButton::Secondary);
     let out = r.frame();
-    assert!(has_text(&out, "Berth BA: empty"), "{:?}", texts(&out));
+    assert!(has_text(&out, "Berth TAA: empty"), "{:?}", texts(&out));
     assert!(has_text(&out, "Interpose"));
 }
 
