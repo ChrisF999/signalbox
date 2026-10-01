@@ -136,8 +136,11 @@ fn nonsense_geometry_stays_cheap_and_finite() {
     d.keep.bars.push((pos2(-1.0e9, 0.0), pos2(1.0e9, 0.0), 6.0));
     d.keep.bars.push((pos2(f32::NAN, 0.0), pos2(5.0, f32::INFINITY), 6.0));
     d.keep.rounds.push((pos2(f32::NAN, f32::NAN), 4.0));
+    d.keep.bars.push((pos2(-1.0e30, -1.0e30), pos2(1.0e30, 1.0e30), 6.0));
+    d.keep.rounds.push((pos2(1.0e30, 1.0e30), 1.0e30));
     push(&mut d, text("LA11", pos2(50.0, 50.0), Align2::CENTER_CENTER), Role::Number, vec![(pos2(f32::NAN, 1.0), Align2::LEFT_TOP)]);
     push(&mut d, text("FAR", pos2(4.0e8, -3.0e8), Align2::LEFT_TOP), Role::Label, vec![]);
+    push(&mut d, text("OUT", pos2(1.0e30, -1.0e30), Align2::LEFT_TOP), Role::Label, vec![]);
     let t = std::time::Instant::now();
     let p = plan_of(&d);
     assert!(t.elapsed() < std::time::Duration::from_secs(1), "{:?}", t.elapsed());
@@ -145,7 +148,31 @@ fn nonsense_geometry_stays_cheap_and_finite() {
     assert!(p.spots.iter().flatten().all(|(o, _)| o.is_finite()));
     // A text that cannot be measured is hidden, never drawn somewhere odd.
     let p = plan(&d, &mut |_| vec2(f32::NAN, 10.0));
-    assert_eq!(p.spots, vec![None, None]);
+    assert_eq!(p.spots, vec![None, None, None]);
+    assert_eq!(p.hidden_numbers, vec!["LA11".to_string()], "an unmeasurable number is still counted as hidden");
+}
+
+#[test]
+fn a_spot_that_is_not_finite_is_never_clear() {
+    let mut d = Drawing::default();
+    d.keep.boxes.push(Rect::from_center_size(pos2(50.0, 50.0), vec2(100.0, 100.0)));
+    // Its own spot is covered; the only other spot is NaN.
+    push(&mut d, text("LA11", pos2(50.0, 50.0), Align2::CENTER_CENTER), Role::AutoLetter, vec![(pos2(f32::NAN, 1.0), Align2::LEFT_TOP)]);
+    assert_eq!(plan_of(&d).spots, vec![None]);
+}
+
+#[test]
+fn an_auto_letter_has_no_nudges_and_a_fringe_number_loses_to_a_label() {
+    let mut d = Drawing::default();
+    push(&mut d, text("LB72", pos2(100.0, 50.0), Align2::CENTER_CENTER), Role::Number, vec![]);
+    push(&mut d, text("A", pos2(100.0, 50.0), Align2::CENTER_CENTER), Role::AutoLetter, vec![]);
+    assert_eq!(plan_of(&d).spots, vec![Some((Vec2::ZERO, Align2::CENTER_CENTER)), None], "no room, no nudge: hidden");
+    let mut d = Drawing::default();
+    push(&mut d, text("LB73", pos2(100.0, 50.0), Align2::CENTER_CENTER), Role::FringeNumber, vec![]);
+    push(&mut d, text("BANK", pos2(100.0, 50.0), Align2::CENTER_CENTER), Role::Label, vec![]);
+    let p = plan_of(&d);
+    assert_eq!(p.spots[1], Some((Vec2::ZERO, Align2::CENTER_CENTER)), "the label keeps its spot");
+    assert_eq!(p.spots[0], None, "a fringe number has no other spot");
 }
 
 #[test]

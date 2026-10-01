@@ -155,24 +155,39 @@ struct Grid {
     everywhere: Vec<Obj>,
 }
 
+/// Which grid cells a rectangle covers.
+enum Span {
+    /// Not finite: it meets nothing in the grid.
+    Nothing,
+    /// Too many cells to walk (or too far out to count them).
+    Everywhere,
+    Cells(i64, i64, i64, i64),
+}
+
 impl Grid {
-    fn span(r: Rect) -> Option<(i64, i64, i64, i64)> {
+    fn span(r: Rect) -> Span {
         if !(r.min.is_finite() && r.max.is_finite()) {
-            return None;
+            return Span::Nothing;
+        }
+        // Counted in f32 first: far coordinates saturate the i64 cells.
+        let count = (r.width() / CELL + 1.0) * (r.height() / CELL + 1.0);
+        if !(count <= MAX_CELLS as f32) {
+            return Span::Everywhere;
         }
         let c = |v: f32| (v / CELL).floor() as i64;
-        Some((c(r.min.x), c(r.min.y), c(r.max.x), c(r.max.y)))
+        Span::Cells(c(r.min.x), c(r.min.y), c(r.max.x), c(r.max.y))
     }
 
     fn insert(&mut self, r: Rect, o: Obj) {
-        let Some((x0, y0, x1, y1)) = Grid::span(r) else { return };
-        if (x1 - x0 + 1).saturating_mul(y1 - y0 + 1) > MAX_CELLS {
-            self.everywhere.push(o);
-            return;
-        }
-        for x in x0..=x1 {
-            for y in y0..=y1 {
-                self.cells.entry((x, y)).or_default().push(o);
+        match Grid::span(r) {
+            Span::Nothing => {}
+            Span::Everywhere => self.everywhere.push(o),
+            Span::Cells(x0, y0, x1, y1) => {
+                for x in x0..=x1 {
+                    for y in y0..=y1 {
+                        self.cells.entry((x, y)).or_default().push(o);
+                    }
+                }
             }
         }
     }
@@ -180,10 +195,10 @@ impl Grid {
     /// Everything that may meet `r`, each once, in order.
     fn near(&self, r: Rect) -> Vec<Obj> {
         let mut out = self.everywhere.clone();
-        if let Some((x0, y0, x1, y1)) = Grid::span(r) {
-            if (x1 - x0 + 1).saturating_mul(y1 - y0 + 1) > MAX_CELLS {
-                out.extend(self.cells.values().flatten().copied());
-            } else {
+        match Grid::span(r) {
+            Span::Nothing => {}
+            Span::Everywhere => out.extend(self.cells.values().flatten().copied()),
+            Span::Cells(x0, y0, x1, y1) => {
                 for x in x0..=x1 {
                     for y in y0..=y1 {
                         out.extend(self.cells.get(&(x, y)).into_iter().flatten().copied());
@@ -245,6 +260,9 @@ pub fn plan(d: &Drawing, measure: &mut dyn FnMut(&TextItem) -> Vec2) -> Plan {
         let t = &d.texts[mv.text];
         let size = measure(t);
         if !size.is_finite() {
+            if mv.role == Role::Number {
+                out.hidden_numbers.push(t.text.clone());
+            }
             continue;
         }
         let own = t.anchor.anchor_size(t.at, size);
@@ -264,7 +282,7 @@ pub fn plan(d: &Drawing, measure: &mut dyn FnMut(&TextItem) -> Vec2) -> Plan {
         }
         let fits = |r: &Rect| mv.within.is_none_or(|w| w.expand(SLACK).contains_rect(*r));
         let looked: Vec<(bool, bool)> =
-            spots.iter().map(|(_, _, r)| if fits(r) { hits(*r, d, &grid, &placed) } else { (true, true) }).collect();
+            spots.iter().map(|(_, _, r)| if fits(r) && r.is_finite() { hits(*r, d, &grid, &placed) } else { (true, true) }).collect();
         let mut pick = looked.iter().position(|&(solid, track)| !solid && !track);
         if pick.is_none() && mv.role == Role::Number {
             pick = looked.iter().position(|&(solid, _)| !solid);
