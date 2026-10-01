@@ -32,7 +32,7 @@ use tokio::time::{Instant, sleep, timeout};
 use crate::layouts::{Layouts, new_game_id, valid_game_id};
 use crate::lessons::Lessons;
 use crate::outbox::{Outbox, Pushed};
-use crate::process::normalise_start;
+use crate::process::{EXIT_SEED_TOO_SLOW, normalise_start};
 
 /// Game processes running at once, at most (tutorials not counted).
 pub const MAX_LIVE_GAMES: usize = 8;
@@ -650,6 +650,7 @@ impl Supervisor {
                 Phase::Starting | Phase::Running => {
                     info.state = GameState::Running;
                     info.error = None;
+                    info.preparing = e.status.as_ref().and_then(|s| s.preparing);
                     if let Some(s) = &e.status {
                         info.sim_time = s.sim_time;
                         info.areas = areas_order
@@ -774,6 +775,16 @@ impl Supervisor {
             return;
         }
         let line = last_line.lock().expect("stderr lock").clone();
+        // A new game that failed while it was being prepared has no save:
+        // it is not listed (timetables spec §3.4).
+        if matches!(start, Start::Create { .. }) {
+            let save = self.save_path(&id);
+            let too_slow = status.and_then(|s| s.code()) == Some(i32::from(EXIT_SEED_TOO_SLOW));
+            if too_slow || game::seed::temp_path(&save).exists() {
+                game::seed::remove_partial(&save);
+                return self.not_created(&id, too_slow, line);
+            }
+        }
         let why = match (line.is_empty(), trouble) {
             (false, _) => line,
             (true, Some(t)) => t,
@@ -806,8 +817,14 @@ impl Supervisor {
                 push(&st, &player, c, ServerFrame::Game(msg));
             }
             FromGame::Status(s) => {
+                // Everyone sees a game start and stop being prepared.
+                let mut changed = false;
                 if let Some(e) = self.lock().games.get_mut(id) {
+                    changed = e.status.as_ref().and_then(|o| o.preparing).is_some() != s.preparing.is_some();
                     e.status = Some(s);
+                }
+                if changed {
+                    self.broadcast_games();
                 }
             }
             // The save file is the record; nothing to keep.
@@ -849,6 +866,25 @@ impl Supervisor {
             _ => ServerFrame::error(codes::GAME_STOPPED, "the game stopped; join it again to resume it"),
         };
         Self::evict(&mut st, id, &f);
+    }
+
+    /// A new game failed before it was ready (`too_slow`: its preparing ran
+    /// out of time, P8): it has no save and leaves the live table, and
+    /// whoever was waiting in it goes back to the lobby with why.
+    fn not_created(&self, id: &str, too_slow: bool, why: String) {
+        eprintln!("[{id}] not created: {why}");
+        let f = if too_slow {
+            let detail = why.split_once(&format!("{}: ", codes::SEED_TOO_SLOW)).map_or(why.as_str(), |(_, d)| d);
+            ServerFrame::error(codes::SEED_TOO_SLOW, format!("The game could not be prepared in time: {detail}. Try an earlier start."))
+        } else {
+            notice(Notice::GameCrashed)
+        };
+        {
+            let mut st = self.lock();
+            st.games.remove(id);
+            Self::evict(&mut st, id, &f);
+        }
+        self.broadcast_games();
     }
 
     /// A game crashed: it is listed as crashed with `why`; a tutorial is

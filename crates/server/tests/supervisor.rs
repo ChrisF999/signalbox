@@ -1094,3 +1094,119 @@ async fn a_burst_of_lesson_starts_never_runs_more_than_the_cap() {
     let bob = rig.attach("bob");
     start_lesson(&rig, &bob).await;
 }
+
+// ---- preparing a later start (timetables spec §3.4) ----
+
+fn joined_id(got: &[ServerFrame]) -> String {
+    got.iter()
+        .find_map(|f| match f {
+            ServerFrame::Lobby(LobbyReply::Joined { game, .. }) => Some(game.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("not joined: {got:?}"))
+}
+
+fn preparing_in(f: &ServerFrame, id: &str) -> Option<Preparing> {
+    match f {
+        ServerFrame::Lobby(LobbyReply::Games { games }) => games.iter().find(|g| g.id == id).and_then(|g| g.preparing),
+        _ => None,
+    }
+}
+
+/// twobox starts at 07:00. A game created for 22:00 is listed as preparing
+/// (everyone is told), a second player can join it and waits, and both get
+/// the game at 22:00 once it is ready.
+#[tokio::test]
+async fn a_later_start_is_listed_as_preparing_until_it_is_ready() {
+    let rig = rig("seed", 600);
+    let ann = rig.attach("ann");
+    let bob = rig.attach("bob");
+    rig.lobby(&ann, LobbyMsg::CreateGame { layout: s("twobox"), seed: Some(5), start: Some(s("22:00")) });
+    let got = until(&ann, |f| matches!(f, ServerFrame::Lobby(LobbyReply::Games { .. }))).await;
+    let id = joined_id(&got);
+    let want = Preparing { from: 25200.0, to: 79200.0 };
+    assert_eq!(preparing_in(got.last().unwrap(), &id), Some(want), "{got:?}");
+    let told = until(&bob, |f| preparing_in(f, &id).is_some()).await;
+    let info = rig.info(&id);
+    assert_eq!((info.state, info.preparing, info.can_delete), (GameState::Running, Some(want), false));
+    assert!(info.sim_time < 79200.0);
+    assert!(!rig.saves().join(format!("{id}.sqlite")).exists(), "no save is listed while preparing: {told:?}");
+    rig.lobby(&bob, LobbyMsg::Join { game: id.clone() });
+    for sock in [&ann, &bob] {
+        let got = until(sock, is_view).await;
+        let Some(ServerFrame::Game(ServerMsg::View(v))) = got.last() else { unreachable!() };
+        assert!((79200.0..79201.0).contains(&v.sim_time), "the game opens at 22:00: {}", v.sim_time);
+    }
+    let info = rig.wait_for(&id, |g| g.preparing.is_none()).await;
+    assert!(info.sim_time >= 79200.0);
+    let sum = game::save::read_summary(&rig.saves().join(format!("{id}.sqlite"))).unwrap();
+    assert_eq!(sum.creator.as_deref(), Some("ann"));
+    rig.sup.shutdown_all(Duration::from_secs(10)).await;
+}
+
+/// A game binary whose preparing has a 1 ms budget (the real one's is 60 s).
+fn impatient_game_bin(root: &Path) -> PathBuf {
+    let path = root.join("impatient-game");
+    std::fs::write(
+        &path,
+        format!("#!/bin/sh\ncase \"$*\" in *--create*) exec {GAME_BIN} \"$@\" --seed-budget-ms 1;; *) exec {GAME_BIN} \"$@\";; esac\n"),
+    )
+    .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    path
+}
+
+#[tokio::test]
+async fn preparing_too_slowly_is_seed_too_slow_and_leaves_no_game() {
+    let root = temp_dir("seed-slow");
+    let layouts = Layouts::load(&layouts_dir(&root)).unwrap();
+    let cfg = SupervisorConfig {
+        game_bin: impatient_game_bin(&root),
+        saves_dir: root.join("data/saves"),
+        sockets_dir: root.join("data/sockets"),
+        empty_exit_s: 600,
+        admins: BTreeSet::new(),
+    };
+    let rig = Rig { sup: Supervisor::new(cfg, layouts).unwrap(), root };
+    let ann = rig.attach("ann");
+    rig.lobby(&ann, LobbyMsg::CreateGame { layout: s("twobox"), seed: Some(5), start: Some(s("23:00")) });
+    let got = until(&ann, |f| error_code(f) == Some(codes::SEED_TOO_SLOW)).await;
+    let Some(ServerFrame::Lobby(LobbyReply::Error { message, .. })) = got.last() else { unreachable!() };
+    assert!(message.contains("07:00:00 → 23:00:00"), "{message}");
+    let id = joined_id(&got);
+    for _ in 0..100 {
+        if rig.sup.live_count() == 0 {
+            break;
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(rig.sup.live_count(), 0);
+    assert!(rig.sup.list_games().iter().all(|g| g.id != id), "{:?}", rig.sup.list_games());
+    assert_eq!(rig.sup.game_of("ann"), None, "back in the lobby");
+    assert_eq!(std::fs::read_dir(rig.saves()).unwrap().count(), 0, "nothing is left on disk");
+    // A start the budget allows still works through the same binary.
+    rig.lobby(&ann, LobbyMsg::CreateGame { layout: s("twobox"), seed: Some(5), start: Some(s("06:00")) });
+    until(&ann, is_view).await;
+    rig.sup.shutdown_all(Duration::from_secs(10)).await;
+}
+
+#[tokio::test]
+async fn a_crash_while_preparing_leaves_no_game() {
+    let rig = rig("seed-crash", 600);
+    let ann = rig.attach("ann");
+    rig.lobby(&ann, LobbyMsg::CreateGame { layout: s("twobox"), seed: Some(5), start: Some(s("23:59")) });
+    let got = until(&ann, |f| matches!(f, ServerFrame::Lobby(LobbyReply::Joined { .. }))).await;
+    let id = joined_id(&got);
+    rig.wait_for(&id, |g| g.preparing.is_some()).await;
+    let pid = rig.sup.pid(&id).expect("a preparing game has a pid");
+    kill(pid, "KILL");
+    until(&ann, |f| *f == notice(Notice::GameCrashed)).await;
+    for _ in 0..100 {
+        if rig.sup.live_count() == 0 {
+            break;
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+    assert!(rig.sup.list_games().iter().all(|g| g.id != id), "{:?}", rig.sup.list_games());
+    assert_eq!(std::fs::read_dir(rig.saves()).unwrap().count(), 0, "the half-built save is removed");
+}
