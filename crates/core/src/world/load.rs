@@ -468,7 +468,13 @@ fn build_timetable(f: &WorldFile, net: &Network) -> Result<Timetable, LoadError>
         if !(e.speed_kmh.is_finite() && e.speed_kmh >= 0.0) {
             return Err(other(format!("entry {}: speed_kmh must be finite and not negative", e.service)));
         }
-        entries.push(Entry { service, start, time_s: time(&e.time, &e.service)?, speed: e.speed_kmh / 3.6 });
+        entries.push(Entry {
+            service,
+            start,
+            time_s: time(&e.time, &e.service)?,
+            speed: e.speed_kmh / 3.6,
+            on_demand: e.on_demand,
+        });
     }
     entries.sort_by(|a, b| a.time_s.total_cmp(&b.time_s));
     let o = &f.options;

@@ -346,18 +346,13 @@ impl Sim {
         let mut ev = Vec::new();
         while self.st.next_entry < self.world.entries.len() && self.world.entries[self.st.next_entry].time_s <= now {
             let i = self.st.next_entry;
+            self.st.next_entry += 1;
+            if self.world.entries[i].on_demand {
+                continue;
+            }
             let (lo, hi) = self.world.options.entry_delay_s;
             let delay = f64::from(self.rng.random_range(lo..=hi));
-            let e = &self.world.entries[i];
-            self.st.pending.push(PendingEntry { entry: i, due_s: e.time_s + delay });
-            let fringe = match e.start {
-                EntryStart::Boundary(n) => self.world.net.boundary_berth(n),
-                EntryStart::At(_) => None,
-            };
-            if let Some(b) = fringe {
-                ev.extend(self.st.describer.interpose(b, &self.world.services[e.service.idx()].headcode));
-            }
-            self.st.next_entry += 1;
+            ev.extend(self.offer(i, self.world.entries[i].time_s + delay));
         }
         let mut used: Vec<SectionId> = Vec::new();
         let mut k = 0;
@@ -380,6 +375,34 @@ impl Sim {
             }
         }
         ev
+    }
+
+    /// Offer entry `i` at the fringe, due at `due_s`: its headcode goes into
+    /// its boundary's berth, and the train enters once its track is free.
+    fn offer(&mut self, i: usize, due_s: f64) -> Vec<Event> {
+        let e = &self.world.entries[i];
+        self.st.pending.push(PendingEntry { entry: i, due_s });
+        let fringe = match e.start {
+            EntryStart::Boundary(n) => self.world.net.boundary_berth(n),
+            EntryStart::At(_) => None,
+        };
+        match fringe {
+            Some(b) => self.st.describer.interpose(b, &self.world.services[e.service.idx()].headcode),
+            None => vec![],
+        }
+    }
+
+    /// Offer the on-demand entry `entry` now (the tutorial's `spawn`); it is
+    /// due at once and enters at the next tick its track is free. Not a
+    /// logged command: worlds with on-demand entries are only run by
+    /// tutorials, which are never saved or replayed.
+    pub fn offer_entry(&mut self, entry: usize) -> Result<Vec<Event>, String> {
+        let e = self.world.entries.get(entry).ok_or_else(|| format!("no entry {entry}"))?;
+        if !e.on_demand {
+            return Err(format!("entry {entry} is not on demand"));
+        }
+        let now = self.now_s();
+        Ok(self.offer(entry, now))
     }
 
     /// The train an entry would put on the network (not yet added).
@@ -509,6 +532,7 @@ impl Sim {
             passed.sort_by(|x, y| x.0.total_cmp(&y.0));
             for (a, s) in passed {
                 let aspect = aspects[s.idx()];
+                ev.push(Event::SignalPassed { signal: s, train: t.id });
                 if aspect == Aspect::Red {
                     ev.push(Event::SignalPassedAtDanger { signal: s, train: t.id });
                     t.emergency = true;

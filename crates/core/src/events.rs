@@ -53,6 +53,9 @@ pub enum Event {
     TrainFormed { train: TrainId, headcode: String },
     TrainStabled { train: TrainId },
     TrainExited { train: TrainId, boundary: NodeId },
+    /// A train's head passed a signal in its direction, whatever it showed
+    /// (followed by `SignalPassedAtDanger` when that was red).
+    SignalPassed { signal: SignalId, train: TrainId },
     SignalPassedAtDanger { signal: SignalId, train: TrainId },
     Collision { train: TrainId, other: TrainId, section: SectionId },
     BerthChanged { berth: BerthId, headcode: Option<String> },

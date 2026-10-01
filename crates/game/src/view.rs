@@ -152,7 +152,10 @@ pub fn build_trains(sim: &Sim, vis: &Visibility) -> BTreeMap<String, TrainRow> {
         rows.entry(t.headcode.clone()).or_insert_with(|| row(call, now, state));
     }
     let waiting = sim.pending_entries().iter().map(|p| p.entry);
-    let coming = (sim.next_entry()..w.entries.len()).take_while(|&i| w.entries[i].time_s <= now + DUE_WINDOW_S);
+    // On-demand entries are due only once offered (then they are waiting).
+    let coming = (sim.next_entry()..w.entries.len())
+        .take_while(|&i| w.entries[i].time_s <= now + DUE_WINDOW_S)
+        .filter(|&i| !w.entries[i].on_demand);
     for i in waiting.chain(coming) {
         let e = &w.entries[i];
         let sec = match e.start {

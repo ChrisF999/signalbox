@@ -123,3 +123,68 @@ fn offered_entries_wait_in_pending_until_they_enter() {
     assert!(sim.pending_entries().is_empty());
     assert_eq!(sim.trains().len(), 1);
 }
+
+/// plain_line with its one entry offered only on demand.
+fn on_demand_line() -> signalbox_core::world::World {
+    load_with("plain_line", |v| v["entries"][0]["on_demand"] = json!(true)).unwrap()
+}
+
+#[test]
+fn an_on_demand_entry_waits_until_it_is_offered() {
+    let mut sim = Sim::new(on_demand_line(), 1);
+    let ev = sim.run_for(600.0);
+    assert_eq!(count(&ev, |e| matches!(e, Event::TrainEntered { .. })), 0, "never at its time");
+    assert!(sim.pending_entries().is_empty());
+    let bw = sim.world().net.berth("BW").unwrap();
+    let ev = sim.offer_entry(0).unwrap();
+    assert_eq!(ev, vec![Event::BerthChanged { berth: bw, headcode: Some("2A01".into()) }]);
+    assert_eq!(sim.pending_entries().len(), 1);
+    let ev = sim.step();
+    assert!(ev.iter().any(|e| matches!(e, Event::TrainEntered { headcode, .. } if headcode == "2A01")));
+    assert_eq!(sim.trains().len(), 1);
+}
+
+#[test]
+fn only_on_demand_entries_can_be_offered() {
+    let mut sim = Sim::new(world("plain_line"), 1);
+    assert_eq!(sim.offer_entry(0).unwrap_err(), "entry 0 is not on demand");
+    assert_eq!(sim.offer_entry(7).unwrap_err(), "no entry 7");
+}
+
+#[test]
+fn an_offered_entry_survives_a_snapshot() {
+    let mut sim = Sim::new(on_demand_line(), 1);
+    sim.offer_entry(0).unwrap();
+    let snap = sim.snapshot();
+    let mut back = Sim::restore(sim.world().clone(), snap).unwrap();
+    back.step();
+    assert_eq!(back.trains().len(), 1);
+}
+
+#[test]
+fn on_demand_is_left_out_of_a_written_world_unless_set() {
+    use signalbox_core::world::file::WorldFile;
+    let f: WorldFile = serde_json::from_value(fixture_json("plain_line")).unwrap();
+    let text = serde_json::to_string(&f).unwrap();
+    assert!(!text.contains("on_demand"), "converted worlds stay byte-identical");
+    let mut f = f;
+    f.entries[0].on_demand = true;
+    assert!(serde_json::to_string(&f).unwrap().contains(r#""on_demand":true"#));
+}
+
+#[test]
+fn passing_a_signal_is_an_event() {
+    let mut sim = Sim::new(world("plain_line"), 1);
+    let w = sim.world().clone();
+    let train = signalbox_core::ids::TrainId(0);
+    sim.submit(Command::SetRoute { entrance: sig(&w, "S1"), exit: Exit::Signal(sig(&w, "S2")) });
+    let ev = run_until(&mut sim, 600.0, |e| matches!(e, Event::SignalPassed { .. }));
+    let passed: Vec<&Event> = ev.iter().filter(|e| matches!(e, Event::SignalPassed { .. })).collect();
+    assert_eq!(passed, vec![&Event::SignalPassed { signal: sig(&w, "S1"), train }]);
+    let ev = sim.run_for(300.0);
+    assert_eq!(count(&ev, |e| matches!(e, Event::SignalPassed { .. })), 0, "it stands at S2, which is red");
+    sim.submit(Command::SetRoute { entrance: sig(&w, "S2"), exit: Exit::Node(node(&w, "E")) });
+    let ev = run_until(&mut sim, 600.0, |e| matches!(e, Event::SignalPassed { .. }));
+    assert!(ev.contains(&Event::SignalPassed { signal: sig(&w, "S2"), train }));
+    assert_eq!(count(&ev, |e| matches!(e, Event::SignalPassedAtDanger { .. })), 0);
+}

@@ -59,6 +59,8 @@ pub struct Entry {
     pub time_s: f64,
     /// m/s
     pub speed: f64,
+    /// Offered only by `Sim::offer_entry`, never at `time_s`.
+    pub on_demand: bool,
 }
 
 #[derive(Clone, Debug)]

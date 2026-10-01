@@ -209,6 +209,10 @@ pub struct EntryFile {
     pub time: String,
     #[serde(default)]
     pub speed_kmh: f64,
+    /// Offered only when asked for (`Sim::offer_entry`, the tutorial's
+    /// `spawn`), never at `time`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub on_demand: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

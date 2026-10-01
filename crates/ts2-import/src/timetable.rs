@@ -203,6 +203,7 @@ pub fn build(ts2: &Ts2, g: &Graph, report: &mut Report) -> Timetable {
             at,
             time: fmt_hms(start as f64),
             speed_kmh,
+            on_demand: false,
         });
     }
 

@@ -143,3 +143,17 @@ fn an_entry_held_at_the_fringe_stays_due_past_the_window() {
     assert!(g.sim().trains().is_empty() && g.sim().pending_entries().iter().any(|p| p.entry == 0), "still held");
     assert_eq!(due(&g), Some(TrainState::Due), "still listed, still due");
 }
+
+/// Tutorial spec §2: an on-demand entry is not due until it is offered.
+#[test]
+fn an_on_demand_entry_is_due_only_once_offered() {
+    let mut json: serde_json::Value = serde_json::from_str(&twobox_json()).unwrap();
+    json["entries"][0]["on_demand"] = true.into();
+    let w = signalbox_core::world::World::from_json(&json.to_string()).unwrap();
+    let m = AreaMap::new(&w);
+    let west = Visibility::of_area(&w, &m, area(&w, "West"));
+    let mut sim = Sim::new(w, 1);
+    assert_eq!(states(&build_trains(&sim, &west)), [("1N02", TrainState::Due)]);
+    sim.offer_entry(0).unwrap();
+    assert_eq!(states(&build_trains(&sim, &west)), [("1E01", TrainState::Due), ("1N02", TrainState::Due)]);
+}
