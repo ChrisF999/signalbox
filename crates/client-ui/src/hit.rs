@@ -34,17 +34,17 @@ pub fn signal_disc(cam: &Camera, screen: Rect, s: &SignalMark) -> Pos2 {
     cam.to_screen(screen, s.base) + left_of(s.facing) * POST_PX + s.facing * (HOOK_PX + LAMP_R)
 }
 
-/// Where the ○A button of an automatic signal is: `AUTO_AHEAD_PX` ahead of
-/// its lamp (past a second yellow); `None` for other signals.
+/// Where a controlled signal's ○A button is: `AUTO_AHEAD_PX` ahead of its
+/// lamp (past a second yellow); `None` for signals without one.
 pub fn auto_button(cam: &Camera, screen: Rect, s: &SignalMark) -> Option<Pos2> {
-    if s.auto_routes.is_empty() {
+    if !s.auto_button {
         return None;
     }
     let ahead = if s.facing == egui::Vec2::ZERO { vec2(1.0, 0.0) } else { s.facing };
     Some(signal_disc(cam, screen, s) + ahead * AUTO_AHEAD_PX)
 }
 
-/// How far ahead of its lamp an automatic signal's ○A button sits.
+/// How far ahead of its lamp a signal's ○A button sits.
 pub const AUTO_AHEAD_PX: f32 = 16.0;
 
 /// The berth box on screen.

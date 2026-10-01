@@ -103,8 +103,11 @@ fn right_click_cancels_a_route_and_swings_points() {
     assert!(t.view().routes.contains_key("C-W2"));
     assert_eq!(
         t.app.menu(&sig("C")),
-        [MenuItem { label: s("Cancel route TBC to TAW2"), cmd: PlayerCommand::CancelRoute { entrance: s("C") } }],
-        "C is East's (B), W2 West's (A)"
+        [
+            MenuItem { label: s("Cancel route TBC to TAW2"), cmd: PlayerCommand::CancelRoute { entrance: s("C") } },
+            MenuItem { label: s("Auto-working on"), cmd: PlayerCommand::SetAutoWorking { entrance: s("C"), on: true } },
+        ],
+        "C is East's (B), W2 West's (A); a controlled route can be auto-worked"
     );
     assert_eq!(t.app.describe(&sig("C")), "Signal TBC: yellow; route to TAW2 set");
     let MenuItem { cmd, .. } = t.app.menu(&sig("C")).remove(0);
@@ -154,9 +157,9 @@ fn berths_interpose_a_typed_headcode_and_cancel_it() {
 }
 
 fn auto_layout() -> Layout {
-    let route = |name: &str, exit: &str, automatic: bool| RouteInfo {
+    let route = |entrance: &str, name: &str, exit: &str, automatic: bool| RouteInfo {
         name: s(name),
-        entrance: s("S1"),
+        entrance: s(entrance),
         exit: ExitName::Signal(s(exit)),
         automatic,
         operable: true,
@@ -168,19 +171,21 @@ fn auto_layout() -> Layout {
         areas: vec![s("A")],
         sections: vec![],
         segments: vec![],
-        signals: vec![SignalInfo {
-            name: s("S1"),
-            area: s("A"),
-            segment: s("x"),
-            offset_m: 0.0,
-            direction: Dir::Up,
-            aspects: 3,
-            operable: true,
-        }],
+        signals: ["S1", "S4"]
+            .map(|n| SignalInfo {
+                name: s(n),
+                area: s("A"),
+                segment: s("x"),
+                offset_m: 0.0,
+                direction: Dir::Up,
+                aspects: 3,
+                operable: true,
+            })
+            .to_vec(),
         points: vec![],
         berths: vec![],
         platforms: vec![],
-        routes: vec![route("S1-S2", "S2", true), route("S1-S3", "S3", false)],
+        routes: vec![route("S1", "S1-S2", "S2", false), route("S1", "S1-S3", "S3", false), route("S4", "S4-S1", "S1", true)],
         geometry: None,
         box_prefix: String::new(),
         workstations: BTreeMap::new(),
@@ -206,21 +211,43 @@ fn empty_view() -> View {
     }
 }
 
+/// Real IECC auto-working: any live route from a controlled signal can be
+/// auto-worked; a permanently automatic signal (S4) never offers it.
 #[test]
-fn automatic_routes_offer_auto_working_on_and_off() {
+fn controlled_routes_offer_auto_working_on_and_off() {
     let l = auto_layout();
     let mut v = empty_view();
     assert!(select::signal_menu(&l, &v, "S1").is_empty());
     v.routes.insert(s("S1-S2"), RouteView { state: RouteState::Locked, auto_working: true });
     let labels: Vec<String> = select::signal_menu(&l, &v, "S1").into_iter().map(|m| m.label).collect();
     assert_eq!(labels, ["Cancel route S1 to S2", "Auto-working off"]);
-    v.routes.insert(s("S1-S2"), RouteView { state: RouteState::Locked, auto_working: false });
+    v.routes.insert(s("S1-S2"), RouteView { state: RouteState::Setting, auto_working: false });
     assert_eq!(
         select::signal_menu(&l, &v, "S1")[1].cmd,
-        PlayerCommand::SetAutoWorking { entrance: s("S1"), on: true }
+        PlayerCommand::SetAutoWorking { entrance: s("S1"), on: true },
+        "a route still setting can be auto-worked too, as the core allows"
     );
+    v.routes.clear();
+    v.routes.insert(s("S1-S3"), RouteView { state: RouteState::Locked, auto_working: false });
+    assert_eq!(select::auto_toggle(&l, &v, "S1"), Some(PlayerCommand::SetAutoWorking { entrance: s("S1"), on: true }), "any route");
+    v.routes.insert(s("S4-S1"), RouteView { state: RouteState::Locked, auto_working: false });
+    let labels: Vec<String> = select::signal_menu(&l, &v, "S4").into_iter().map(|m| m.label).collect();
+    assert_eq!(labels, ["Cancel route S4 to S1"], "S4 is permanently automatic: no auto-working");
+    assert_eq!(select::auto_toggle(&l, &v, "S4"), None);
     assert_eq!(select::click(&l, None, &ExitName::Signal(s("S9"))), Click::Ignore, "no routes from S9");
     assert_eq!(select::click(&l, Some("S1"), &ExitName::Node(s("Z"))), Click::Clear);
+}
+
+/// Only a controlled signal that starts a route gets a ○A button.
+#[test]
+fn auto_buttons_go_beside_controlled_signals_with_routes() {
+    let l = auto_layout();
+    assert!(select::has_auto_button(&l, "S1"));
+    assert!(!select::has_auto_button(&l, "S4"), "permanently automatic");
+    assert!(!select::has_auto_button(&l, "S9"), "starts no route");
+    let mut theirs = l.clone();
+    theirs.signals[0].operable = false;
+    assert!(select::has_auto_button(&theirs, "S1"), "drawn (grey) on the fringe too");
 }
 
 /// The ○A button sends exactly what the signal menu's auto-working entry
@@ -230,9 +257,11 @@ fn the_auto_button_is_the_menus_auto_working_command() {
     let l = auto_layout();
     let mut v = empty_view();
     assert_eq!(select::auto_toggle(&l, &v, "S1"), None, "no route set from S1");
-    assert_eq!(select::describe_auto(&l, &v, "S1"), "Auto-working S1: off");
+    assert!(!select::auto_working(&l, &v, "S1"));
+    assert_eq!(select::describe_auto(&l, &v, "S1"), "Auto-working S1: set a route first");
     v.routes.insert(s("S1-S2"), RouteView { state: RouteState::Locked, auto_working: false });
     assert_eq!(select::auto_toggle(&l, &v, "S1"), Some(PlayerCommand::SetAutoWorking { entrance: s("S1"), on: true }));
+    assert_eq!(select::describe_auto(&l, &v, "S1"), "Auto-working S1: off");
     v.routes.insert(s("S1-S2"), RouteView { state: RouteState::Locked, auto_working: true });
     assert_eq!(select::auto_toggle(&l, &v, "S1"), Some(PlayerCommand::SetAutoWorking { entrance: s("S1"), on: false }));
     assert!(select::auto_working(&l, &v, "S1"));
@@ -244,6 +273,10 @@ fn the_auto_button_is_the_menus_auto_working_command() {
     assert_eq!(select::describe_auto(&theirs, &v, "S1"), "Auto-working S1 (B): on", "whose it is, as a signal's hover says");
     theirs.area = None;
     assert_eq!(select::describe_auto(&theirs, &v, "S1"), "Auto-working S1 (B): on", "a spectator's too");
+    v.routes.insert(s("S1-S2"), RouteView { state: RouteState::Cancelling, auto_working: true });
+    assert!(!select::auto_working(&l, &v, "S1"), "a cancelling route is not live");
+    assert_eq!(select::auto_toggle(&l, &v, "S1"), None);
+    assert_eq!(select::describe_auto(&theirs, &v, "S1"), "Auto-working S1 (B): set a route first");
 }
 
 #[test]
@@ -252,9 +285,55 @@ fn clicking_an_auto_button_never_touches_the_selection() {
     t.app.click(&sig("W1"));
     t.app.click(&Target::Auto(s("W1")));
     assert_eq!(t.app.game().unwrap().selected(), Some("W1"));
-    assert!(t.h.take_sent().is_empty(), "twobox has no automatic routes: nothing to toggle");
-    assert_eq!(t.app.describe(&Target::Auto(s("W1"))), "Auto-working TAW1: off");
+    assert!(t.h.take_sent().is_empty(), "no route set from W1: nothing to toggle");
+    assert_eq!(t.app.describe(&Target::Auto(s("W1"))), "Auto-working TAW1: set a route first");
     assert!(t.app.menu(&Target::Auto(s("W1"))).is_empty());
+
+    t.app.click(&sig("A"));
+    t.pump();
+    t.run(1.0);
+    assert!(t.view().routes.contains_key("W1-A"), "{:?}", t.view().routes);
+    t.app.click(&sig("W2"));
+    t.app.click(&Target::Auto(s("W1")));
+    assert_eq!(t.app.game().unwrap().selected(), Some("W2"), "the selection is untouched");
+    assert_eq!(
+        t.h.take_sent(),
+        [ClientFrame::Game(ClientMsg::Command { cmd: PlayerCommand::SetAutoWorking { entrance: s("W1"), on: true } })]
+    );
+    assert_eq!(t.app.describe(&Target::Auto(s("W1"))), "Auto-working TAW1: off", "until the game says so");
+}
+
+/// Real auto-working through the game: W1-A, auto-working on, stays set
+/// behind 1E01 once it has passed.
+#[test]
+fn an_auto_worked_route_stays_set_after_a_train_passes() {
+    let mut t = Table::new("ann", Some("West"));
+    t.app.click(&sig("W1"));
+    t.app.click(&sig("A"));
+    t.app.click(&sig("A"));
+    t.app.click(&Target::Exit(s("E")));
+    t.pump();
+    t.run(10.0);
+    assert!(t.view().routes.contains_key("A-E"), "{:?}", t.view().routes);
+    t.app.click(&Target::Auto(s("W1")));
+    t.pump();
+    t.run(0.5);
+    assert!(t.view().routes["W1-A"].auto_working);
+    assert!(select::auto_working(t.layout(), t.view(), "W1"));
+    assert_eq!(t.app.describe(&Target::Auto(s("W1"))), "Auto-working TAW1: on");
+    // 1E01 enters at W at 07:00 and runs W1 -> A -> E.
+    let mut seen_in_tw2 = false;
+    for _ in 0..600 {
+        t.run(1.0);
+        seen_in_tw2 |= t.view().sections["TW2"].occupied;
+        if seen_in_tw2 && !t.view().sections["TW2"].occupied && !t.view().sections["TW1"].occupied {
+            break;
+        }
+    }
+    assert!(seen_in_tw2, "1E01 ran through W1-A");
+    assert!(!t.view().sections["TW2"].occupied, "and has left it");
+    let rv = &t.view().routes["W1-A"];
+    assert_eq!((rv.state, rv.auto_working), (RouteState::Locked, true), "still set, still auto-working");
 }
 
 #[test]

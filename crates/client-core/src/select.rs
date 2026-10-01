@@ -87,8 +87,10 @@ pub fn signal_menu(l: &Layout, v: &View, signal: &str) -> Vec<MenuItem> {
             cmd: PlayerCommand::CancelRoute { entrance: signal.to_string() },
         });
     }
-    if let Some(r) = live_from(l, v, signal).find(|r| r.automatic) {
-        let on = v.routes.get(&r.name).is_some_and(|rv| rv.auto_working);
+    if !is_automatic(l, signal)
+        && let Some(r) = live_from(l, v, signal).next()
+    {
+        let on = v.routes[&r.name].auto_working;
         items.push(MenuItem {
             label: format!("Auto-working {}", if on { "off" } else { "on" }),
             cmd: PlayerCommand::SetAutoWorking { entrance: signal.to_string(), on: !on },
@@ -97,21 +99,40 @@ pub fn signal_menu(l: &Layout, v: &View, signal: &str) -> Vec<MenuItem> {
     items
 }
 
+/// A permanently automatic signal: one with an automatic route from it. It
+/// keeps its dashed post and gets no ○A.
+pub fn is_automatic(l: &Layout, signal: &str) -> bool {
+    l.routes.iter().any(|r| r.automatic && r.entrance == signal)
+}
+
+/// Whether `signal` has a ○A button beside it (realism spec decision 6): a
+/// controlled signal that starts at least one route. Drawn for any such
+/// signal you can see; only your own are clickable.
+pub fn has_auto_button(l: &Layout, signal: &str) -> bool {
+    !is_automatic(l, signal) && l.routes.iter().any(|r| r.entrance == signal)
+}
+
 /// What the ○A button beside `signal` sends when clicked: exactly the
-/// signal menu's auto-working command, if it offers one.
+/// signal menu's auto-working command, if it offers one (an operable,
+/// controlled signal with a live route set from it).
 pub fn auto_toggle(l: &Layout, v: &View, signal: &str) -> Option<PlayerCommand> {
     signal_menu(l, v, signal).into_iter().map(|m| m.cmd).find(|c| matches!(c, PlayerCommand::SetAutoWorking { .. }))
 }
 
-/// Whether an automatic route from `signal` is auto-working (○A filled).
+/// Whether the live route set from `signal` is auto-working (○A filled).
 pub fn auto_working(l: &Layout, v: &View, signal: &str) -> bool {
-    l.routes.iter().any(|r| r.automatic && r.entrance == signal && v.routes.get(&r.name).is_some_and(|rv| rv.auto_working))
+    live_from(l, v, signal).any(|r| v.routes[&r.name].auto_working)
 }
 
-/// The ○A button's hover: its state, and whose signal it is when not yours
-/// (as a signal's hover says), so a dead click on it is explained.
+/// The ○A button's hover: on or off, or that a route must be set first;
+/// and whose signal it is when not yours (as a signal's hover says), so a
+/// dead click on it is explained.
 pub fn describe_auto(l: &Layout, v: &View, signal: &str) -> String {
-    let state = if auto_working(l, v, signal) { "on" } else { "off" };
+    let state = match live_from(l, v, signal).next() {
+        None => "set a route first",
+        Some(r) if v.routes[&r.name].auto_working => "on",
+        Some(_) => "off",
+    };
     let area = l.signals.iter().find(|s| s.name == signal).map(|s| area_note(l, &s.area)).unwrap_or_default();
     format!("Auto-working {}{area}: {state}", Names::new(l).signal(signal))
 }

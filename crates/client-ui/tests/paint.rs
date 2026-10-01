@@ -482,18 +482,45 @@ fn fringe_headcodes_are_grey() {
 }
 
 #[test]
-fn automatic_signals_carry_a_blue_auto_button_hollow_off_filled_on() {
-    let mut l = layout_for(Some("West"));
-    l.routes[0].automatic = true;
-    let mut r = Rig::of(l, view_for(Some("West")));
+fn controlled_signals_carry_a_blue_auto_button_hollow_off_filled_on() {
+    let mut r = Rig::new(Some("West"));
     let c = r.disc("W1") + vec2(client_ui::hit::AUTO_AHEAD_PX, 0.0);
     let d = r.idle();
     assert!(circles(&d).contains(&(c, AUTO_R, Color32::TRANSPARENT, AUTO)), "hollow: {:?}", circles(&d));
-    let a = d.texts.iter().find(|t| t.text == "A").unwrap();
-    assert_eq!((a.colour, a.anchor, a.at), (AUTO, Align2::LEFT_CENTER, c + vec2(AUTO_R + 2.0, 0.0)));
+    let a = d.texts.iter().find(|t| t.text == "A" && t.at == c + vec2(AUTO_R + 2.0, 0.0)).unwrap();
+    assert_eq!((a.colour, a.anchor), (AUTO, Align2::LEFT_CENTER));
+    r.view.routes.insert(s("W1-A"), RouteView { state: RouteState::Locked, auto_working: false });
+    assert!(circles(&r.idle()).contains(&(c, AUTO_R, Color32::TRANSPARENT, AUTO)), "hollow while set normally");
     r.view.routes.insert(s("W1-A"), RouteView { state: RouteState::Locked, auto_working: true });
     assert!(circles(&r.idle()).contains(&(c, AUTO_R, AUTO, Color32::TRANSPARENT)), "filled while auto-working");
-    assert_eq!(r.idle().texts.iter().filter(|t| t.text == "A").count(), 1, "only W1 is automatic");
+    r.view.routes.insert(s("W1-A"), RouteView { state: RouteState::Cancelling, auto_working: true });
+    assert!(circles(&r.idle()).contains(&(c, AUTO_R, Color32::TRANSPARENT, AUTO)), "hollow once cancelling");
+    let colours = |d: &Drawing| d.texts.iter().filter(|t| t.text == "A").map(|t| t.colour).collect::<Vec<_>>();
+    assert_eq!(colours(&r.idle()), [AUTO, AUTO, AUTO], "W1, A and W2");
+    let east = Rig::new(Some("East"));
+    let a = east.disc("A") + vec2(client_ui::hit::AUTO_AHEAD_PX, 0.0);
+    assert!(circles(&east.idle()).contains(&(a, AUTO_R, Color32::TRANSPARENT, FRINGE)), "grey on East's fringe");
+}
+
+/// A permanently automatic signal keeps its dashed post and gets no ○A.
+#[test]
+fn automatic_signals_have_no_auto_button() {
+    let mut l = layout_for(Some("West"));
+    l.routes[0].automatic = true;
+    let mut r = Rig::of(l, view_for(Some("West")));
+    r.view.routes.insert(s("W1-A"), RouteView { state: RouteState::Locked, auto_working: true });
+    let d = r.idle();
+    let c = r.disc("W1") + vec2(client_ui::hit::AUTO_AHEAD_PX, 0.0);
+    assert!(circles(&d).iter().all(|k| k.0 != c), "no ○A beside W1: {:?}", circles(&d));
+    assert_eq!(d.texts.iter().filter(|t| t.text == "A").count(), 2, "only A and W2");
+}
+
+/// A spectator sees every controlled signal's ○A, coloured as the rest of
+/// its view (nothing is fringe to a spectator); `hit` keeps them unclickable.
+#[test]
+fn a_spectator_sees_every_auto_button() {
+    let d = Rig::new(None).idle();
+    assert_eq!(d.texts.iter().filter(|t| t.text == "A").map(|t| t.colour).collect::<Vec<_>>(), [AUTO; 5]);
 }
 
 #[test]
@@ -629,9 +656,7 @@ fn a_backward_runs_arrow_is_on_the_right_of_its_travel() {
 /// headcode's knock-out goes down first, so the disc stays whole.
 #[test]
 fn headcodes_are_drawn_under_signals_and_auto_buttons() {
-    let mut l = layout_for(Some("West"));
-    l.routes.iter_mut().filter(|r| r.entrance == "W2").for_each(|r| r.automatic = true);
-    let mut r = Rig::of(l, view_for(Some("West")));
+    let mut r = Rig::new(Some("West"));
     r.view.berths.insert(s("BW1"), s("1A01"));
     let d = r.idle();
     let knockout = d.shapes.iter().position(|s| matches!(s, Shape::Rect(rs) if rs.fill == BG && rs.rect.width() == client_ui::hit::BERTH_W)).unwrap();

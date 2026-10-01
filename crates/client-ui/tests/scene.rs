@@ -95,6 +95,26 @@ fn automatic_routes_are_listed_on_their_entrance() {
     assert!(sc.signals[1].auto_routes.is_empty());
 }
 
+/// ○A goes beside every controlled signal that starts a route (fringe ones
+/// too, drawn grey), never beside a permanently automatic signal.
+#[test]
+fn auto_buttons_go_beside_controlled_signals_with_routes() {
+    let button = |sc: &Scene, n: &str| sc.signals.iter().find(|s| s.name == n).unwrap().auto_button;
+    let sc = Scene::build(&layout_for(Some("West"))).unwrap();
+    for n in ["W1", "A", "W2"] {
+        assert!(button(&sc, n), "{n}");
+    }
+    let sc = Scene::build(&layout_for(Some("East"))).unwrap();
+    assert!(button(&sc, "A"), "A on East's fringe");
+    let mut l = layout_for(Some("West"));
+    l.routes[0].automatic = true;
+    l.routes.retain(|r| r.entrance != "W2");
+    let sc = Scene::build(&l).unwrap();
+    assert!(!button(&sc, "W1"), "W1 is permanently automatic");
+    assert!(!button(&sc, "W2"), "W2 starts no route");
+    assert!(button(&sc, "A"));
+}
+
 #[test]
 fn exits_know_their_fringe_and_routes() {
     let sc = Scene::build(&layout_for(Some("West"))).unwrap();

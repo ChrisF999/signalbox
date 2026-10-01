@@ -80,17 +80,18 @@ fn a_spectator_cannot_click_an_exit_marker() {
 
 #[test]
 fn the_auto_button_is_its_own_target() {
-    let mut l = layout_for(Some("West"));
-    l.routes[0].automatic = true;
-    let sc = Scene::build(&l).unwrap();
-    let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 600.0));
-    let cam = Camera::fit(sc.all.unwrap(), screen);
+    let (sc, cam, screen) = setup(Some("West"));
     let w1 = sc.signals.iter().find(|s| s.name == "W1").unwrap();
-    let c = auto_button(&cam, screen, w1).expect("W1 has an automatic route");
+    let c = auto_button(&cam, screen, w1).expect("W1 is a controlled signal with a route");
     assert_eq!(c, signal_disc(&cam, screen, w1) + vec2(AUTO_AHEAD_PX, 0.0));
     assert_eq!(hit_test(&sc, None, &cam, screen, c), hit(Target::Auto(s("W1")), true));
     assert_eq!(hit_test(&sc, None, &cam, screen, signal_disc(&cam, screen, w1)), hit(Target::Signal(s("W1")), true));
-    assert_eq!(auto_button(&cam, screen, sc.signals.iter().find(|s| s.name == "A").unwrap()), None);
+    let mut l = layout_for(Some("West"));
+    l.routes[0].automatic = true;
+    let sc = Scene::build(&l).unwrap();
+    let w1 = sc.signals.iter().find(|s| s.name == "W1").unwrap();
+    assert_eq!(auto_button(&cam, screen, w1), None, "W1 is permanently automatic");
+    assert_ne!(hit_test(&sc, None, &cam, screen, c).map(|h| h.target), Some(Target::Auto(s("W1"))));
 }
 
 /// C turned to face away from P, about 20 px past it: its berth, in the
@@ -129,12 +130,10 @@ fn an_empty_berth_never_hides_points_or_an_exit() {
 fn a_fringe_or_spectators_auto_button_is_not_clickable() {
     let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 600.0));
     for area in [Some("East"), None] {
-        let mut l = layout_for(area);
-        l.routes.iter_mut().filter(|r| r.entrance == "A").for_each(|r| r.automatic = true);
-        let sc = Scene::build(&l).unwrap();
+        let sc = Scene::build(&layout_for(area)).unwrap();
         let cam = Camera::fit(sc.all.unwrap(), screen);
         let a = sc.signals.iter().find(|s| s.name == "A").unwrap();
-        let c = auto_button(&cam, screen, a).expect("A has an automatic route");
+        let c = auto_button(&cam, screen, a).expect("A is a controlled signal with routes");
         assert_eq!(hit_test(&sc, None, &cam, screen, c), hit(Target::Auto(s("A")), false), "{area:?}");
     }
 }

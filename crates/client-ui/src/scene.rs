@@ -4,6 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use client_core::select;
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 use protocol::{ExitName, Layout};
 
@@ -62,8 +63,11 @@ pub struct SignalMark {
     pub facing: Vec2,
     pub fringe: bool,
     pub operable: bool,
-    /// Automatic routes starting here (an "A" is drawn, lit while one auto-works).
+    /// Automatic routes starting here: a permanently automatic signal, drawn
+    /// with a dashed post.
     pub auto_routes: Vec<String>,
+    /// Has a ○A button beside it: a controlled signal that starts a route.
+    pub auto_button: bool,
     /// Ends a route you can set, so it takes the click that sets it even on the fringe.
     pub route_exit: bool,
 }
@@ -249,6 +253,7 @@ impl Scene {
                 fringe: other_area(&info.area),
                 operable: info.operable,
                 auto_routes: l.routes.iter().filter(|r| r.automatic && r.entrance == s.signal).map(|r| r.name.clone()).collect(),
+                auto_button: select::has_auto_button(l, &s.signal),
                 route_exit: exit_of_yours(&ExitName::Signal(s.signal.clone())),
             });
             for b in l.berths.iter().filter(|b| b.signal.as_deref() == Some(s.signal.as_str())) {
