@@ -174,7 +174,9 @@ pub struct UiApp {
     ticks_store: Option<Box<dyn SettingsStore>>,
 }
 
-type PlacementKey = (String, u64, u32, bool);
+/// (game, layout generation, scale bits, numbers on, the lesson's highlights:
+/// a highlight ring is kept clear, polish spec M16).
+type PlacementKey = (String, u64, u32, bool, Vec<Highlight>);
 
 impl UiApp {
     pub fn new(core: App) -> UiApp {
@@ -1092,7 +1094,7 @@ impl UiApp {
             highlight: &highlight,
         };
         let d = paint::draw(scene, &cam, rect, &st);
-        let key = (g.id.clone(), g.layout_gen(), cam.scale.to_bits(), self.settings.numbers);
+        let key = (g.id.clone(), g.layout_gen(), cam.scale.to_bits(), self.settings.numbers, highlight.clone());
         if self.placement.as_ref().is_none_or(|(k, p)| *k != key || p.spots.len() != d.movable.len()) {
             let plan = ui.ctx().fonts_mut(|f| {
                 labels::plan(&d, &mut |t| f.layout_no_wrap(t.text.clone(), paint::font(t), t.colour).size())

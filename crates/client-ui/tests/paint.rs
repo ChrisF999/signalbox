@@ -756,7 +756,7 @@ fn a_lesson_highlight_outlines_what_it_names_and_pulses() {
         (Highlight::Signal(s("W1")), 1),
         (Highlight::Exit(ExitName::Signal(s("A"))), 1),
         (Highlight::Exit(ExitName::Node(s("E"))), 1),
-        (Highlight::Points(s("P")), 1),
+        (Highlight::Points(s("P")), 6),
         (Highlight::Berth(s("BA")), 1),
         (Highlight::Section(s("TW2")), 2),
         (Highlight::Section(s("TP")), 6),
@@ -775,9 +775,9 @@ fn a_lesson_highlight_outlines_what_it_names_and_pulses() {
     let d = with(&[Highlight::Signal(s("W1"))], 0.0);
     let Shape::Circle(c) = highlighted(&d)[0] else { panic!() };
     assert!(close(c.center, signal_disc(&r.cam, screen(), w1)), "round the lamp");
-    // 1 Hz between a third and full strength.
+    // 1 Hz between 60 % and full strength (polish spec M16).
     assert_eq!(highlight_colour(0.25).a(), 255);
-    assert_eq!(highlight_colour(0.75).a(), 89);
+    assert_eq!(highlight_colour(0.75).a(), 153);
     assert_eq!(highlight_colour(1.25), highlight_colour(0.25));
 }
 
@@ -916,4 +916,75 @@ fn signal_glyphs_grow_when_zoomed_in() {
     assert!(circles(&d).iter().any(|k| close(k.0, r.disc("W1")) && k.1 == LAMP_R * 2.0), "{:?}", circles(&d));
     let n = d.texts.iter().find(|t| t.text == "TAW1").unwrap();
     assert_eq!(n.size, NUMBER_MAX_PX * 2.0);
+}
+
+/// Polish spec M16: a highlight is drawn over a black underlay, a points
+/// highlight outlines the legs (no ring takes in the signals beside them),
+/// and a signal's ring is kept clear so the placer moves its number off it.
+#[test]
+fn highlights_stand_out_and_keep_clear_of_labels() {
+    use client_ui::labels::{Role, plan};
+    let r = Rig::new(Some("West"));
+    let with = |h: &[Highlight]| {
+        let st = PaintState {
+            view: Some(&r.view),
+            selected: None,
+            exits: &[],
+            refused: None,
+            blocking: None,
+            time: 0.0,
+            aspects: AspectMode::RedGreen,
+            numbers: true,
+            names: &r.names,
+            highlight: h,
+        };
+        draw(&r.sc, &r.cam, screen(), &st)
+    };
+    let d = with(&[Highlight::Points("P".into())]);
+    assert!(highlighted(&d).iter().all(|s| matches!(s, Shape::LineSegment { .. })), "legs, no ring");
+    let under = d
+        .shapes
+        .iter()
+        .filter(|s| matches!(s, Shape::LineSegment { stroke, .. } if stroke.color == BG && stroke.width == HIGHLIGHT_W + HIGHLIGHT_UNDER_PX))
+        .count();
+    assert_eq!(under, 6, "a black line under each");
+    let d = with(&[Highlight::Signal("W1".into())]);
+    let ring = d.keep.rounds.iter().find(|(c, rad)| close(*c, r.disc("W1")) && *rad > LAMP_R + HIGHLIGHT_GAP_PX).copied();
+    assert!(ring.is_some(), "the ring is kept clear");
+    let p = plan(&d, &mut |t| vec2(t.text.chars().count() as f32 * 6.0, 10.0));
+    let w1 = d.movable.iter().position(|m| m.role == Role::Number && d.texts[m.text].text == "TAW1").unwrap();
+    let (off, anchor) = p.spots[w1].expect("drawn");
+    let t = &d.texts[d.movable[w1].text];
+    let at = anchor.anchor_size(t.at + off, vec2(24.0, 10.0));
+    assert!(!client_ui::labels::touches_round(at, ring.unwrap()), "TAW1 moved off the ring: {at:?}");
+}
+
+/// Polish spec M16 with Tasks 2 and 19: a highlight follows the drawn sizes,
+/// the lamp as it grows with the zoom and the berth box as wide as its text.
+#[test]
+fn highlights_follow_the_drawn_lamp_and_berth_box() {
+    use client_ui::hit::berth_box;
+    let mut r = Rig::new(Some("West"));
+    r.cam.scale = GLYPH_FROM_SCALE * 2.0;
+    let st = |h: &'static [Highlight]| PaintState {
+        view: Some(&r.view),
+        selected: None,
+        exits: &[],
+        refused: None,
+        blocking: None,
+        time: 0.0,
+        aspects: AspectMode::RedGreen,
+        numbers: true,
+        names: &r.names,
+        highlight: h,
+    };
+    let d = draw(&r.sc, &r.cam, screen(), &st(Box::leak(Box::new([Highlight::Signal("W1".into())]))));
+    let want = LAMP_R * 2.0 + HIGHLIGHT_GAP_PX + 4.0;
+    let Shape::Circle(c) = highlighted(&d)[0] else { panic!() };
+    assert!(close(c.center, r.disc("W1")) && c.radius == want, "ring {c:?}");
+    assert!(d.keep.rounds.iter().any(|&(p, rad)| close(p, r.disc("W1")) && rad == want + HIGHLIGHT_W));
+    let berth = r.sc.berths.iter().find(|m| m.name == "BA").unwrap();
+    let d = draw(&r.sc, &r.cam, screen(), &st(Box::leak(Box::new([Highlight::Berth("BA".into())]))));
+    let Shape::Rect(b) = highlighted(&d)[0] else { panic!() };
+    assert_eq!(b.rect, berth_box(&r.cam, screen(), berth).expand(HIGHLIGHT_GAP_PX - 2.0));
 }

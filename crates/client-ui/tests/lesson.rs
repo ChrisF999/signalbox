@@ -321,6 +321,28 @@ fn a_showing_highlight_repaints_often_enough_to_pulse() {
     assert!(delay(&out) <= std::time::Duration::from_millis(50), "{:?}", delay(&out));
 }
 
+/// Polish spec M16: a highlight ring is kept clear, so the placement cache is
+/// keyed by the highlights: the number moves off the ring while it shows and
+/// is back where it was once the highlight is gone.
+#[test]
+fn a_highlight_moves_the_number_off_its_ring_and_back() {
+    let mut r = Rig::in_lesson("02-setting-routes");
+    let show = |r: &mut Rig, h: Vec<Highlight>| {
+        let mut v = r.ui.core.game().unwrap().lesson().unwrap().clone();
+        v.highlight = h;
+        r.h.push(ServerFrame::Game(ServerMsg::Lesson(v)));
+        r.frame();
+        let out = r.frame();
+        texts(&out).into_iter().filter(|(t, _)| t.starts_with("H") && t.len() <= 3).collect::<Vec<_>>()
+    };
+    let plain = show(&mut r, vec![]);
+    let lit = show(&mut r, vec![Highlight::Signal(s("3"))]);
+    let again = show(&mut r, vec![]);
+    assert!(!plain.is_empty());
+    assert_ne!(plain, lit, "a number moved off the ring");
+    assert_eq!(plain, again, "and back when it is gone");
+}
+
 #[test]
 fn leave_in_the_lesson_box_goes_back_to_the_lobby() {
     let mut r = Rig::in_lesson("02-setting-routes");

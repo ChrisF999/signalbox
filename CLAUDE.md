@@ -366,6 +366,10 @@ output is byte-identical for the same input.
 - Points show which way they lie (polish spec M12, U17): the non-lying leg, and a crossover's middle while no end lies
   over it (`paint::unused_crossovers`), are drawn at `UNUSED_W` (0.4) of the current track width; the leg moving points
   swing to blinks its first half at 2 Hz (only moving points flash). Labels still keep clear of the full width.
+- Tutorial highlights (polish spec M16, U22): the pulse runs 60-100 % (`paint::HIGHLIGHT_MIN_ALPHA`) and every stroke sits
+  over a black one 2 px wider (`HIGHLIGHT_UNDER_PX`); a points highlight outlines the legs, not a ring round the
+  signals beside them; rings join `keep.rounds` so numbers move off them, and `UiApp`'s plan cache key holds the
+  lesson's highlights (the repaint rate while one shows is unchanged).
 - The lobby (polish spec M14, M15): who you are and Sign out (`UiApp::wants_logout`, followed by `client-web`), layouts
   by title with the areas file's `description` (the front reads only area names, title and `layout.description`,
   leniently: a malformed one is shown empty), By and Last played, and a form checked as typed (`client_core::form`).

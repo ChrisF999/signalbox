@@ -38,6 +38,11 @@ pub const HIGHLIGHT: Color32 = Color32::from_rgb(0xFF, 0x8C, 0x1A);
 /// The highlight's outline: this wide, and this far round what it marks.
 pub const HIGHLIGHT_W: f32 = 2.5;
 pub const HIGHLIGHT_GAP_PX: f32 = 5.0;
+/// The pulse's weakest strength (polish spec M16).
+pub const HIGHLIGHT_MIN_ALPHA: f64 = 0.6;
+/// Each highlight stroke is drawn over a black one this much wider, so it
+/// stands out on ochre platforms and grey track alike (polish spec M16).
+pub const HIGHLIGHT_UNDER_PX: f32 = 2.0;
 
 /// Track width: this many pixels per layout unit, within the limits.
 pub const TRACK_UNITS: f32 = 9.0;
@@ -149,11 +154,12 @@ pub fn blink_on(time: f64) -> bool {
     (time * 4.0).floor().rem_euclid(2.0) == 0.0
 }
 
-/// A tutorial highlight's colour at `time`: a calm 1 Hz pulse between a
-/// third and full strength (tutorial spec §4: UI, not panel state).
+/// A tutorial highlight's colour at `time`: a calm 1 Hz pulse between 60 %
+/// and full strength (tutorial spec §4: UI, not panel state; polish spec
+/// M16: never a dim brown).
 pub fn highlight_colour(time: f64) -> Color32 {
     let k = 0.5 + 0.5 * (time * std::f64::consts::TAU).sin();
-    let a = (255.0 * (0.35 + 0.65 * k)).round().clamp(0.0, 255.0) as u8;
+    let a = (255.0 * (HIGHLIGHT_MIN_ALPHA + (1.0 - HIGHLIGHT_MIN_ALPHA) * k)).round().clamp(0.0, 255.0) as u8;
     Color32::from_rgba_unmultiplied(HIGHLIGHT.r(), HIGHLIGHT.g(), HIGHLIGHT.b(), a)
 }
 
@@ -656,9 +662,18 @@ fn highlight_shapes(d: &mut Drawing, scene: &Scene, cam: &Camera, screen: Rect, 
     let stroke = Stroke::new(HIGHLIGHT_W, colour);
     let to = |p: Pos2| cam.to_screen(screen, p);
     let w = track_w(cam.scale);
-    let ring = |d: &mut Drawing, c: Pos2, r: f32| d.shapes.push(Shape::circle_stroke(c, r, stroke));
+    let under = Stroke::new(HIGHLIGHT_W + HIGHLIGHT_UNDER_PX, BG);
+    // A ring is kept clear of texts too: the placer moves a number off it
+    // (polish spec M16).
+    let ring = |d: &mut Drawing, c: Pos2, r: f32| {
+        d.shapes.push(Shape::circle_stroke(c, r, under));
+        d.shapes.push(Shape::circle_stroke(c, r, stroke));
+        d.keep.rounds.push((c, r + HIGHLIGHT_W));
+    };
     let boxed = |d: &mut Drawing, r: Rect| {
-        d.shapes.push(Shape::rect_stroke(r.expand(HIGHLIGHT_GAP_PX - 2.0), CornerRadius::same(2), stroke, StrokeKind::Outside));
+        let r = r.expand(HIGHLIGHT_GAP_PX - 2.0);
+        d.shapes.push(Shape::rect_stroke(r, CornerRadius::same(2), under, StrokeKind::Outside));
+        d.shapes.push(Shape::rect_stroke(r, CornerRadius::same(2), stroke, StrokeKind::Outside));
     };
     // Both sides of a bar, clear of it.
     let along = |d: &mut Drawing, a: Pos2, b: Pos2| {
@@ -668,6 +683,7 @@ fn highlight_shapes(d: &mut Drawing, scene: &Scene, cam: &Camera, screen: Rect, 
         }
         let n = vec2(-v.y, v.x).normalized() * (w / 2.0 + HIGHLIGHT_GAP_PX);
         for side in [n, -n] {
+            d.shapes.push(Shape::line_segment([a + side, b + side], under));
             d.shapes.push(Shape::line_segment([a + side, b + side], stroke));
         }
     };
@@ -684,9 +700,13 @@ fn highlight_shapes(d: &mut Drawing, scene: &Scene, cam: &Camera, screen: Rect, 
                     boxed(d, Rect::from_center_size(to(e.at), vec2(7.0, 7.0)));
                 }
             }
+            // Points: their legs outlined, not a ring that takes in the
+            // signals beside them (polish spec M16).
             Highlight::Points(p) => {
                 if let Some(m) = scene.points.iter().find(|m| m.name == *p) {
-                    ring(d, to(m.at), w + HIGHLIGHT_GAP_PX * 2.0);
+                    for leg in [m.toe, m.normal, m.reverse].into_iter().flatten() {
+                        along(d, to(m.at), to(leg));
+                    }
                 }
             }
             Highlight::Berth(b) => {
