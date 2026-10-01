@@ -206,7 +206,13 @@ output is byte-identical for the same input.
   front connects (a `Status` with `preparing` every second, the front's
   frames held until ready) within 60 s real time (`process::SEED_BUDGET`;
   `--seed-budget-ms` for tests), else it exits 3 and the lobby gets
-  `seed_too_slow`. A create that fails while being prepared is not listed.
+  `seed_too_slow`. Any other failure while preparing exits 4
+  (`EXIT_NOT_PREPARED`, error prefix `preparing failed`); a stop (Shutdown,
+  SIGTERM) exits 0 with no save. Either way the create is not listed: the
+  front removes the half-built save and sends `not_created` (or
+  `seed_too_slow`). The front sweeps stale `*.sqlite.seeding*` at startup;
+  more than `MAX_HELD` (1000) front frames while preparing fail the create.
+  The budget is per game: several big seeds at once share the CPU.
   Cost (release): Liverpool St 05:00→23:00 about 9 s (`--test seed_timing`).
 - Saves are WAL with `synchronous=NORMAL` (a power cut may lose the last
   moments; the owner accepted that). Every command is logged before
@@ -245,7 +251,7 @@ output is byte-identical for the same input.
   `tests/oidc.rs` runs a small OpenID provider in the test.
 - The front stops accepting connections before it shuts the games down; game
   children run in their own process group, so a terminal's Ctrl-C reaches only
-  the front. Names are refused when they are `robot`. `/` redirects (303) to
+  the front. Names are refused when they are `robot` or `seed` (any case: `is_reserved`). `/` redirects (303) to
   `/auth/login`, `/ws` and the web client's files under `/app/` are 401
   without a session, `/auth/dev` is 404 in the release build, `/auth/login`
   is 303 to the provider or 503 if it is unreachable.
