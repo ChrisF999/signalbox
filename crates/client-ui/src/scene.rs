@@ -203,7 +203,10 @@ impl Scene {
         let mut sc = Scene::default();
         // Every berth box fits the longest headcode the layout books, as it is
         // displayed (spec P18: the WTT's `202/163` shows as `202`).
-        let chars = l.simplifier.iter().map(|r| shown_headcode(&l.display_headcodes, &r.headcode).chars().count()).max().unwrap_or(0).max(4);
+        // The simplifier is this area's; `display_headcodes` spans the whole
+        // world, so a train only passing through is covered when it differs.
+        let rows = l.simplifier.iter().map(|r| shown_headcode(&l.display_headcodes, &r.headcode).chars().count());
+        let chars = rows.chain(l.display_headcodes.values().map(|d| d.chars().count())).max().unwrap_or(0).max(4);
         let berth_w = crate::hit::berth_width(chars);
         for line in &g.lines {
             let (Some(a), Some(b), Some(&(section, from, to))) = (pt(line.x1, line.y1), pt(line.x2, line.y2), seg_of.get(line.segment.as_str()))

@@ -54,7 +54,9 @@ pub const HEADCODE_CHAR_PX: f32 = 6.7;
 pub const BERTH_PAD_PX: f32 = 6.0;
 
 /// A berth box wide enough for headcodes of `chars` characters, never
-/// narrower than `BERTH_W` (Gretz's are 7 or 8 characters long).
+/// narrower than `BERTH_W` (Gretz's are up to 8 characters long). The scene
+/// sizes by this area's simplifier and the world's display headcodes; the raw
+/// headcode of a non-calling service outside both can still overflow.
 pub fn berth_width(chars: usize) -> f32 {
     BERTH_W.max(chars as f32 * HEADCODE_CHAR_PX + BERTH_PAD_PX)
 }

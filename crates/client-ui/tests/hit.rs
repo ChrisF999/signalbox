@@ -25,6 +25,22 @@ fn hit(t: Target, clickable: bool) -> Option<Hit> {
 }
 
 #[test]
+fn a_click_in_the_widened_part_of_a_berth_box_hits_the_berth() {
+    use client_ui::hit::{BERTH_W, berth_box, berth_width};
+    let mut l = layout_for(Some("West"));
+    l.simplifier.push(protocol::SimplifierRow { headcode: "W118400".into(), origin: None, destination: None, calls: vec![] });
+    let sc = Scene::build(&l).unwrap();
+    let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 600.0));
+    let cam = Camera::fit(sc.all.unwrap(), screen);
+    let b = sc.berths.iter().find(|b| b.name == "BA").unwrap();
+    assert!(b.width_px > BERTH_W && b.width_px == berth_width(7));
+    let r = berth_box(&cam, screen, b);
+    let p = pos2(r.left() + 1.0, r.center().y);
+    assert!(p.x < r.center().x - BERTH_W / 2.0, "outside a BERTH_W box");
+    assert_eq!(hit_test(&sc, None, &cam, screen, p), hit(Target::Berth(s("BA")), true));
+}
+
+#[test]
 fn signals_berths_exits_points_and_track() {
     let (sc, cam, screen) = setup(Some("West"));
     assert_eq!(hit_test(&sc, None, &cam, screen, at(&cam, screen, 200.0, -5.0)), hit(Target::Signal(s("A")), true));

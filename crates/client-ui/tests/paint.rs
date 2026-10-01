@@ -811,7 +811,7 @@ fn a_numbers_other_spots_hug_the_track_then_mirror_it() {
     assert!(with_auto[1].0.x >= disc.x + client_ui::hit::AUTO_AHEAD_PX + AUTO_R);
 }
 
-/// Gretz's headcodes are 7 characters: every berth box fits the longest
+/// Gretz's headcodes are up to 8 characters; this uses 7: every berth box fits the longest
 /// headcode the layout books, and never shrinks below `BERTH_W`.
 #[test]
 fn berth_boxes_fit_the_longest_headcode() {
@@ -836,4 +836,15 @@ fn berth_boxes_fit_display_headcodes() {
     l.display_headcodes.insert(s("202/163"), s("202"));
     let sc = Scene::build(&l).unwrap();
     assert!(sc.berths.iter().all(|b| b.width_px == BERTH_W), "`202`, not `202/163`");
+}
+
+/// A train only passing through (absent from this area's simplifier) is
+/// still covered when the world's display headcodes show it.
+#[test]
+fn berth_boxes_fit_the_worlds_display_headcodes() {
+    use client_ui::hit::berth_width;
+    let mut l = layout_for(Some("West"));
+    l.display_headcodes.insert(s("X/1"), s("W1184000"));
+    let sc = Scene::build(&l).unwrap();
+    assert!(sc.berths.iter().all(|b| b.width_px == berth_width(8)));
 }
