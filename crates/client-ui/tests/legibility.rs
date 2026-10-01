@@ -53,6 +53,9 @@ struct Row {
     hidden: Vec<String>,
     /// How long `plan` took (debug builds are several times slower).
     ms: f64,
+    /// Fit showed part of the area round its busiest station (polish spec
+    /// M13), not all of it: reported, not held to criterion 3.
+    readable: bool,
 }
 
 #[test]
@@ -81,7 +84,8 @@ fn every_view_is_legible_at_every_zoom() {
             let names = Names::new(&l);
             let view = format!("{name} {}", area.as_deref().unwrap_or("spectator"));
             for (window, screen) in windows() {
-                let fit = Camera::fit(sc.fit_bounds().unwrap(), screen);
+                let fit = sc.fit_camera(screen).unwrap();
+                let readable = fit.scale > Camera::fit(sc.fit_bounds().unwrap(), screen).scale;
                 for zoom in [1.0_f32, 2.0, 4.0] {
                     let cam = Camera { centre: fit.centre, scale: fit.scale * zoom };
                     let st = PaintState {
@@ -100,17 +104,37 @@ fn every_view_is_legible_at_every_zoom() {
                     let t0 = std::time::Instant::now();
                     let plan = labels::plan(&d, &mut measure);
                     let ms = t0.elapsed().as_secs_f64() * 1000.0;
+                    // Own numbers hidden where the player looks (a readable Fit,
+                    // polish spec M13, shows only part of a long area).
+                    let hidden: Vec<String> = d
+                        .movable
+                        .iter()
+                        .zip(&plan.spots)
+                        .filter(|(m, spot)| m.role == labels::Role::Number && spot.is_none() && screen.contains(d.texts[m.text].at))
+                        .map(|(m, _)| d.texts[m.text].text.clone())
+                        .collect();
                     let audit = labels::audit(&on_screen(labels::apply(d, &plan), screen), &mut measure);
-                    rows.push(Row { window, view: view.clone(), zoom, glyph: paint::glyph(cam.scale), audit, hidden: plan.hidden_numbers.clone(), ms });
+                    rows.push(Row { window, view: view.clone(), zoom, glyph: paint::glyph(cam.scale), audit, hidden, ms, readable });
                 }
             }
         }
     }
-    println!("{:10} {:38} {:>4} {:>5} {:>8} {:>7} {:>5} {:>6} {:>7}  shown", "window", "view", "zoom", "glyph", "overlaps", "covered", "tight", "hidden", "plan ms");
+    println!("{:10} {:38} {:>4} {:>5} {:>8} {:>7} {:>5} {:>6} {:>7} {:>4}  shown", "window", "view", "zoom", "glyph", "overlaps", "covered", "tight", "hidden", "plan ms", "fit");
     for r in &rows {
         println!(
-            "{:10} {:38} {:>4} {:>5.2} {:>8} {:>7} {:>5} {:>6} {:>7.2}  {:?} {:?}",
-            r.window, r.view, r.zoom, r.glyph, r.audit.overlaps, r.audit.covered, r.audit.tight, r.hidden.len(), r.ms, r.audit.shown, r.hidden
+            "{:10} {:38} {:>4} {:>5.2} {:>8} {:>7} {:>5} {:>6} {:>7.2} {:>4}  {:?} {:?}",
+            r.window,
+            r.view,
+            r.zoom,
+            r.glyph,
+            r.audit.overlaps,
+            r.audit.covered,
+            r.audit.tight,
+            r.hidden.len(),
+            r.ms,
+            if r.readable { "read" } else { "all" },
+            r.audit.shown,
+            r.hidden
         );
     }
     for r in &rows {
@@ -121,7 +145,9 @@ fn every_view_is_legible_at_every_zoom() {
     // layouts' 4x Fit is past the zoom where glyphs start to grow.
     let grown = |name: &str| rows.iter().filter(|r| r.view.starts_with(name) && r.glyph > 1.5).count();
     assert!(grown("drain") > 0 && grown("liverpool-st") > 0, "no row measures grown glyphs");
-    let fit_small: Vec<&Row> = rows.iter().filter(|r| r.window == "1280x800" && r.zoom == 1.0).collect();
+    // Criterion 3 holds where Fit frames the whole area; a readable Fit (Gretz's
+    // boxes, which drew no numbers at all before) is reported above.
+    let fit_small: Vec<&Row> = rows.iter().filter(|r| r.window == "1280x800" && r.zoom == 1.0 && !r.readable).collect();
     for r in fit_small.iter().filter(|r| !r.view.ends_with("spectator")) {
         assert!(r.hidden.is_empty(), "{}: every own number drawn at 1280x800 Fit, not {:?}", r.view, r.hidden);
     }

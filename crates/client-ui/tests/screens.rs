@@ -1404,3 +1404,22 @@ fn fit_keeps_the_zoom_buttons_and_hint_clear_of_the_drawing() {
         assert!(top >= rect.min.y + band - 0.5 && bottom <= rect.max.y - band + 0.5, "{top} {bottom} in {rect:?}");
     }
 }
+
+/// Polish spec M13: Gretz's long areas are not a thin strip at Fit: Fit
+/// shows them at a readable scale round their busiest station; short areas
+/// and spectators still see everything.
+#[test]
+fn fit_keeps_a_long_area_readable() {
+    use client_ui::scene::FIT_MIN_SCALE;
+    let mut r = Rig::in_game(converted("gretz-armainvilliers"), Some("Gretz"));
+    r.frame();
+    let cam = r.ui.camera().unwrap();
+    let sc = client_ui::scene::Scene::build(r.ui.core.game().unwrap().layout().unwrap()).unwrap();
+    assert_eq!((cam.scale, Some(cam.centre)), (FIT_MIN_SCALE, sc.focus), "{cam:?}");
+    let mut r = Rig::in_game(converted("gretz-armainvilliers"), None);
+    r.frame();
+    assert!(r.ui.camera().unwrap().scale < FIT_MIN_SCALE, "a spectator sees the whole layout");
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    r.frame();
+    assert!(r.ui.camera().unwrap().scale > FIT_MIN_SCALE);
+}

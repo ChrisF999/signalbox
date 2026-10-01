@@ -9,6 +9,8 @@ use client_core::select;
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 use protocol::{ExitName, Layout};
 
+use crate::camera::Camera;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct TrackLine {
     pub segment: String,
@@ -148,7 +150,14 @@ pub struct Scene {
     pub own: Option<Rect>,
     /// Bounds of everything drawn.
     pub all: Option<Rect>,
+    /// Your area's busiest station (the most calls in your simplifier): the
+    /// middle of its platforms. `None` for a spectator (polish spec M13).
+    pub focus: Option<Pos2>,
 }
+
+/// Fit never shows a player's area smaller than this (pixels per layout
+/// unit), just above where signal numbers appear (polish spec M13).
+pub const FIT_MIN_SCALE: f32 = 0.55;
 
 /// Coordinates beyond this are nonsense and left out, so bounds, centres
 /// and fits stay finite.
@@ -372,13 +381,42 @@ impl Scene {
         for p in &sc.points {
             grow(&mut sc.all, p.at);
         }
+        sc.focus = busiest(l, &sc);
         Some(sc)
+    }
+
+    /// The "Fit" camera: your own area (or everything) framed in `screen`; a
+    /// player's area too long to read that way is shown at `FIT_MIN_SCALE`
+    /// round its busiest station instead (polish spec M13).
+    pub fn fit_camera(&self, screen: Rect) -> Option<Camera> {
+        let fit = Camera::fit(self.fit_bounds()?, screen);
+        Some(match self.focus {
+            Some(centre) if fit.scale < FIT_MIN_SCALE => Camera { centre, scale: FIT_MIN_SCALE },
+            _ => fit,
+        })
     }
 
     /// What "Fit" frames: your own area, or everything.
     pub fn fit_bounds(&self) -> Option<Rect> {
         self.own.or(self.all)
     }
+}
+
+/// The middle of the platforms of the place your simplifier calls at most
+/// (ties: the first in name order), among places with a platform in your own
+/// area; `None` for a spectator or with no such place.
+fn busiest(l: &Layout, sc: &Scene) -> Option<Pos2> {
+    let own = sc.own?;
+    l.area.as_ref()?;
+    let mut calls: BTreeMap<&str, usize> = BTreeMap::new();
+    for c in l.simplifier.iter().flat_map(|r| &r.calls) {
+        *calls.entry(c.place.as_str()).or_default() += 1;
+    }
+    let mine = |place: &str| -> Option<Rect> {
+        sc.platforms.iter().filter(|p| p.place == place && own.contains(p.rect.center())).map(|p| p.rect).reduce(|a, b| a.union(b))
+    };
+    let (place, _) = calls.iter().filter(|(p, _)| mine(p).is_some()).max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0)))?;
+    Some(mine(place)?.center())
 }
 
 /// Chain drawn lines into runs through plain joints, and give each run the

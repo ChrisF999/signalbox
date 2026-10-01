@@ -923,7 +923,7 @@ impl UiApp {
         // changes size while the player has not moved the view (polish spec H7).
         let resized = self.fit_size.is_some_and(|s| (s - rect.size()).length() > 0.5);
         if self.fitted.as_ref() != Some(&fit_key) || self.cam.is_none() || (resized && !self.cam_moved) {
-            self.cam = Some(scene.fit_bounds().map_or(Camera { centre: rect.center(), scale: 1.0 }, |b| Camera::fit(b, rect.shrink2(vec2(0.0, VIEW_BAND)))));
+            self.cam = Some(scene.fit_camera(rect.shrink2(vec2(0.0, VIEW_BAND))).unwrap_or(Camera { centre: rect.center(), scale: 1.0 }));
             self.fitted = Some(fit_key);
             self.cam_moved = false;
         }
