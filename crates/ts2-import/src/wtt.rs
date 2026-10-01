@@ -780,7 +780,12 @@ pub fn apply(w: &mut WorldFile, day: &[Trip]) -> Result<ApplyReport, WttError> {
     w.services = services;
     w.entries = entries;
     w.options.start_time = rep.start_time.clone();
+    // P20: the WTT's turnarounds need 20–30 s; TS2's delay bands would
+    // replace these ranges, and its trains enter on time.
     w.options.min_dwell_s = [20, 30];
+    w.options.min_dwell_bands.clear();
+    w.options.entry_delay_s = [0, 0];
+    w.options.entry_delay_bands.clear();
     World::from_file(w.clone()).map_err(|e| fail(format!("the world no longer loads: {e}")))?;
     Ok(rep)
 }

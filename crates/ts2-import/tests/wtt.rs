@@ -117,6 +117,11 @@ fn a_day_goes_into_drain() {
     assert_eq!((last.place.as_str(), last.stop, last.arr.as_deref()), ("WTL", false, Some("06:38:15")));
     assert!(matches!(svc("302/5").end, EndFile::Stable), "the last train in stables in platform 26");
     assert_eq!(w.options.start_time, "05:50:00");
+    // P20: 20–30 s dwell, and nothing drawn from TS2's delay bands (they would
+    // replace it); the WTT's trains enter on time.
+    let o = &w.options;
+    assert_eq!((o.min_dwell_s, o.entry_delay_s), ([20, 30], [0, 0]));
+    assert!(o.min_dwell_bands.is_empty() && o.entry_delay_bands.is_empty(), "{o:?}");
     let entry = |h: &str| w.entries.iter().find(|e| e.service == h).unwrap();
     assert_eq!((entry("301/1").time.as_str(), entry("301/1").at.as_ref().unwrap().segment.as_str()), ("05:50:00", "L1000021"));
     assert_eq!((entry("302/1").time.as_str(), entry("302/1").at.as_ref().unwrap().segment.as_str()), ("05:50:00", "L8"));
