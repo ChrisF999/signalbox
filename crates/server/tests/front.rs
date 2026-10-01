@@ -298,6 +298,11 @@ async fn precompressed_assets_follow_accept_encoding() {
         assert_eq!(r.header("vary"), Some("accept-encoding"), "{ae:?}");
         assert_eq!(r.header("cache-control"), Some("private, no-cache"), "{ae:?}");
     }
+    // A list split over several header lines counts as one.
+    let r = http_get_with(&f.base, wasm, &[("Cookie", &cookie), ("Accept-Encoding", "gzip"), ("Accept-Encoding", "br")]).await.unwrap();
+    assert_eq!((r.header("content-encoding"), r.body.as_bytes()), (Some("br"), WASM_BR));
+    let r = http_get_with(&f.base, wasm, &[("Cookie", &cookie), ("Accept-Encoding", "identity"), ("Accept-Encoding", "gzip")]).await.unwrap();
+    assert_eq!(r.header("content-encoding"), Some("gzip"));
     // One ETag per encoding; If-None-Match is checked against the one chosen.
     let br_tag = get(Some("br"), wasm).await.header("etag").unwrap().to_string();
     let gz_tag = get(Some("gzip"), wasm).await.header("etag").unwrap().to_string();

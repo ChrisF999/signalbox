@@ -303,10 +303,11 @@ async fn send_all(w: &mut OwnedWriteHalf, out: Vec<FromGame>) -> Result<(), ipc:
     Ok(())
 }
 
-/// Hand the heap's free pages back to the system. Opening a game frees
-/// several MB of parse buffers (the world JSON, its `WorldFile`) that glibc
-/// would otherwise keep for the life of the process: about 3 MB of RSS per
-/// Liverpool Street game. Elsewhere (musl, other systems) nothing.
+/// Hand the heap's free pages back to the system once the game is open.
+/// glibc already returns the large parse buffers (the world JSON is
+/// mmapped, the heap top is trimmed); this gets the free holes left in the
+/// heap, measured at about 0.2 MB for a Liverpool Street game. Elsewhere
+/// (musl, other systems) nothing.
 pub fn release_free_memory() {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     {

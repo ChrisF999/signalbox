@@ -135,8 +135,10 @@ async fn app_file(State(state): State<AppState>, jar: SignedCookieJar, Path(file
 /// to a browser that accepts it (`Vary: Accept-Encoding`), each with its
 /// own ETag.
 fn serve(a: &Asset, headers: &HeaderMap) -> Response {
-    let accept = headers.get(ACCEPT_ENCODING).and_then(|v| v.to_str().ok());
-    let (coding, body, etag) = a.negotiate(accept);
+    // The list may be split over several header lines.
+    let accept: Vec<&str> = headers.get_all(ACCEPT_ENCODING).iter().filter_map(|v| v.to_str().ok()).collect();
+    let accept = (!accept.is_empty()).then(|| accept.join(","));
+    let (coding, body, etag) = a.negotiate(accept.as_deref());
     let fresh = headers
         .get(IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())

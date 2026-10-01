@@ -183,6 +183,8 @@ fn peek_type(text: &str) -> Result<Cow<'_, str>, FrameError> {
         });
     }
     serde_json::from_str::<Tag>(text).map(|t| t.t).map_err(|e| match json_error(e) {
+        // "duplicate field `type`" says what is wrong; keep it.
+        FrameError::BadMessage(m) if m.contains("duplicate field") => FrameError::BadMessage(m),
         FrameError::BadMessage(_) => FrameError::BadMessage(NEEDS_TYPE.into()),
         bad_json => bad_json,
     })
@@ -196,7 +198,8 @@ fn read<'a, T: Deserialize<'a>>(text: &'a str) -> Result<T, FrameError> {
 
 impl ClientFrame {
     /// Read a frame: its `type` first, then the message it names (no
-    /// `Value` in between).
+    /// `Value` in between). A key given twice, the tag or any field, is
+    /// `bad_message` ("duplicate field"); `from_value` keeps the last one.
     pub fn from_json(text: &str) -> Result<ClientFrame, FrameError> {
         let t = peek_type(text)?;
         if LOBBY_MSG_TYPES.contains(&t.as_ref()) {
@@ -228,7 +231,8 @@ impl ServerFrame {
     /// Read a frame: its `type` first, then the message it names. A game
     /// message is read as its content type (`Layout`, `View`, ...), not
     /// through `ServerMsg`, whose tag would make serde buffer it all first:
-    /// a large layout reads several times faster.
+    /// a large layout reads several times faster. As for `ClientFrame`, a
+    /// key given twice is `bad_message`.
     pub fn from_json(text: &str) -> Result<ServerFrame, FrameError> {
         let t = peek_type(text)?;
         let game = |m| Ok(ServerFrame::Game(m));

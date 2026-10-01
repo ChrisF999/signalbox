@@ -221,9 +221,13 @@ fn frames_are_objects() {
     for text in ["", "{", r#"{"type": "join", "game": "g"#, r#"{"type": "resync"} x"#, "[1, 2"] {
         assert_eq!(ClientFrame::from_json(text).unwrap_err().code(), codes::BAD_JSON, "{text}");
     }
-    assert_eq!(
-        ClientFrame::from_json(r#"{"type": "resync", "type": "leave"}"#).unwrap_err().code(),
-        codes::BAD_MESSAGE,
-        "a repeated tag"
-    );
+    // A repeated key, the tag or any other, is a bad message that says so
+    // (the old `Value` path kept the last one).
+    for text in [r#"{"type": "resync", "type": "leave"}"#, r#"{"type": "join", "game": "a", "game": "b"}"#] {
+        let e = ClientFrame::from_json(text).unwrap_err();
+        assert_eq!(e.code(), codes::BAD_MESSAGE, "{text}");
+        assert!(e.to_string().contains("duplicate field"), "{text}: {e}");
+    }
+    let e = ServerFrame::from_json(r#"{"type": "delta", "seq": 1, "seq": 2}"#).unwrap_err();
+    assert!(matches!(&e, FrameError::BadMessage(m) if m.contains("duplicate field")), "{e}");
 }
