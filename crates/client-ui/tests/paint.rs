@@ -966,7 +966,38 @@ fn highlights_follow_the_drawn_lamp_and_berth_box() {
     use client_ui::hit::berth_box;
     let mut r = Rig::new(Some("West"));
     r.cam.scale = GLYPH_FROM_SCALE * 2.0;
-    let st = |h: &'static [Highlight]| PaintState {
+    fn st<'a>(r: &'a Rig, h: &'a [Highlight]) -> PaintState<'a> {
+        PaintState {
+            view: Some(&r.view),
+            selected: None,
+            exits: &[],
+            refused: None,
+            blocking: None,
+            time: 0.0,
+            aspects: AspectMode::RedGreen,
+            numbers: true,
+            names: &r.names,
+            highlight: h,
+        }
+    }
+    let d = draw(&r.sc, &r.cam, screen(), &st(&r, &[Highlight::Signal("W1".into())]));
+    let want = LAMP_R * 2.0 + HIGHLIGHT_GAP_PX + 4.0;
+    let Shape::Circle(c) = highlighted(&d)[0] else { panic!() };
+    assert!(close(c.center, r.disc("W1")) && c.radius == want, "ring {c:?}");
+    assert!(d.keep.rounds.iter().any(|&(p, rad)| close(p, r.disc("W1")) && rad == want + HIGHLIGHT_W));
+    let berth = r.sc.berths.iter().find(|m| m.name == "BA").unwrap();
+    let d = draw(&r.sc, &r.cam, screen(), &st(&r, &[Highlight::Berth("BA".into())]));
+    let Shape::Rect(b) = highlighted(&d)[0] else { panic!() };
+    assert_eq!(b.rect, berth_box(&r.cam, screen(), berth).expand(HIGHLIGHT_GAP_PX - 2.0));
+}
+
+/// Polish spec M16: every underlay is drawn before any highlight stroke, so
+/// where outlines cross no black notch is cut through an orange one.
+#[test]
+fn highlight_underlays_come_before_every_stroke() {
+    let r = Rig::new(Some("West"));
+    let h = [Highlight::Points("P".into()), Highlight::Signal("W1".into()), Highlight::Section("TP".into())];
+    let st = PaintState {
         view: Some(&r.view),
         selected: None,
         exits: &[],
@@ -976,15 +1007,17 @@ fn highlights_follow_the_drawn_lamp_and_berth_box() {
         aspects: AspectMode::RedGreen,
         numbers: true,
         names: &r.names,
-        highlight: h,
+        highlight: &h,
     };
-    let d = draw(&r.sc, &r.cam, screen(), &st(Box::leak(Box::new([Highlight::Signal("W1".into())]))));
-    let want = LAMP_R * 2.0 + HIGHLIGHT_GAP_PX + 4.0;
-    let Shape::Circle(c) = highlighted(&d)[0] else { panic!() };
-    assert!(close(c.center, r.disc("W1")) && c.radius == want, "ring {c:?}");
-    assert!(d.keep.rounds.iter().any(|&(p, rad)| close(p, r.disc("W1")) && rad == want + HIGHLIGHT_W));
-    let berth = r.sc.berths.iter().find(|m| m.name == "BA").unwrap();
-    let d = draw(&r.sc, &r.cam, screen(), &st(Box::leak(Box::new([Highlight::Berth("BA".into())]))));
-    let Shape::Rect(b) = highlighted(&d)[0] else { panic!() };
-    assert_eq!(b.rect, berth_box(&r.cam, screen(), berth).expand(HIGHLIGHT_GAP_PX - 2.0));
+    let d = draw(&r.sc, &r.cam, screen(), &st);
+    let wide = HIGHLIGHT_W + HIGHLIGHT_UNDER_PX;
+    let is_under = |s: &Shape| match s {
+        Shape::Circle(c) => c.stroke.color == BG && c.stroke.width == wide,
+        Shape::LineSegment { stroke, .. } => stroke.color == BG && stroke.width == wide,
+        _ => false,
+    };
+    let lit = |s: &Shape| highlighted(&Drawing { shapes: vec![s.clone()], ..Default::default() }).len() == 1;
+    let last_under = d.shapes.iter().rposition(is_under).expect("underlays");
+    let first_stroke = d.shapes.iter().position(lit).expect("strokes");
+    assert!(last_under < first_stroke, "underlay {last_under} after stroke {first_stroke}");
 }

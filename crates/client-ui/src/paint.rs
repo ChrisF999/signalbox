@@ -658,6 +658,7 @@ fn highlight_shapes(d: &mut Drawing, scene: &Scene, cam: &Camera, screen: Rect, 
     if st.highlight.is_empty() {
         return;
     }
+    let first = d.shapes.len();
     let colour = highlight_colour(st.time);
     let stroke = Stroke::new(HIGHLIGHT_W, colour);
     let to = |p: Pos2| cam.to_screen(screen, p);
@@ -736,6 +737,18 @@ fn highlight_shapes(d: &mut Drawing, scene: &Scene, cam: &Camera, screen: Rect, 
             }
         }
     }
+    // Every underlay first, then every stroke, so no underlay cuts a notch
+    // through another highlight's stroke where they cross.
+    let lit = d.shapes.split_off(first);
+    let is_under = |s: &Shape| match s {
+        Shape::Circle(c) => c.stroke.color == BG,
+        Shape::Rect(r) => r.stroke.color == BG,
+        Shape::LineSegment { stroke, .. } => stroke.color == BG,
+        _ => false,
+    };
+    let (under, over): (Vec<Shape>, Vec<Shape>) = lit.into_iter().partition(is_under);
+    d.shapes.extend(under);
+    d.shapes.extend(over);
 }
 
 /// Put a drawing on screen.

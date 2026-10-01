@@ -130,9 +130,9 @@ All of it is client-ui drawing; nothing else changes.
    - Headcodes are never moved or hidden: they are state. Their knock-out boxes (kept clear) are as wide
      as the layout's longest booked headcode as displayed (P13, P18).
 3. **Static and cached (P3).** `plan` sees no train state (headcodes are not inputs; every berth box is kept
-   clear), and no screen edge, so its result depends only on the scene, the scale and the numbers setting.
-   `UiApp` caches the decisions under (game, layout generation, scale, numbers on/off) and re-plans only on
-   a zoom or a settings change. Texts that a later feature pushes without placement data (for example the
+   clear), and no screen edge, so its result depends only on the scene, the scale, the numbers setting and the lesson's highlights (M16:
+   a highlight ring is kept clear). `UiApp` caches the decisions under (game, layout generation, scale,
+   numbers on/off, highlights) and re-plans only on a zoom, a settings change or a new lesson highlight. Texts that a later feature pushes without placement data (for example the
    tutorial's highlights) are drawn as they are.
 4. **Measuring text.** `screens.rs` measures with the frame's fonts (`ctx.fonts_mut(… layout_no_wrap …)`);
    tests use either the same egui fonts (legibility test) or a fixed-advance measure (unit tests).
