@@ -110,6 +110,9 @@ struct NewGame {
     layout: usize,
     /// 0: watch; `i + 1`: claim the layout's area `i` (polish spec H2).
     area: usize,
+    /// The layout `area` was chosen in: another layout puts it back to watch
+    /// (final review M4).
+    area_of: String,
     seed: String,
     start: String,
 }
@@ -373,6 +376,10 @@ impl UiApp {
                 });
                 // Where the creator starts (polish spec H2): an area to signal, or watching.
                 let mine = &chosen.areas;
+                if self.new_game.area_of != chosen.name {
+                    self.new_game.area_of = chosen.name.clone();
+                    self.new_game.area = 0;
+                }
                 self.new_game.area = self.new_game.area.min(mine.len());
                 let area = |i: usize| if i == 0 { "watch".to_string() } else { mine[i - 1].clone() };
                 ui.label("Signal");
@@ -421,52 +428,61 @@ impl UiApp {
         }
         let mut join = None;
         let mut delete = None;
-        egui::Grid::new("games").striped(true).show(ui, |ui| {
-            for h in ["Game", "Layout", "By", "Last played", "State", "Time", "Areas", "Players", ""] {
-                ui.label(RichText::new(h).strong());
-            }
-            ui.end_row();
-            for g in &games {
-                ui.label(&g.id);
-                let title = layouts.iter().find(|l| l.name == g.layout).map(|l| l.title.as_str()).filter(|t| !t.is_empty());
-                ui.label(title.unwrap_or(&g.layout));
-                ui.label(g.creator.as_deref().unwrap_or("\u{2014}"));
-                ui.label(g.last_played.map(client_core::form::utc).unwrap_or_default());
-                let state = match g.state {
-                    GameState::Running if g.preparing.is_some() => {
-                        g.preparing.as_ref().map(client_core::text::preparing_text).unwrap_or_default()
-                    }
-                    GameState::Running => "running".to_string(),
-                    GameState::Saved => "saved".to_string(),
-                    GameState::Crashed => format!("crashed: {}", g.error.as_deref().unwrap_or("?")),
-                };
-                ui.label(state);
-                ui.label(fmt_hms(g.sim_time));
-                let areas: Vec<String> =
-                    g.areas.iter().map(|a| format!("{} ({})", a.name, a.holder.as_deref().unwrap_or("robot"))).collect();
-                ui.label(areas.join(", "));
-                ui.label(g.players.join(", "));
-                ui.horizontal(|ui| {
-                    if ui.button(if g.state == GameState::Running { "Join" } else { "Resume" }).clicked() {
-                        join = Some(g.id.clone());
-                    }
-                    // Owner decision 13: the front re-checks all of it.
-                    if g.can_delete {
-                        if self.confirm_delete.as_deref() == Some(g.id.as_str()) {
-                            ui.label(RichText::new("Delete for good?").color(ALARM));
-                            if ui.button("Yes, delete").clicked() {
-                                delete = Some(g.id.clone());
-                            }
-                            if ui.button("Cancel").clicked() {
-                                self.confirm_delete = None;
-                            }
-                        } else if ui.button("Delete").clicked() {
-                            self.confirm_delete = Some(g.id.clone());
-                        }
-                    }
-                });
+        // The actions lead each row so they stay in a laptop window however long
+        // the other cells grow (final review I1); the table scrolls sideways
+        // when it is still wider than the column.
+        egui::ScrollArea::horizontal().id_salt("games_wide").show(ui, |ui| {
+            egui::Grid::new("games").striped(true).show(ui, |ui| {
+                for h in ["", "Game", "Layout", "By", "Last played", "State", "Time", "Areas", "Players"] {
+                    ui.label(RichText::new(h).strong());
+                }
                 ui.end_row();
-            }
+                for g in &games {
+                    ui.horizontal(|ui| {
+                        if ui.button(if g.state == GameState::Running { "Join" } else { "Resume" }).clicked() {
+                            join = Some(g.id.clone());
+                        }
+                        // Owner decision 13: the front re-checks all of it.
+                        if g.can_delete {
+                            if self.confirm_delete.as_deref() == Some(g.id.as_str()) {
+                                ui.label(RichText::new("Delete for good?").color(ALARM));
+                                if ui.button("Yes, delete").clicked() {
+                                    delete = Some(g.id.clone());
+                                }
+                                if ui.button("Cancel").clicked() {
+                                    self.confirm_delete = None;
+                                }
+                            } else if ui.button("Delete").clicked() {
+                                self.confirm_delete = Some(g.id.clone());
+                            }
+                        }
+                    });
+                    ui.label(&g.id);
+                    let title =
+                        layouts.iter().find(|l| l.name == g.layout).map(|l| l.title.as_str()).filter(|t| !t.is_empty());
+                    ui.label(title.unwrap_or(&g.layout));
+                    ui.label(g.creator.as_deref().unwrap_or("\u{2014}"));
+                    ui.label(g.last_played.map(client_core::form::utc).unwrap_or_default());
+                    let state = match g.state {
+                        GameState::Running if g.preparing.is_some() => {
+                            g.preparing.as_ref().map(client_core::text::preparing_text).unwrap_or_default()
+                        }
+                        GameState::Running => "running".to_string(),
+                        GameState::Saved => "saved".to_string(),
+                        GameState::Crashed => format!("crashed: {}", g.error.as_deref().unwrap_or("?")),
+                    };
+                    ui.label(state);
+                    ui.label(fmt_hms(g.sim_time));
+                    let areas: Vec<String> = g
+                        .areas
+                        .iter()
+                        .map(|a| format!("{} ({})", a.name, a.holder.as_deref().unwrap_or("robot")))
+                        .collect();
+                    ui.label(areas.join(", "));
+                    ui.label(g.players.join(", "));
+                    ui.end_row();
+                }
+            });
         });
         if let Some(id) = join {
             self.core.join(&id);

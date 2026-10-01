@@ -1557,3 +1557,91 @@ fn the_signal_picker_chooses_the_area_a_new_game_claims() {
     }
     assert_eq!(r.ui.core.game().unwrap().area(), Some("East"));
 }
+
+/// Final review I1: a saved Liverpool Street game's row keeps its Resume and
+/// Delete buttons inside the window at 1280 × 800 and at 1024 × 768 (the
+/// actions lead the row; the table scrolls sideways if it is still too wide).
+#[test]
+fn the_lobby_games_table_keeps_its_buttons_in_a_laptop_window() {
+    for (w, h) in [(1280.0, 800.0), (1024.0, 768.0)] {
+        let mut r = Rig::lobby(drawn_twobox());
+        r.size = vec2(w, h);
+        let areas = vec![s("Liverpool Street"), s("Bethnal Green"), s("Hackney & Bow")];
+        r.h.push(ServerFrame::Lobby(LobbyReply::Layouts {
+            layouts: vec![LayoutInfo {
+                name: s("liverpool-st"),
+                areas: areas.clone(),
+                title: s("London Liverpool Street Station"),
+                description: s("London Liverpool Street and the lines out to Hackney and Bow."),
+            }],
+            you: Some(s("ann")),
+        }));
+        let saved = GameInfo {
+            id: s("g-1a2b3c4d"),
+            layout: s("liverpool-st"),
+            state: GameState::Saved,
+            sim_time: 25_300.0,
+            areas: areas.into_iter().map(|name| AreaHolder { name, holder: None }).collect(),
+            players: vec![],
+            error: None,
+            creator: Some(s("ann")),
+            last_played: Some(1_790_865_900),
+            can_delete: true,
+            preparing: None,
+        };
+        r.h.push(ServerFrame::Lobby(LobbyReply::Games { games: vec![saved] }));
+        r.frame();
+        let out = r.frame();
+        for want in ["Resume", "Delete"] {
+            let at = text_at(&out, want);
+            assert!(at.min.x >= 0.0 && at.max.x <= w && at.max.y <= h, "{want} outside {w}x{h}: {at:?}");
+        }
+    }
+}
+
+/// Final review M4: choosing another layout puts the Signal picker back to
+/// "watch"; it never silently picks the new layout's area at the old index.
+#[test]
+fn the_signal_picker_goes_back_to_watch_when_the_layout_changes() {
+    let mut r = Rig::lobby(drawn_twobox());
+    let layout = |name: &str, title: &str, areas: [&str; 2]| LayoutInfo {
+        name: s(name),
+        areas: areas.map(s).to_vec(),
+        title: s(title),
+        description: String::new(),
+    };
+    r.h.push(ServerFrame::Lobby(LobbyReply::Layouts {
+        layouts: vec![
+            layout("drain", "The Drain", ["Waterloo", "Bank"]),
+            layout("liverpool-st", "Liverpool St", ["Liverpool Street", "Bethnal Green"]),
+        ],
+        you: None,
+    }));
+    r.frame();
+    let out = r.frame();
+    click_text(&mut r, &out, "watch");
+    r.frame();
+    let out = r.frame();
+    click_text(&mut r, &out, "Waterloo");
+    r.frame();
+    let out = r.frame();
+    assert!(has_text(&out, "Waterloo") && !has_text(&out, "watch"), "{:?}", texts(&out));
+    click_text(&mut r, &out, "The Drain");
+    r.frame();
+    let out = r.frame();
+    click_text(&mut r, &out, "Liverpool St");
+    r.frame();
+    let out = r.frame();
+    assert!(texts(&out).iter().any(|(t, _)| t == "watch"), "back to watch: {:?}", texts(&out));
+    assert!(!texts(&out).iter().any(|(t, _)| t == "Liverpool Street"), "no area picked silently: {:?}", texts(&out));
+    click_text(&mut r, &out, "Create");
+    assert_eq!(r.lobby_sent, [LobbyMsg::CreateGame { layout: s("liverpool-st"), seed: None, start: None }]);
+    r.h.push(ServerFrame::Lobby(LobbyReply::Joined { game: s("g-test"), you: s("ann") }));
+    for (_, m) in r.game.connect("ann") {
+        r.h.push(ServerFrame::Game(m));
+    }
+    for _ in 0..4 {
+        r.frame();
+    }
+    assert_eq!(r.ui.core.game().unwrap().area(), None, "nothing claimed");
+}
