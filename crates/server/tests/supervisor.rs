@@ -141,9 +141,33 @@ async fn expect_error(sock: &Sock, code: &str) {
 async fn create(rig: &Rig, sock: &Sock) -> String {
     rig.lobby(sock, LobbyMsg::CreateGame { layout: s("twobox"), seed: Some(5), start: None });
     let got = until(sock, is_view).await;
-    let Some(ServerFrame::Lobby(LobbyReply::Joined { game, you })) = got.first() else { panic!("{got:?}") };
+    let ServerFrame::Lobby(LobbyReply::Joined { game, you }) = joined(&got) else { unreachable!() };
     assert_eq!(you, &sock.user);
     game.clone()
+}
+
+/// Write a fake game binary: `#!/bin/sh`, then `body`. It is run once with
+/// `--probe` (which exits at once) until the kernel stops refusing it with
+/// ETXTBSY: a parallel test's fork can hold our write descriptor between its
+/// fork and its exec (rust-lang/rust#114554). Once a run succeeds nobody holds
+/// one, and nobody can take one again, so the supervisor's spawn cannot fail
+/// that way.
+fn fake_game(path: PathBuf, body: &str) -> PathBuf {
+    std::fs::write(&path, format!("#!/bin/sh\n[ \"$1\" = --probe ] && exit 0\n{body}")).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    for _ in 0..200 {
+        match std::process::Command::new(&path).arg("--probe").status() {
+            Ok(st) => {
+                assert!(st.success(), "{}: {st}", path.display());
+                return path;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                std::thread::sleep(Duration::from_millis(10))
+            }
+            Err(e) => panic!("{}: {e}", path.display()),
+        }
+    }
+    panic!("{} stayed busy", path.display());
 }
 
 fn kill(pid: u32, signal: &str) {
@@ -384,7 +408,7 @@ async fn create_join_claim_and_leave() {
     let ann = rig.attach("ann");
     rig.lobby(&ann, LobbyMsg::CreateGame { layout: s("twobox"), seed: Some(5), start: Some(s("8:00")) });
     let got = until(&ann, is_view).await;
-    let Some(ServerFrame::Lobby(LobbyReply::Joined { game: id, .. })) = got.first() else { panic!("{got:?}") };
+    let ServerFrame::Lobby(LobbyReply::Joined { game: id, .. }) = joined(&got) else { unreachable!() };
     let id = id.clone();
     let Some(ServerFrame::Game(ServerMsg::View(v))) = got.last() else { unreachable!() };
     assert!((28800.0..28801.0).contains(&v.sim_time), "the start time reached the game: {}", v.sim_time);
@@ -394,7 +418,7 @@ async fn create_join_claim_and_leave() {
     let bob = rig.attach("bob");
     rig.lobby(&bob, LobbyMsg::Join { game: id.clone() });
     let got = until(&bob, is_view).await;
-    assert_eq!(got[0], ServerFrame::Lobby(LobbyReply::Joined { game: id.clone(), you: s("bob") }));
+    assert_eq!(joined(&got), &ServerFrame::Lobby(LobbyReply::Joined { game: id.clone(), you: s("bob") }));
 
     rig.game_msg(&ann, ClientMsg::Claim { area: s("West") });
     let got = until(&ann, |f| matches!(f, ServerFrame::Game(ServerMsg::Layout(_)))).await;
@@ -430,7 +454,7 @@ async fn a_second_login_replaces_the_first_and_keeps_the_game() {
     // the sockets, so it can reach `second` before the reconnect's Layout:
     // wait for the Layout itself, not the first View.
     let got = until(&second, |f| matches!(f, ServerFrame::Game(ServerMsg::Layout(_)))).await;
-    assert_eq!(got[0], ServerFrame::Lobby(LobbyReply::Joined { game: id.clone(), you: s("ann") }));
+    assert_eq!(joined(&got), &ServerFrame::Lobby(LobbyReply::Joined { game: id.clone(), you: s("ann") }));
     let Some(ServerFrame::Game(ServerMsg::Layout(layout))) = got.last() else { unreachable!() };
     assert_eq!(layout.area.as_deref(), Some("West"), "still holding her area");
 
@@ -454,7 +478,7 @@ async fn a_game_that_fails_to_resume_shows_as_crashed_with_its_error() {
     let ann = rig.attach("ann");
     rig.lobby(&ann, LobbyMsg::Join { game: s(bad) });
     let got = until(&ann, |f| *f == notice(Notice::GameCrashed)).await;
-    assert_eq!(got[0], ServerFrame::Lobby(LobbyReply::Joined { game: s(bad), you: s("ann") }));
+    assert_eq!(joined(&got), &ServerFrame::Lobby(LobbyReply::Joined { game: s(bad), you: s("ann") }));
     assert_eq!(rig.sup.game_of("ann"), None, "back in the lobby");
     let g = rig.info(bad);
     assert_eq!(g.state, GameState::Crashed);
@@ -594,9 +618,7 @@ async fn the_robot_name_cannot_enter_a_game() {
 async fn a_game_still_starting_at_shutdown_is_stopped_not_crashed() {
     let root = temp_dir("slow-start");
     // A "game" that never listens: it is still starting when the front stops.
-    let bin = root.join("slow-game");
-    std::fs::write(&bin, "#!/bin/sh\nexec sleep 30\n").unwrap();
-    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let bin = fake_game(root.join("slow-game"), "exec sleep 30\n");
     let cfg = SupervisorConfig {
         game_bin: bin,
         saves_dir: root.join("saves"),
@@ -721,7 +743,7 @@ async fn a_socket_that_takes_over_a_game_waits_for_its_base_view() {
     let second = rig.attach("ann");
     assert_eq!(second.me.outbox.push(delta(1)), Pushed::Dropped, "no delta before the base view");
     let got = until(&second, is_view).await;
-    assert_eq!(got[0], ServerFrame::Lobby(LobbyReply::Joined { game: id, you: s("ann") }));
+    assert_eq!(joined(&got), &ServerFrame::Lobby(LobbyReply::Joined { game: id, you: s("ann") }));
     assert!(!got.iter().any(is_delta), "{got:?}");
     rig.sup.shutdown_all(Duration::from_secs(10)).await;
 }
@@ -1166,6 +1188,17 @@ async fn a_burst_of_lesson_starts_never_runs_more_than_the_cap() {
 
 // ---- preparing a later start (timetables spec §3.4) ----
 
+/// The `Joined` among `got`: a lobby push (`Games`) for someone else's game
+/// may reach a socket still in the lobby first, but nothing else may.
+fn joined(got: &[ServerFrame]) -> &ServerFrame {
+    let at = got
+        .iter()
+        .position(|f| matches!(f, ServerFrame::Lobby(LobbyReply::Joined { .. })))
+        .unwrap_or_else(|| panic!("not joined: {got:?}"));
+    assert!(got[..at].iter().all(|f| matches!(f, ServerFrame::Lobby(LobbyReply::Games { .. }))), "{got:?}");
+    &got[at]
+}
+
 fn joined_id(got: &[ServerFrame]) -> String {
     got.iter()
         .find_map(|f| match f {
@@ -1215,14 +1248,10 @@ async fn a_later_start_is_listed_as_preparing_until_it_is_ready() {
 
 /// A game binary whose preparing has a 1 ms budget (the real one's is 60 s).
 fn impatient_game_bin(root: &Path) -> PathBuf {
-    let path = root.join("impatient-game");
-    std::fs::write(
-        &path,
-        format!("#!/bin/sh\ncase \"$*\" in *--create*) exec {GAME_BIN} \"$@\" --seed-budget-ms 1;; *) exec {GAME_BIN} \"$@\";; esac\n"),
+    fake_game(
+        root.join("impatient-game"),
+        &format!("case \"$*\" in *--create*) exec {GAME_BIN} \"$@\" --seed-budget-ms 1;; *) exec {GAME_BIN} \"$@\";; esac\n"),
     )
-    .unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    path
 }
 
 #[tokio::test]
@@ -1314,17 +1343,13 @@ fn rig_with_bin(name: &str, bin: impl FnOnce(&Path) -> PathBuf) -> Rig {
 #[tokio::test]
 async fn any_failure_while_preparing_leaves_no_game() {
     let rig = rig_with_bin("seed-fail", |root| {
-        let path = root.join("failing-game");
         let code = server::process::EXIT_NOT_PREPARED;
-        std::fs::write(
-            &path,
-            format!(
-                "#!/bin/sh\ncase \"$*\" in *--create*) echo 'signalbox-game: preparing failed: save: database or disk is full' >&2; exit {code};; *) exec {GAME_BIN} \"$@\";; esac\n"
+        fake_game(
+            root.join("failing-game"),
+            &format!(
+                "case \"$*\" in *--create*) echo 'signalbox-game: preparing failed: save: database or disk is full' >&2; exit {code};; *) exec {GAME_BIN} \"$@\";; esac\n"
             ),
         )
-        .unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        path
     });
     let ann = rig.attach("ann");
     rig.lobby(&ann, LobbyMsg::CreateGame { layout: s("twobox"), seed: Some(5), start: Some(s("23:00")) });
@@ -1409,16 +1434,12 @@ async fn the_seed_name_is_reserved_in_any_case() {
 #[tokio::test]
 async fn a_preparing_child_killed_after_it_cleaned_up_still_leaves_no_game() {
     let rig = rig_with_bin("seed-linger", |root| {
-        let path = root.join("lingering-game");
-        std::fs::write(
-            &path,
-            format!(
-                "#!/bin/sh\ncase \"$*\" in *--create*) {GAME_BIN} \"$@\" --seed-budget-ms 1; trap '' TERM; exec sleep 60;; *) exec {GAME_BIN} \"$@\";; esac\n"
+        fake_game(
+            root.join("lingering-game"),
+            &format!(
+                "case \"$*\" in *--create*) {GAME_BIN} \"$@\" --seed-budget-ms 1; trap '' TERM; exec sleep 60;; *) exec {GAME_BIN} \"$@\";; esac\n"
             ),
         )
-        .unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        path
     });
     let ann = rig.attach("ann");
     rig.lobby(&ann, LobbyMsg::CreateGame { layout: s("twobox"), seed: Some(5), start: Some(s("23:00")) });
