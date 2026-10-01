@@ -4,7 +4,7 @@ Date: 2026-10-01
 Status: approved by the owner 2026-10-01 (P1–P6, P9–P22; P7–P8 withdrawn; P18 amended, P22 conditional). Amended 2026-10-01: the
 Drain timetable is the real Waterloo & City WTT (§4), replacing the repeat timetable (P7, P8 withdrawn). Amended again
 2026-10-01: P18 shows train numbers only (§4.4), P22 waits for the `robot-fixes` branch (§4.6), the hands-on UI review's
-High and Medium findings join the pass (§10; the findings owner approved, the new design choices in §10.2 proposed), and
+High and Medium findings join the pass (§10; the findings owner approved, the new design choices in §10.2 approved by the owner 2026-10-01), and
 the WTT (§4 with P18) ships as its own plan first (§9).
 License: GPL-2.0-or-later
 Builds on: `2026-10-01-panel-realism-design.md` (D1.1, deployed) and `2026-09-30-browser-client-design.md` (D1).
@@ -621,7 +621,7 @@ H4–H6 with the lessons and their CI play-through.
 The findings are approved; these are the choices made in specifying them. Each is what the plan implements, so a
 "no" means a change to its task.
 
-| # | Topic | Proposed |
+| # | Topic | Decision (approved by the owner 2026-10-01) |
 |---|---|---|
 | U1 | H2: where a new game's creator starts | A "Signal" list beside Layout: *watch* (default) or one of the layout's areas; the claim is made by the client after the first layout, so nothing changes on the front |
 | U2 | H2: dead-click lines | Logged as ordinary (not alarm) lines, once until another line is logged: "You are watching: claim an area to signal", "`LB72` is worked from Bethnal Green, not your area", "No route of yours starts at `LA31`", "Auto-working `LA31`: set a route from it first" |
