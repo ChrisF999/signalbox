@@ -28,6 +28,9 @@ pub const COLLISION_ALERT: &str = "Two trains collided. Press Restart step to tr
 struct Progress {
     next: bool,
     rejected: bool,
+    /// The task of a step with a `done` text is done: it now waits for
+    /// Next (polish spec H5).
+    completed: bool,
 }
 
 /// What has happened so far in the lesson, so that a step whose event came
@@ -118,9 +121,10 @@ impl Runner {
 
     pub fn view(&self) -> LessonView {
         let count = self.lesson.steps.len();
-        let (say, highlight, needs_next) = match self.lesson.steps.get(self.step) {
-            Some(s) => (s.say.clone(), s.highlight.clone(), s.wait_for.needs_next()),
-            None => (String::new(), vec![], false),
+        let completed = self.progress.completed;
+        let (say, highlight, needs_next, after) = match self.lesson.steps.get(self.step) {
+            Some(s) => (s.say.clone(), s.highlight.clone(), s.wait_for.needs_next() || completed, s.done.clone().filter(|_| completed)),
+            None => (String::new(), vec![], false, None),
         };
         LessonView {
             lesson: self.id.clone(),
@@ -132,6 +136,8 @@ impl Runner {
             needs_next,
             done: self.done(),
             alert: self.alert.clone(),
+            completed,
+            after,
         }
     }
 
@@ -333,15 +339,30 @@ impl Runner {
         if self.alert.is_some() {
             return vec![];
         }
-        let mut moved = false;
+        let mut changed = false;
         while let Some(step) = self.lesson.steps.get(self.step) {
-            if !self.met(g, &step.wait_for) {
-                break;
+            // A step with a `done` text waits for Next once its task is done
+            // (polish spec H5); any other moves on as soon as its condition holds.
+            if self.progress.completed {
+                if !self.progress.next {
+                    break;
+                }
+            } else {
+                if !self.met(g, &step.wait_for) {
+                    break;
+                }
+                if step.done.is_some() && !step.wait_for.needs_next() {
+                    self.progress.completed = true;
+                    // A Next pressed before the task was done does not count.
+                    self.progress.next = false;
+                    changed = true;
+                    break;
+                }
             }
             self.begin(g, self.step + 1);
-            moved = true;
+            changed = true;
         }
-        if moved { self.message(g) } else { vec![] }
+        if changed { self.message(g) } else { vec![] }
     }
 
     fn met(&self, g: &Game, c: &Condition) -> bool {

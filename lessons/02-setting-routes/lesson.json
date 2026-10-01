@@ -20,12 +20,14 @@
       "wait_for": {"continue": {}}
     },
     {
-      "say": "Click H5 to set the route from H3 to H5. The points are set for platform 1, the route turns white, and H3 turns green. The short white piece past H5 is the overlap: spare track kept clear in case a train runs a little past a red signal. (If H3 is no longer chosen, click H3 first.)",
+      "say": "Click H5 to set the route from H3 to H5. The points are set for platform 1, the route turns white, and H3 shows a proceed aspect. The short white piece past H5 is the overlap: spare track kept clear in case a train runs a little past a red signal. (If H3 is no longer chosen, click H3 first.)",
+      "done": "Done: the route is white and H3 shows a proceed aspect. Look, then press Next.",
       "highlight": [{"exit": {"kind": "signal", "name": "5"}}],
       "wait_for": {"route_set": {"entrance": "3", "exit": {"kind": "signal", "name": "5"}}}
     },
     {
       "say": "Now cancel the route. Right-click H3 and choose 'Cancel route H3 to H5'. The white track goes grey and H3 goes back to red.",
+      "done": "Done: the track is grey again and H3 is back to red. Press Next.",
       "highlight": [{"signal": "3"}],
       "wait_for": {"route_cancelled": {"entrance": "3"}}
     },
@@ -49,6 +51,7 @@
     },
     {
       "say": "Now set the route from H3 to H7, into platform 2. It uses the points as they lie.",
+      "done": "Done: the route into platform 2 is set. Press Next.",
       "highlight": [{"signal": "3"}, {"exit": {"kind": "signal", "name": "7"}}],
       "wait_for": {"route_set": {"entrance": "3", "exit": {"kind": "signal", "name": "7"}}}
     },

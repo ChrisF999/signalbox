@@ -50,4 +50,10 @@ pub struct LessonView {
     /// Said after a SPAD or a collision: the step can be restarted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alert: Option<String>,
+    /// The step's task is done and it waits for Next, so the player sees
+    /// what happened (polish spec H5); `after` says what to look at.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub completed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<String>,
 }

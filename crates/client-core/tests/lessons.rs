@@ -19,6 +19,8 @@ fn lesson(index: u32, done: bool) -> ServerFrame {
         needs_next: false,
         done,
         alert: None,
+        completed: false,
+        after: None,
     }))
 }
 

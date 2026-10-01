@@ -34,6 +34,11 @@ pub struct Step {
     /// when `wait_for` alone does not say (`rejected`, say).
     #[serde(default)]
     pub solution: Vec<Move>,
+    /// Said once the step's task is done; the step then waits for Next, so
+    /// the player sees the result (polish spec H5). Without it the lesson
+    /// moves on at once.
+    #[serde(default)]
+    pub done: Option<String>,
 }
 
 /// What a step waits for.

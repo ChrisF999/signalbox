@@ -65,6 +65,8 @@ pub fn simplifier_columns(train_w: f32) -> [f32; 8] {
 pub fn table_width(cols: &[f32; 8]) -> f32 {
     cols.iter().sum::<f32>() + CELL_GAP * (cols.len() - 1) as f32
 }
+/// The lesson box's Next button is at least this wide (polish spec H4).
+const LESSON_NEXT_W: f32 = 72.0;
 /// The enquiry window opens this far right of and below where it was asked for.
 const ENQUIRY_OFFSET_PX: f32 = 16.0;
 /// The top bar's fixed widths (polish spec M5): the clock state (`paused`,
@@ -730,8 +732,11 @@ impl UiApp {
         });
     }
 
-    /// The lesson (tutorial spec §4): title, step, what to do, the alert,
-    /// and its buttons; on `done`, the way back to the lobby.
+    /// The lesson (tutorial spec §4; polish spec H4, H5): its title, then a
+    /// row of buttons that never moves — Next on the left (greyed while the
+    /// step waits for something else; Enter presses it), Restart step,
+    /// Restart lesson and Leave on the right — then the step, its text, a
+    /// done step's result and the alert. On `done`, the way back.
     fn lesson_box(&mut self, ui: &mut Ui) {
         let Some(v) = self.core.game().and_then(|g| g.lesson()).cloned() else { return };
         let mut act: Option<fn(&mut App)> = None;
@@ -747,25 +752,32 @@ impl UiApp {
                 }
             });
         } else {
+            ui.horizontal(|ui| {
+                let typing = ui.ctx().egui_wants_keyboard_input();
+                let enter = v.needs_next && !typing && ui.input(|i| i.key_pressed(Key::Enter));
+                if ui.add_enabled(v.needs_next, egui::Button::new("Next").min_size(vec2(LESSON_NEXT_W, 0.0))).clicked() || enter {
+                    act = Some(App::lesson_next);
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button("Leave").clicked() {
+                        act = Some(App::leave);
+                    }
+                    if ui.button("Restart lesson").clicked() {
+                        act = Some(App::lesson_restart);
+                    }
+                    if ui.button("Restart step").clicked() {
+                        act = Some(App::lesson_restart_step);
+                    }
+                });
+            });
             ui.label(format!("Step {} of {}", v.index + 1, v.count));
             ui.label(RichText::new(&v.say).size(14.0));
+            if v.completed {
+                ui.label(RichText::new(v.after.as_deref().unwrap_or("Done. Press Next.")).color(paint::GREEN).size(14.0));
+            }
             if let Some(a) = &v.alert {
                 ui.label(RichText::new(a).color(ALARM));
             }
-            ui.horizontal(|ui| {
-                if v.needs_next && ui.button("Next").clicked() {
-                    act = Some(App::lesson_next);
-                }
-                if ui.button("Restart step").clicked() {
-                    act = Some(App::lesson_restart_step);
-                }
-                if ui.button("Restart lesson").clicked() {
-                    act = Some(App::lesson_restart);
-                }
-                if ui.button("Leave").clicked() {
-                    act = Some(App::leave);
-                }
-            });
         }
         ui.separator();
         if let Some(f) = act {

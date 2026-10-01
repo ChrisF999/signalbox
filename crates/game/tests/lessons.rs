@@ -173,6 +173,11 @@ fn play(dir: &PathBuf) -> f64 {
         let since = p.g.sim().now_s();
         let mut ticks = 0u32;
         while p.r.step() == i {
+            // The task is done: the player looks, then presses Next (polish spec H5).
+            if p.r.view().completed {
+                p.send(ClientMsg::LessonNext);
+                continue;
+            }
             if trains {
                 p.drive();
             }

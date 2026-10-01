@@ -448,6 +448,8 @@ fn lesson_view() {
         needs_next: false,
         done: false,
         alert: Some(s("Restart the step.")),
+        completed: false,
+        after: None,
     };
     check_server(
         ServerMsg::Lesson(v.clone()),

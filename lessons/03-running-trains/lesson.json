@@ -36,6 +36,7 @@
     },
     {
       "say": "Watch the train. As it leaves each track circuit, the white route behind it turns grey: this is sectional release, which frees track for other routes as soon as the train has passed. The step ends when 2H05 stands at platform 2.",
+      "done": "2H05 stands at platform 2, and the route behind it has gone grey. Press Next.",
       "highlight": [{"platform": {"place": "HXC", "platform": "2"}}],
       "wait_for": {"train_at": {"headcode": "2H05", "place": "HXC", "platform": "2"}}
     },

@@ -29,21 +29,22 @@
       "wait_for": {"continue": {}}
     },
     {
-      "say": "A train is coming. Its headcode 2S01 has appeared in the berth of S1, and the track under it has turned red: red track means a train is on it. The train will stop at S1, because S1 is red. Press Next.",
+      "say": "The lesson has set a route from S3 to S5, so S3 shows a proceed aspect. On a signal box panel a signal shows only red (stop) or green (go). Open Settings at the top and choose Real aspects to see what the driver sees: S3 turns yellow, meaning 'the next signal is red'. Switch back to Red/green if you like, then press Next.",
+      "highlight": [{"ui": "settings"}, {"signal": "3"}],
+      "do": [{"set_route": {"entrance": "3", "exit": {"kind": "signal", "name": "5"}}}],
+      "wait_for": {"continue": {}}
+    },
+    {
+      "say": "The lesson has cancelled S3's route. A train is coming. Its headcode 2S01 has appeared in the berth of S1, and the track under it has turned red: red track means a train is on it. The train will stop at S1, because S1 is red. Press Next.",
       "highlight": [{"berth": "B1"}],
-      "do": [{"spawn": {"headcode": "2S01", "entry": "W"}}],
+      "do": [{"cancel_route": {"entrance": "3"}}, {"spawn": {"headcode": "2S01", "entry": "W"}}],
       "wait_for": {"all": [{"berth": {"name": "B1", "headcode": "2S01"}}, {"continue": {}}]}
     },
     {
-      "say": "This time the lesson sets a route for you, from S1 to S3. A route is the path a train may take; it shows white. S1 now shows green, so the driver may go. Watch the train run through the station and stop at S3. Press Next.",
+      "say": "This time the lesson sets a route for you, from S1 to S3. A route is the path a train may take; it shows white. S1 now shows a proceed aspect, so the driver may go. Watch the train run through the station and stop at S3. Press Next.",
       "highlight": [{"signal": "1"}, {"section": "TB"}],
       "do": [{"set_route": {"entrance": "1", "exit": {"kind": "signal", "name": "3"}}}],
       "wait_for": {"all": [{"route_set": {"entrance": "1", "exit": {"kind": "signal", "name": "3"}}}, {"continue": {}}]}
-    },
-    {
-      "say": "On a signal box panel a signal shows only red (stop) or green (go). Open Settings at the top and choose Real aspects to see what the driver sees: with yellow meaning 'the next signal is red'. Switch back to Red/green if you like, then press Next.",
-      "highlight": [{"ui": "settings"}],
-      "wait_for": {"continue": {}}
     },
     {
       "say": "The lesson now clears the way out: S3 to S5, and S5 to the edge of your area. Watch 2S01 leave. Behind it the track turns grey again as it is freed.",

@@ -38,6 +38,7 @@
     },
     {
       "say": "Beside KA5 is a small blue circle marked A: the auto-working button. Click it. It fills in, and the route from KA5 now stays set after each train, so the trains behind get a clear signal without you setting it again. Auto-working suits plain line with no junction. (If the route has already gone, set KA5 to KB7 again first, then click the circle.)",
+      "done": "Done: the circle is filled, so auto-working is on. Press Next.",
       "highlight": [{"ui": "auto:5"}],
       "wait_for": {"auto_working": {"signal": "5", "on": true}}
     },

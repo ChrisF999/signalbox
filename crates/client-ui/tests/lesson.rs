@@ -189,9 +189,14 @@ fn a_lesson_is_followed_through_the_lesson_box_and_the_diagram() {
     for gone in ["Penalty", "Release area", "Claim"] {
         assert!(!has_text(&out, gone), "{gone} is not offered in a lesson");
     }
-    r.click(find(&out, "Next"));
+    let next = find(&out, "Next");
+    r.click(next);
     let out = r.until("Step 2 of 10");
-    assert!(!has_text(&out, "Next"), "this step waits for a click on the diagram");
+    // Polish spec H4: Next stays where it was, greyed while the step waits
+    // for the diagram; pressing it does nothing.
+    assert_eq!(find(&out, "Next"), next, "the button row never moves");
+    r.click(next);
+    assert_eq!(r.step(), 1, "a greyed Next does nothing");
     // The step's highlight pulses round H3.
     let rings = out.shapes.iter().filter(|c| matches!(&c.shape, Shape::Circle(cs) if is_highlight(cs.stroke.color))).count();
     assert_eq!(rings, 1, "a highlight ring round H3");
@@ -204,6 +209,10 @@ fn a_lesson_is_followed_through_the_lesson_box_and_the_diagram() {
     r.until("Step 4 of 10");
     assert_eq!(r.ui.core.game().unwrap().selected(), Some("3"), "H3 is still the entrance");
     r.click(r.at(405.0, 0.0));
+    // Polish spec H5: the route is set and the step says so, waiting for Next.
+    let out = r.until("Done: the route is white");
+    assert_eq!((r.step(), find(&out, "Next")), (3, next));
+    r.events.push(Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::default() });
     r.until("Step 5 of 10");
     let out = r.frame();
     r.click(find(&out, "Restart step"));

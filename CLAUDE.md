@@ -399,6 +399,11 @@ output is byte-identical for the same input.
   (`client_core::lessons::LESSONS_KEY`, `UiApp::with_stores`; `client-web`
   gives each its own `LocalStore::new(key)`). The lesson highlight is UI, not
   panel state.
+- A step may carry a `done` text (polish spec H5): once its task is done it says so and waits for Next; the CI
+  play-through presses Next there. The lesson box's buttons sit above the text and never move (Next alone on the
+  left, greyed while the step waits for something else; the rest on the right); Enter is Next whenever Next is
+  enabled and no text field has focus (H4). Real aspects is never forced: texts say "a proceed aspect", and lesson 1
+  shows it before the train, with S3 set to S5 (H6).
 
 ### Tests
 - Core fixtures: `crates/core/tests/fixtures/{plain_line,terminus,junction}.json`.

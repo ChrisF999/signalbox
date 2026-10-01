@@ -279,6 +279,8 @@ fn joining_claims_the_lessons_area_and_shows_the_first_step() {
             needs_next: true,
             done: false,
             alert: None,
+            completed: false,
+            after: None,
         }
     );
 }
@@ -601,4 +603,24 @@ fn another_users_lesson_messages_are_ignored() {
 fn joining_sends_the_layout_and_view_once() {
     let (_, out) = Rig::new(&hollins(), "Hollins Cross", json!([{"say": "x", "wait_for": next()}]));
     assert!(matches!(&out[..], [(_, ServerMsg::Layout(_)), (_, ServerMsg::View(_)), (_, ServerMsg::Lesson(_))]), "{out:?}");
+}
+
+/// Polish spec H5: a step with a `done` text, its task done, says so and
+/// waits for Next, so the player sees the result; a Next pressed early does
+/// not count.
+#[test]
+fn a_done_step_waits_for_next_after_its_task() {
+    let steps = json!([
+        {"say": "pause it", "done": "Paused: nothing moves.", "wait_for": {"clock": {"paused": true}}},
+        {"say": "end", "wait_for": next()}
+    ]);
+    let (mut rig, _) = Rig::new(&hollins(), "Hollins Cross", steps);
+    let v = rig.r.view();
+    assert_eq!((v.completed, v.needs_next, v.after.clone()), (false, false, None));
+    assert!(rig.send(ClientMsg::LessonNext).is_empty(), "too early");
+    let v = lessons(&rig.send(ClientMsg::Vote { proposal: Proposal::Pause }));
+    assert_eq!((v[0].index, v[0].completed, v[0].needs_next, v[0].after.as_deref()), (0, true, true, Some("Paused: nothing moves.")));
+    assert_eq!(rig.r.step(), 0, "it waits");
+    let v = lessons(&rig.send(ClientMsg::LessonNext));
+    assert_eq!((v[0].index, v[0].completed), (1, false));
 }
