@@ -486,3 +486,119 @@ fn a_train_that_left_early_does_not_hold_the_lesson_up() {
     rig.send(ClientMsg::LessonNext);
     assert_eq!(rig.r.step(), 3, "1K01 already left: the step after it is shown at once");
 }
+
+#[test]
+fn a_spad_holds_the_step_even_when_it_meets_the_condition() {
+    // The step waits for 2H05 to pass H1; passing it at danger must not count.
+    let steps = json!([
+        {"say": "in", "do": [{"spawn": {"headcode": "2H05", "entry": "W"}}],
+         "wait_for": {"train_passed": {"headcode": "2H05", "signal": "1"}}},
+        {"say": "end", "wait_for": next()}
+    ]);
+    let (mut rig, _) = Rig::new(&hollins(), "Hollins Cross", steps);
+    rig.command(set("1", "3"));
+    let a = rig.g.sim().world().net.segment("a").unwrap();
+    for _ in 0..600 {
+        rig.run(0.1);
+        let t = &rig.g.sim().trains()[0];
+        if t.head().0 == a && t.head_m > 570.0 {
+            break;
+        }
+    }
+    rig.command(PlayerCommand::CancelRoute { entrance: "1".into() });
+    let out = rig.run(30.0);
+    assert_eq!(rig.g.stats().spads, 1);
+    assert_eq!(rig.r.step(), 0, "the step stays while the alert is up");
+    assert_eq!(rig.r.view().alert.as_deref(), Some(SPAD_ALERT));
+    assert!(lessons(&out).iter().all(|v| v.index == 0));
+    rig.send(ClientMsg::LessonNext);
+    assert_eq!(rig.r.step(), 0, "nothing moves it on but a restart");
+    let v = lessons(&rig.send(ClientMsg::LessonRestartStep));
+    assert_eq!((v[0].index, v[0].alert.as_deref()), (0, None));
+    assert!(rig.g.sim().trains().is_empty(), "back to before the train came in");
+    rig.command(set("1", "3"));
+    rig.run(120.0);
+    assert_eq!(rig.r.step(), 1, "passed at a proceed aspect this time");
+    assert_eq!(rig.r.view().alert, None);
+}
+
+#[test]
+fn only_an_interlocking_refusal_counts_as_rejected() {
+    let steps = json!([
+        {"say": "conflict", "wait_for": {"rejected": {}},
+         "solution": [{"set_route": {"entrance": "3", "exit": {"kind": "signal", "name": "5"}}}]},
+        {"say": "end", "wait_for": next()}
+    ]);
+    let (mut rig, _) = Rig::new(&kirkby(), "Kirkby", steps);
+    let out = rig.command(PlayerCommand::SetRoute { entrance: "7".into(), exit: ExitName::Node("E".into()) });
+    assert!(matches!(&out[..], [(_, ServerMsg::Notice(Notice::NotYourArea { .. }))]), "{out:?}");
+    rig.run(0.2);
+    assert_eq!(rig.r.step(), 0, "Lowfield's signal is not the interlocking refusing");
+    let out = rig.command(set("Nope", "5"));
+    assert!(matches!(&out[..], [(_, ServerMsg::Notice(Notice::Rejected { .. }))]), "{out:?}");
+    rig.run(0.2);
+    assert_eq!(rig.r.step(), 0, "nor is an unknown name");
+    rig.command(set("1", "5"));
+    rig.run(7.0);
+    assert_eq!(rig.r.step(), 0);
+    rig.command(set("3", "5"));
+    rig.run(0.2);
+    assert_eq!(rig.r.step(), 1, "the conflicting route is refused by the interlocking");
+}
+
+#[test]
+fn restart_lesson_forgets_what_the_screen_showed() {
+    let steps = json!([
+        {"say": "one", "wait_for": next()},
+        {"say": "choose", "wait_for": {"selected": {"signal": "3"}}},
+        {"say": "end", "wait_for": next()}
+    ]);
+    let (mut rig, _) = Rig::new(&hollins(), "Hollins Cross", steps);
+    rig.send(ClientMsg::LessonNext);
+    rig.send(ClientMsg::LessonUi { tab: Some("trains".into()), selected: Some("3".into()) });
+    assert_eq!(rig.r.step(), 2);
+    rig.send(ClientMsg::LessonRestart);
+    assert_eq!(rig.r.step(), 0);
+    rig.send(ClientMsg::LessonNext);
+    assert_eq!(rig.r.step(), 1, "the old selection does not choose for the player");
+}
+
+#[test]
+fn restart_step_puts_the_game_back_bit_for_bit() {
+    let steps = json!([
+        {"say": "in", "do": [{"spawn": {"headcode": "2H05", "entry": "W"}}], "wait_for": next()},
+        {"say": "watch", "wait_for": {"all": [{"train_passed": {"headcode": "2H05", "signal": "3"}}, next()]}},
+        {"say": "end", "wait_for": next()}
+    ]);
+    let (mut rig, _) = Rig::new(&hollins(), "Hollins Cross", steps);
+    rig.command(set("1", "3"));
+    rig.command(set("3", "7"));
+    rig.run(5.0);
+    rig.send(ClientMsg::LessonNext);
+    assert_eq!(rig.r.step(), 1);
+    let at_start = format!("{:?}", rig.g.snapshot());
+    rig.run(150.0);
+    assert_eq!(rig.route_state("1-3"), RouteState::Idle, "2H05 is past H3");
+    assert_eq!(rig.r.step(), 1, "waiting for Next");
+    rig.send(ClientMsg::LessonRestartStep);
+    assert_eq!(format!("{:?}", rig.g.snapshot()), at_start, "sim, clock, queue and robot as the step found them");
+    rig.send(ClientMsg::LessonNext);
+    assert_eq!(rig.r.step(), 1, "what the lesson had seen went back too: 2H05 has not passed H3");
+}
+
+#[test]
+fn another_users_lesson_messages_are_ignored() {
+    let (mut rig, _) = Rig::new(&hollins(), "Hollins Cross", json!([{"say": "a", "wait_for": next()}, {"say": "b", "wait_for": next()}]));
+    rig.send(ClientMsg::LessonNext);
+    rig.g.connect("sam");
+    for msg in [ClientMsg::LessonNext, ClientMsg::LessonRestartStep, ClientMsg::LessonRestart] {
+        assert!(rig.r.handle(&mut rig.g, "sam", msg).is_empty());
+        assert_eq!(rig.r.step(), 1);
+    }
+}
+
+#[test]
+fn joining_sends_the_layout_and_view_once() {
+    let (_, out) = Rig::new(&hollins(), "Hollins Cross", json!([{"say": "x", "wait_for": next()}]));
+    assert!(matches!(&out[..], [(_, ServerMsg::Layout(_)), (_, ServerMsg::View(_)), (_, ServerMsg::Lesson(_))]), "{out:?}");
+}

@@ -190,6 +190,8 @@ fn play(dir: &PathBuf) -> f64 {
         }
         assert!(p.g.stats().spads == 0 && p.g.stats().collisions == 0, "{}: trouble at step {}", dir.display(), i + 1);
     }
+    let v = p.r.view();
+    assert!(v.done && v.index == v.count, "{}: the client is told the lesson is done", dir.display());
     let took = p.g.sim().now_s() - t0;
     assert!(took <= LESSON_LIMIT_S, "{}: took {took} s", dir.display());
     took

@@ -149,14 +149,17 @@ impl Runner {
     /// The first to connect takes the lesson and holds its area; anyone
     /// else (the front lets nobody else in) is a spectator.
     pub fn connect(&mut self, g: &mut Game, player: &str) -> Vec<Out> {
-        let mut out = g.connect(player);
+        let out = g.connect(player);
         if self.player.is_none() && g.connected(player) {
             self.player = Some(player.to_string());
         }
-        if self.is_player(player) {
-            out.extend(g.handle(player, ClientMsg::Claim { area: self.lesson.area.clone() }));
-            out.extend(self.message(g));
+        if !self.is_player(player) {
+            return out;
         }
+        // The claim sends the layout and a full view again, now of the
+        // lesson's area: only those go out.
+        let mut out = g.handle(player, ClientMsg::Claim { area: self.lesson.area.clone() });
+        out.extend(self.message(g));
         out
     }
 
@@ -194,7 +197,6 @@ impl Runner {
             other => {
                 let mut out = g.handle(player, other);
                 if mine {
-                    self.note_refusals(&out);
                     out.extend(self.settle(g));
                 }
                 out
@@ -256,10 +258,12 @@ impl Runner {
         }
     }
 
+    /// A tick's messages: a `rejected` there is the interlocking refusing
+    /// (spec §2). A command `Game` refuses at once (another area, an
+    /// unknown name) never reaches the sim and does not count.
     fn note_refusals(&mut self, outs: &[Out]) {
-        let refused = outs.iter().any(|(p, m)| {
-            self.is_player(p) && matches!(m, ServerMsg::Notice(Notice::Rejected { .. } | Notice::NotYourArea { .. }))
-        });
+        let refused =
+            outs.iter().any(|(p, m)| self.is_player(p) && matches!(m, ServerMsg::Notice(Notice::Rejected { .. })));
         self.progress.rejected |= refused;
     }
 
@@ -270,6 +274,7 @@ impl Runner {
         self.alert = None;
         let stats = g.stats();
         self.trouble = (stats.spads, stats.collisions);
+        self.names = g.sim().trains().iter().map(|t| (t.id, t.headcode.clone())).collect();
         self.note_trains(g);
         let Some(step) = self.lesson.steps.get(i) else { return };
         self.starts.truncate(i);
@@ -304,13 +309,17 @@ impl Runner {
         }
     }
 
-    /// Back to the start of step `i` and run it again.
+    /// Back to the start of step `i` and run it again. Restart lesson also
+    /// forgets what the screen showed, until the client says again.
     fn restart(&mut self, g: &mut Game, i: usize) -> Vec<Out> {
         let Some((snap, seen)) = self.starts.get(i).cloned() else { return vec![] };
         if g.restore(&snap).is_err() {
             return vec![];
         }
         self.seen = seen;
+        if i == 0 {
+            self.screen = Screen::default();
+        }
         self.begin(g, i);
         let mut out = self.message(g);
         out.extend(self.settle(g));
@@ -318,7 +327,12 @@ impl Runner {
     }
 
     /// Move on while the step's condition holds; the new step if it moved.
+    /// While a SPAD or collision alert is up the step holds: only a restart
+    /// (which clears the alert) moves the lesson.
     fn settle(&mut self, g: &mut Game) -> Vec<Out> {
+        if self.alert.is_some() {
+            return vec![];
+        }
         let mut moved = false;
         while let Some(step) = self.lesson.steps.get(self.step) {
             if !self.met(g, &step.wait_for) {
