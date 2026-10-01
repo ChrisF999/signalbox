@@ -407,7 +407,7 @@ fn signal_shapes(d: &mut Drawing, s: &SignalMark, cam: &Camera, screen: Rect, st
         } else {
             TRACK_FREE
         };
-        let stroke = Stroke::new(POST_W, colour);
+        let stroke = Stroke::new(POST_W * g, colour);
         if s.auto_routes.is_empty() {
             d.shapes.push(Shape::line_segment([base, top], stroke));
             d.shapes.push(Shape::line_segment([top, hook], stroke));

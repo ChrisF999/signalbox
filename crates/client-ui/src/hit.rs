@@ -91,9 +91,24 @@ pub fn hit_test(scene: &Scene, view: Option<&View>, cam: &Camera, screen: Rect, 
     if let Some(s) = scene.signals.iter().filter_map(|s| Some((s, button(s)?))).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(s, _)| s) {
         return Some(Hit { target: Target::Auto(s.name.clone()), clickable: s.operable });
     }
-    // A signal is its disc, the foot of its post, and its own point.
-    let signal_dist =
-        |s: &SignalMark| signal_disc(cam, screen, s).distance(p).min(at(s.base).distance(p)).min(at(s.at).distance(p));
+    // A signal is its disc, a second yellow's spot, its post and hook, and its
+    // own point, all as drawn: they grow with the zoom (polish spec M11).
+    let g = glyph(cam.scale);
+    let signal_dist = |s: &SignalMark| {
+        let disc = signal_disc(cam, screen, s);
+        let grown = LAMP_R * (g - 1.0);
+        let mut d = (disc.distance(p) - grown).min(at(s.base).distance(p)).min(at(s.at).distance(p));
+        if s.facing != egui::Vec2::ZERO {
+            let second = disc + s.facing * (LAMP_R * g * 2.2);
+            let top = at(s.base) + left_of(s.facing) * (POST_PX * g);
+            let hook = top + s.facing * (HOOK_PX * g);
+            d = d
+                .min(second.distance(p) - grown)
+                .min(dist_to_segment(p, at(s.base), top))
+                .min(dist_to_segment(p, top, hook));
+        }
+        d
+    };
     if let Some(s) = nearest(scene.signals.iter().map(|s| (s, signal_dist(s)))) {
         return Some(Hit { target: Target::Signal(s.name.clone()), clickable: s.operable || s.route_exit });
     }

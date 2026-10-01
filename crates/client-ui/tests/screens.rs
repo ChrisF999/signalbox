@@ -1325,3 +1325,82 @@ fn the_zoom_buttons_fit_at_1024_and_count_as_moving_the_view() {
     let refit = r.ui.camera().unwrap();
     assert!(refit.scale < zoomed.scale, "Fit refits: {zoomed:?} → {refit:?}");
 }
+
+fn key(r: &mut Rig, key: Key, modifiers: Modifiers) {
+    r.events.push(Event::ModifiersChanged(modifiers));
+    r.events.push(Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
+    r.frame();
+    r.events.push(Event::ModifiersChanged(Modifiers::default()));
+    r.frame();
+}
+
+/// Polish spec M11, review M4: the buttons take their own click (the entrance
+/// stays chosen); the keys are not ours while a text field has focus or with
+/// Ctrl/Cmd (the browser's page zoom).
+#[test]
+fn zoom_buttons_and_keys_leave_the_entrance_the_search_and_page_zoom_alone() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    let w1 = r.at(100.0, -5.0);
+    r.click(w1, PointerButton::Primary);
+    assert_eq!(r.ui.core.game().unwrap().selected(), Some("W1"));
+    let out = r.frame();
+    click_text(&mut r, &out, "+");
+    assert_eq!(r.ui.core.game().unwrap().selected(), Some("W1"), "a click on + is not a dead click");
+    let before = r.ui.camera().unwrap();
+    r.ctx.options_mut(|o| o.zoom_with_keyboard = false); // as eframe's web backend sets it
+    let ctrl = Modifiers { ctrl: true, command: true, ..Modifiers::default() };
+    key(&mut r, Key::Equals, ctrl);
+    assert_eq!(r.ui.camera().unwrap(), before, "Ctrl+= is the browser's");
+    key(&mut r, Key::Minus, ctrl);
+    assert_eq!(r.ui.camera().unwrap(), before, "and so is Ctrl+-");
+    key(&mut r, Key::Equals, Modifiers::SHIFT);
+    assert!(r.ui.camera().unwrap().scale > before.scale, "+ is Shift+=");
+    let mut r = Rig::in_game(drawn_twobox(), None);
+    let out = r.frame();
+    click_text(&mut r, &out, "SIMPLIFIER");
+    let out = r.frame();
+    click_text(&mut r, &out, "headcode");
+    r.frame();
+    let before = r.ui.camera().unwrap();
+    key(&mut r, Key::Equals, Modifiers::default());
+    assert_eq!(r.ui.camera().unwrap(), before, "typing in the search does not zoom");
+    key(&mut r, Key::Minus, Modifiers::default());
+    assert_eq!(r.ui.camera().unwrap(), before, "nor does -");
+}
+
+/// Polish spec M11, review M3: over a zoom button the diagram is not hovered,
+/// so the wheel there does not zoom about it.
+#[test]
+fn the_wheel_over_a_zoom_button_does_nothing() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    let out = r.frame();
+    let at = text_at(&out, "+").center();
+    let before = r.ui.camera().unwrap();
+    r.events.push(Event::PointerMoved(at));
+    r.frame();
+    r.events.push(Event::MouseWheel { unit: MouseWheelUnit::Point, delta: vec2(0.0, 60.0), modifiers: Modifiers::default(), phase: TouchPhase::Move });
+    for _ in 0..10 {
+        r.frame();
+    }
+    assert_eq!(r.ui.camera().unwrap(), before);
+}
+
+/// Polish spec M11, review M2: Fit keeps the button strip and the hint's
+/// strip clear, so on a tall layout nothing starts under them.
+#[test]
+fn fit_keeps_the_zoom_buttons_and_hint_clear_of_the_drawing() {
+    let tall = drawn_twobox_with(|w| {
+        w["layout"]["lines"][3]["y2"] = serde_json::json!(900.0);
+    });
+    for world in [tall, converted("gretz-armainvilliers")] {
+        let mut r = Rig::in_game(world, None);
+        r.frame();
+        let rect = r.ui.diagram_rect().unwrap();
+        let cam = r.ui.camera().unwrap();
+        let g = r.ui.core.game().unwrap();
+        let b = client_ui::scene::Scene::build(g.layout().unwrap()).unwrap().fit_bounds().unwrap();
+        let (top, bottom) = (cam.to_screen(rect, b.min).y, cam.to_screen(rect, b.max).y);
+        let band = client_ui::screens::VIEW_BAND;
+        assert!(top >= rect.min.y + band - 0.5 && bottom <= rect.max.y - band + 0.5, "{top} {bottom} in {rect:?}");
+    }
+}

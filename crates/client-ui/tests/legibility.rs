@@ -47,6 +47,8 @@ struct Row {
     window: &'static str,
     view: String,
     zoom: f32,
+    /// `paint::glyph` at this row's camera: 1 is base size (polish spec M11).
+    glyph: f32,
     audit: Audit,
     hidden: Vec<String>,
     /// How long `plan` took (debug builds are several times slower).
@@ -99,22 +101,26 @@ fn every_view_is_legible_at_every_zoom() {
                     let plan = labels::plan(&d, &mut measure);
                     let ms = t0.elapsed().as_secs_f64() * 1000.0;
                     let audit = labels::audit(&on_screen(labels::apply(d, &plan), screen), &mut measure);
-                    rows.push(Row { window, view: view.clone(), zoom, audit, hidden: plan.hidden_numbers.clone(), ms });
+                    rows.push(Row { window, view: view.clone(), zoom, glyph: paint::glyph(cam.scale), audit, hidden: plan.hidden_numbers.clone(), ms });
                 }
             }
         }
     }
-    println!("{:10} {:38} {:>4} {:>8} {:>7} {:>5} {:>6} {:>7}  shown", "window", "view", "zoom", "overlaps", "covered", "tight", "hidden", "plan ms");
+    println!("{:10} {:38} {:>4} {:>5} {:>8} {:>7} {:>5} {:>6} {:>7}  shown", "window", "view", "zoom", "glyph", "overlaps", "covered", "tight", "hidden", "plan ms");
     for r in &rows {
         println!(
-            "{:10} {:38} {:>4} {:>8} {:>7} {:>5} {:>6} {:>7.2}  {:?} {:?}",
-            r.window, r.view, r.zoom, r.audit.overlaps, r.audit.covered, r.audit.tight, r.hidden.len(), r.ms, r.audit.shown, r.hidden
+            "{:10} {:38} {:>4} {:>5.2} {:>8} {:>7} {:>5} {:>6} {:>7.2}  {:?} {:?}",
+            r.window, r.view, r.zoom, r.glyph, r.audit.overlaps, r.audit.covered, r.audit.tight, r.hidden.len(), r.ms, r.audit.shown, r.hidden
         );
     }
     for r in &rows {
         assert_eq!(r.audit.overlaps, 0, "{} {} x{}: texts overlap", r.window, r.view, r.zoom);
         assert_eq!(r.audit.covered, 0, "{} {} x{}: texts cover track, lamps or boxes", r.window, r.view, r.zoom);
     }
+    // Zoomed rows must really measure grown signals (polish spec M11): the small
+    // layouts' 4x Fit is past the zoom where glyphs start to grow.
+    let grown = |name: &str| rows.iter().filter(|r| r.view.starts_with(name) && r.glyph > 1.5).count();
+    assert!(grown("drain") > 0 && grown("liverpool-st") > 0, "no row measures grown glyphs");
     let fit_small: Vec<&Row> = rows.iter().filter(|r| r.window == "1280x800" && r.zoom == 1.0).collect();
     for r in fit_small.iter().filter(|r| !r.view.ends_with("spectator")) {
         assert!(r.hidden.is_empty(), "{}: every own number drawn at 1280x800 Fit, not {:?}", r.view, r.hidden);

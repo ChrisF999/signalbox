@@ -34,6 +34,9 @@ pub const ZOOM_STEP: f32 = 1.25;
 /// The zoom buttons: this big, this far in from the diagram's corner.
 const ZOOM_BUTTON: f32 = 26.0;
 const ZOOM_INSET: f32 = 8.0;
+/// Fit keeps this band clear at the top (the zoom buttons) and, to stay
+/// centred, at the bottom (the hint), so no signal or label starts under them.
+pub const VIEW_BAND: f32 = 2.0 * ZOOM_INSET + ZOOM_BUTTON;
 /// Until the player first moves the view, the diagram says how.
 pub const VIEW_HINT: &str = "Drag to move · wheel, + or - to zoom · Fit shows it all";
 /// Simplifier columns, in points: headcode, lateness, from, to, at,
@@ -920,7 +923,7 @@ impl UiApp {
         // changes size while the player has not moved the view (polish spec H7).
         let resized = self.fit_size.is_some_and(|s| (s - rect.size()).length() > 0.5);
         if self.fitted.as_ref() != Some(&fit_key) || self.cam.is_none() || (resized && !self.cam_moved) {
-            self.cam = Some(scene.fit_bounds().map_or(Camera { centre: rect.center(), scale: 1.0 }, |b| Camera::fit(b, rect)));
+            self.cam = Some(scene.fit_bounds().map_or(Camera { centre: rect.center(), scale: 1.0 }, |b| Camera::fit(b, rect.shrink2(vec2(0.0, VIEW_BAND)))));
             self.fitted = Some(fit_key);
             self.cam_moved = false;
         }
@@ -937,15 +940,23 @@ impl UiApp {
         let keys = if ui.ctx().egui_wants_keyboard_input() {
             0
         } else {
+            // Ctrl/Cmd + and - are the browser's page zoom, not ours.
             ui.input(|i| {
-                i32::from(i.key_pressed(Key::Plus) || i.key_pressed(Key::Equals)) - i32::from(i.key_pressed(Key::Minus))
+                let plain = !i.modifiers.command && !i.modifiers.ctrl && !i.modifiers.alt;
+                i32::from(plain && (i.key_pressed(Key::Plus) || i.key_pressed(Key::Equals)))
+                    - i32::from(plain && i.key_pressed(Key::Minus))
             })
         };
         if keys != 0 {
             cam.zoom_at(rect, rect.center(), ZOOM_STEP.powi(keys));
             self.cam_moved = true;
         }
-        if let Some(p) = resp.hover_pos() {
+        // The zoom buttons' places; under them the diagram is not hovered.
+        let corner = |k: f32| rect.right_top() + vec2(-(ZOOM_INSET + ZOOM_BUTTON) * k, ZOOM_INSET);
+        let plus_rect = Rect::from_min_size(corner(2.0) - vec2(4.0, 0.0), vec2(ZOOM_BUTTON, ZOOM_BUTTON));
+        let minus_rect = Rect::from_min_size(corner(1.0), vec2(ZOOM_BUTTON, ZOOM_BUTTON));
+        let hover_pos = resp.hover_pos().filter(|p| !plus_rect.contains(*p) && !minus_rect.contains(*p));
+        if let Some(p) = hover_pos {
             let (scroll, zoom) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
             if scroll != 0.0 {
                 cam.zoom_at(rect, p, (scroll * ZOOM_PER_POINT).exp());
@@ -959,7 +970,7 @@ impl UiApp {
         let cam = *cam;
         let view = self.core.game().and_then(|g| g.view());
         let hit_at = |p: Option<egui::Pos2>| p.and_then(|p| hit_test(scene, view, &cam, rect, p));
-        let hover = hit_at(resp.hover_pos());
+        let hover = hit_at(hover_pos);
         // Every click goes on, even one on nothing or on what is not yours:
         // a dead click clears the entrance (`App::click` decides what the
         // rest mean, from the same operability `Hit::clickable` shows). The
@@ -1009,9 +1020,8 @@ impl UiApp {
             painter.text(rect.left_bottom() + vec2(ZOOM_INSET, -ZOOM_INSET), Align2::LEFT_BOTTOM, VIEW_HINT, FontId::proportional(12.0), paint::LABEL);
         }
         // The zoom buttons, on top of the diagram (polish spec M11).
-        let corner = |k: f32| rect.right_top() + vec2(-(ZOOM_INSET + ZOOM_BUTTON) * k, ZOOM_INSET);
-        let plus = ui.put(Rect::from_min_size(corner(2.0) - vec2(4.0, 0.0), vec2(ZOOM_BUTTON, ZOOM_BUTTON)), egui::Button::new("+"));
-        let minus = ui.put(Rect::from_min_size(corner(1.0), vec2(ZOOM_BUTTON, ZOOM_BUTTON)), egui::Button::new("-"));
+        let plus = ui.put(plus_rect, egui::Button::new("+"));
+        let minus = ui.put(minus_rect, egui::Button::new("-"));
         let steps = i32::from(plus.clicked()) - i32::from(minus.clicked());
         if let (Some(c), true) = (self.cam.as_mut(), steps != 0) {
             c.zoom_at(rect, rect.center(), ZOOM_STEP.powi(steps));

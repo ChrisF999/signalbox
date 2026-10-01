@@ -158,3 +158,27 @@ fn a_fringe_signal_has_no_auto_button_and_a_spectators_is_not_clickable() {
     assert!(east.signals.iter().all(|s| auto_button(&cam, screen, s).is_none_or(|b| b.distance(c) > 10.0)));
     assert_ne!(hit_test(&east, None, &cam, screen, c).map(|h| h.target), Some(Target::Auto(s("A"))));
 }
+
+/// Polish spec M11, review I1: zoomed in, the whole drawn signal is a target:
+/// hook, post and a second yellow's lamp, not only the disc and the foot.
+#[test]
+fn a_grown_signal_is_a_target_over_its_hook_post_and_second_lamp() {
+    use client_ui::paint::{GLYPH_FROM_SCALE, HOOK_PX, LAMP_R, POST_PX, left_of};
+    let (sc, mut cam, screen) = setup(Some("West"));
+    cam.scale = GLYPH_FROM_SCALE * 2.0;
+    let w1 = sc.signals.iter().find(|s| s.name == "W1").unwrap();
+    let (f, g) = (w1.facing, 2.0);
+    let base = cam.to_screen(screen, w1.base);
+    let top = base + left_of(f) * (POST_PX * g);
+    let want = hit(Target::Signal(s("W1")), true);
+    for (what, p) in [
+        ("post midpoint", base + (top - base) * 0.5),
+        ("hook midpoint", top + f * (HOOK_PX * g * 0.5)),
+        ("second lamp", signal_disc(&cam, screen, w1) + f * (LAMP_R * g * 2.2)),
+        ("lamp edge", signal_disc(&cam, screen, w1) - f * (LAMP_R * g - 1.0)),
+    ] {
+        assert_eq!(hit_test(&sc, None, &cam, screen, p), want, "{what}");
+    }
+    let far = signal_disc(&cam, screen, w1) + left_of(f) * 60.0;
+    assert_ne!(hit_test(&sc, None, &cam, screen, far), want, "well clear of the glyph is not the signal");
+}
