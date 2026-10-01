@@ -15,4 +15,4 @@ pub mod save;
 pub mod seed;
 pub mod view;
 
-pub use game::{GRACE_S, Game, GameError, GameMeta, GameSnapshot, GameStats, GameStatus, MAX_TICKS_PER_ADVANCE, Out, ROBOT, SNAPSHOT_EVERY_S};
+pub use game::{GRACE_S, Game, GameError, GameMeta, GameSnapshot, GameStats, GameStatus, MAX_TICKS_PER_ADVANCE, Out, ROBOT, Refresh, SNAPSHOT_EVERY_S};

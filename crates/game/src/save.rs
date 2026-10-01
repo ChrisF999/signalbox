@@ -347,6 +347,25 @@ impl SaveDb {
     }
 }
 
+/// The world keys a layout's drawing and names describe (polish spec §5.2).
+pub const NETWORK_KEYS: [&str; 8] = ["areas", "sections", "nodes", "segments", "signals", "berths", "platforms", "routes"];
+
+/// The saved world with its display data (`layout`) taken from `current`,
+/// the layout file the game was made from as it is now, when the two have
+/// exactly the same network (polish spec §5.2); otherwise why not. The sim
+/// never reads `layout`, so this cannot change a replay; services, entries
+/// and options stay the save's.
+pub fn refresh_display(saved: &str, current: &str) -> Result<String, String> {
+    let mut s: serde_json::Value = serde_json::from_str(saved).map_err(|e| format!("the saved world is unreadable: {e}"))?;
+    let c: serde_json::Value = serde_json::from_str(current).map_err(|e| format!("the layout file is unreadable: {e}"))?;
+    if let Some(k) = NETWORK_KEYS.iter().find(|k| s.get(**k) != c.get(**k)) {
+        return Err(format!("the layout's `{k}` differ from the save's"));
+    }
+    let layout = c.get("layout").filter(|l| l.is_object()).cloned().ok_or("the layout file has no drawing")?;
+    s.as_object_mut().ok_or("the saved world is not an object")?.insert("layout".into(), layout);
+    Ok(serde_json::to_string(&s).expect("JSON values serialise"))
+}
+
 /// Rebuild a saved game's sim (spec §7.3): restore the snapshot, then
 /// replay exactly the commands logged after it (`seq > last_seq`) tick by
 /// tick, stopping at the last logged tick with that tick's commands queued.

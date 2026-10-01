@@ -216,6 +216,11 @@ output is byte-identical for the same input.
   more than `MAX_HELD` (1000) front frames while preparing fail the create.
   The budget is per game: several big seeds at once share the CPU.
   Cost (release): Liverpool St 05:00→23:00 about 9 s (`--test seed_timing`).
+- `Game::resume_with_layout(path, Some(current))` (polish spec §5) takes the
+  world's display-only `layout` from the layout file as it is now when the
+  saved network (`game::save::NETWORK_KEYS`) is identical, so old saves get
+  today's prefixes, line names and drawing; in memory only, never written
+  back, and the sim never reads it. Services, entries and options stay the save's.
 - Saves are WAL with `synchronous=NORMAL` (a power cut may lose the last
   moments; the owner accepted that). Every command is logged before
   `sim.submit`; a robot run's commands are one transaction

@@ -21,7 +21,7 @@ use crate::geometry::WorldGeometry;
 use crate::layout::build_layout;
 use crate::names::{resolve, to_player_command, valid_headcode};
 use crate::notices::area_notices;
-use crate::save::{Logged, SaveDb, SaveError, resume_sim};
+use crate::save::{Logged, SaveDb, SaveError, refresh_display, resume_sim};
 use crate::view::{Shared, build_view};
 
 /// The robot's player name, reserved: it holds every unclaimed area.
@@ -45,6 +45,17 @@ pub enum GameError {
 
 /// A message for one player.
 pub type Out = (String, ServerMsg);
+
+/// Where a resumed game's display data came from (polish spec §5).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Refresh {
+    /// No current layout was given: the save's own.
+    NotAsked,
+    /// The current layout file's (same network as the save).
+    Refreshed,
+    /// The save's own, and why the current layout's could not be used.
+    Kept(String),
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GameMeta {
@@ -177,9 +188,22 @@ impl Game {
 
     /// Resume the game saved at `path`: paused at 1x, every area unclaimed.
     pub fn resume(path: &Path) -> Result<Game, GameError> {
+        Game::resume_with_layout(path, None).map(|(g, _)| g)
+    }
+
+    /// `resume`, taking the display data from `current` (the layout file's
+    /// world JSON as it is now) when its network matches the save's.
+    pub fn resume_with_layout(path: &Path, current: Option<&str>) -> Result<(Game, Refresh), GameError> {
         let db = SaveDb::open(path)?;
         let saved = db.load()?;
-        let world = World::from_json(&saved.world_json)?;
+        let (world, refresh) = match current.map(|c| refresh_display(&saved.world_json, c)) {
+            None => (World::from_json(&saved.world_json)?, Refresh::NotAsked),
+            Some(Err(why)) => (World::from_json(&saved.world_json)?, Refresh::Kept(why)),
+            Some(Ok(json)) => match World::from_json(&json) {
+                Ok(w) => (w, Refresh::Refreshed),
+                Err(e) => (World::from_json(&saved.world_json)?, Refresh::Kept(format!("the refreshed world does not load: {e}"))),
+            },
+        };
         let snapshot_tick = saved.snapshot.tick;
         let (sim, robot_ran) =
             resume_sim(world, saved.snapshot, saved.last_seq, &saved.commands).map_err(GameError::Resume)?;
@@ -207,7 +231,7 @@ impl Game {
         g.queued = senders.into_iter().zip(queue).collect();
         g.save = Some(db);
         g.last_snapshot = Some(snapshot_tick);
-        Ok(g)
+        Ok((g, refresh))
     }
 
     /// Record `user` as the game's creator in its save (owner decision 13);
