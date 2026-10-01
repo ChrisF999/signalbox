@@ -40,7 +40,7 @@
       "wait_for": {"train_at": {"headcode": "2H05", "place": "HXC", "platform": "2"}}
     },
     {
-      "say": "2H05 is at platform 2. It leaves when its time comes, but only if its signal is clear. Set the route out: H7 to H9. It is booked to leave at 08:05, so it may wait a little; 2x or 4x beside the clock speeds time up.",
+      "say": "2H05 is at platform 2. It leaves when its time comes, but only if its signal is clear. Set the route out: H7 to H9. It is booked to leave at 08:05, so it may wait a little; 2× or 4× beside the clock speeds time up.",
       "highlight": [{"signal": "7"}, {"exit": {"kind": "signal", "name": "9"}}],
       "wait_for": {"route_set": {"entrance": "7", "exit": {"kind": "signal", "name": "9"}}}
     },
