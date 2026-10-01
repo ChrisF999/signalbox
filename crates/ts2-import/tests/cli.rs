@@ -93,7 +93,7 @@ fn wtt_flag_checks_the_timetable_and_writes_nothing_when_it_fails() {
     let out = dir.join("drain.json");
     let o = cli(&[DRAIN, "-o", out.to_str().unwrap(), "--wtt", SYNTHETIC_WTT]);
     assert_eq!(o.status.code(), Some(1), "{}", stderr(&o));
-    assert!(stderr(&o).contains("check failed: 0 trains in service at 09:00:00, the WTT says 5"), "{}", stderr(&o));
+    assert!(stderr(&o).contains("check failed: train 302 trip 1 runs in 225 s, under the published 240 s"), "{}", stderr(&o));
     assert!(!out.exists());
     let o = cli(&[DRAIN, "-o", out.to_str().unwrap(), "--wtt", dir.join("missing.html").to_str().unwrap()]);
     assert_eq!(o.status.code(), Some(1), "{}", stderr(&o));

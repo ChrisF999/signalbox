@@ -116,15 +116,19 @@ fn decode(s: &str) -> String {
     s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
 }
 
-/// The words of each page of `pdftotext -bbox` output.
-fn pages(xhtml: &str) -> Vec<Vec<Word>> {
+/// The words of each page of `pdftotext -bbox` output. A `<word` tag that
+/// does not close before its `</word>` is an error naming the page.
+fn pages(xhtml: &str) -> Result<Vec<Vec<Word>>, WttError> {
     let mut out = Vec::new();
-    for page in xhtml.split("<page ").skip(1) {
+    for (pi, page) in xhtml.split("<page ").skip(1).enumerate() {
         let mut words = Vec::new();
         let mut rest = page;
         while let Some(at) = rest.find("<word ") {
             rest = &rest[at..];
             let (Some(close), Some(end)) = (rest.find('>'), rest.find("</word>")) else { break };
+            if close > end {
+                return Err(WttError::Format(pi + 1, "a malformed word tag".into()));
+            }
             let tag = &rest[..close];
             if let (Some(x0), Some(y0), Some(x1), Some(y1)) = (attr(tag, "xMin"), attr(tag, "yMin"), attr(tag, "xMax"), attr(tag, "yMax")) {
                 words.push(Word { x0, y0, x1, y1, text: decode(&rest[close + 1..end]) });
@@ -133,7 +137,7 @@ fn pages(xhtml: &str) -> Vec<Vec<Word>> {
         }
         out.push(words);
     }
-    out
+    Ok(out)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -247,8 +251,15 @@ fn tokens(row: Row, words: &[&Word], stacked: &[&Word], page: usize) -> Result<V
     }
     for tok in &mut out {
         if let Tok::Time { h, m, frac, x1, y0, .. } = tok {
-            if m.is_none() {
+            let Some(mm) = *m else {
                 return Err(WttError::Format(page, format!("hours {h:02} without minutes")));
+            };
+            // After midnight the WTT writes 24:xx (and 00:xx); nothing runs past 03:59.
+            if *h > 27 {
+                return Err(WttError::Format(page, format!("hours {h:02} out of range")));
+            }
+            if mm > 59 {
+                return Err(WttError::Format(page, format!("minutes {mm:02} out of range")));
             }
             let mut st: Vec<&&Word> =
                 stacked.iter().filter(|s| (s.x0 - *x1).abs() < 0.6 && (-1.0..5.0).contains(&(s.y0 - *y0))).collect();
@@ -275,7 +286,7 @@ fn seconds(h: u32, m: u32, frac: u32) -> u32 {
 /// Every Monday-to-Friday trip, in page and column order.
 pub fn parse(xhtml: &str) -> Result<Vec<Trip>, WttError> {
     let mut trips = Vec::new();
-    for (pi, words) in pages(xhtml).into_iter().enumerate() {
+    for (pi, words) in pages(xhtml)?.into_iter().enumerate() {
         let page = pi + 1;
         let texts: Vec<&str> = words.iter().map(|w| w.text.as_str()).collect();
         let mf = texts.windows(3).any(|w| w == ["MONDAYS", "TO", "FRIDAYS"]) && !texts.contains(&"SATURDAYS");

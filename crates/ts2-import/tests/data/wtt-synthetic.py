@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # Writes wtt-synthetic.bbox.html: a made-up Working Timetable in the form
 # `pdftotext -bbox` gives for LU WTTs (words with their boxes), for the tests
-# of ts2_import::wtt. Fictional trains 301-303 and times; nothing in it comes
-# from TfL's timetable. Rerun after editing:
+# of ts2_import::wtt. Fictional trains 301-303, times and running times
+# (Bank platform 7 westbound 3 1/4 min, 8 westbound 3 3/4, 7 eastbound 4 1/2,
+# 8 eastbound 3 3/4); no figure in it comes from TfL's timetable. Rerun after editing:
 #   python3 crates/ts2-import/tests/data/wtt-synthetic.py > crates/ts2-import/tests/data/wtt-synthetic.bbox.html
 out = []
 def word(x0, y0, w, h, t):
@@ -63,14 +64,14 @@ page('WESTBOUND', W, [
     (142.0, {'train': '303', 'trip': '1', 'crew': '9', 'notes': 'Ety', 'extra': [(-6.16, 'Start')],
              'arr': 'Pfm 26', 'dep': ('05', '50'), 'depot': ('05', '52'), 'toform': 'Stop'}),
     (185.2, {'train': '302', 'trip': '1', 'crew': '2', 'notes': 'TThX', 'extra': [(-6.16, 'Start')], 'pf': '8',
-             'bank': ('06', '05'), 'arr': ('06', '09'), 'dep': ('06', '10'), 'siding': ('06', '11'), 'toform': ('06', '12')}),
+             'bank': ('06', '05'), 'arr': ('06', '08', {'frac': '34'}), 'dep': ('06', '10'), 'siding': ('06', '11'), 'toform': ('06', '12')}),
     (206.8, {'train': '302', 'trip': '2', 'crew': '2', 'notes': 'TThO', 'extra': [(-6.16, 'Start')], 'pf': '7',
-             'bank': ('06', '05'), 'arr': ('06', '08', {'frac': '12'}), 'dep': ('06', '10'), 'siding': ('06', '11'), 'toform': ('06', '12')}),
-    (250.0, {'train': '301', 'trip': '2', 'crew': '1', 'pf': '7', 'bank': ('06', '09'), 'arr': ('06', '12', {'frac': '12'}),
+             'bank': ('06', '05'), 'arr': ('06', '08', {'frac': '14'}), 'dep': ('06', '10'), 'siding': ('06', '11'), 'toform': ('06', '12')}),
+    (250.0, {'train': '301', 'trip': '2', 'crew': '1', 'pf': '7', 'bank': ('06', '09'), 'arr': ('06', '12', {'frac': '14'}),
              'dep': ('06', '13', {'frac': '12'}), 'siding': ('06', '14', {'frac': '12'}), 'toform': ('06', '16'), 'by': '2'}),
-    (336.5, {'train': '302', 'trip': '5', 'crew': '2', 'notes': 'WO', 'pf': '8', 'bank': ('06', '34', {'frac': '14'}),
+    (336.5, {'train': '302', 'trip': '5', 'crew': '2', 'notes': 'WO', 'pf': '8', 'bank': ('06', '34', {'frac': '12'}),
              'arr': ('06', '38', {'stacked': ('1', '4')}), 'toform': 'Stop'}),
-    (293.3, {'train': '301', 'trip': '4', 'crew': '1', 'pf': '7', 'bank': ('06', '24'), 'arr': ('06', '27', {'frac': '12'}),
+    (293.3, {'train': '301', 'trip': '4', 'crew': '1', 'pf': '7', 'bank': ('06', '24'), 'arr': ('06', '27', {'frac': '14'}),
              'dep': ('06', '28', {'frac': '12'}), 'depot': ('06', '30', {'frac': '12', 'wash': True}),
              'extra': [(49.0, 'Shed Rd')], 'toform': 'Stop'}),
 ])
@@ -78,11 +79,11 @@ E = [('train', 73.21), ('trip', 85.71), ('crew', 98.20), ('notes', 116.95), ('de
      ('arr', 135.70), ('dep', 141.95), ('bank', 148.20), ('pf', 154.45), ('toform', 166.95), ('by', 173.20)]
 page('EASTBOUND', E, [
     (142.0, {'train': '301', 'trip': '1', 'crew': '1', 'extra': [(-6.16, 'Start')], 'depot': ('06', '00'),
-             'arr': ('06', '01', {'frac': '12'}), 'dep': ('06', '03'), 'bank': ('06', '07', {'frac': '14'}), 'pf': '7', 'toform': ('06', '09')}),
+             'arr': ('06', '01', {'frac': '12'}), 'dep': ('06', '03'), 'bank': ('06', '07', {'frac': '12'}), 'pf': '7', 'toform': ('06', '09')}),
     (185.2, {'train': '302', 'trip': '3', 'crew': '2', 'siding': ('06', '12'), 'arr': ('06', '12', {'frac': '34'}),
-             'dep': ('06', '13', {'frac': '12'}), 'bank': ('06', '17', {'frac': '12'}), 'pf': '8', 'toform': ('06', '34', {'stacked': ('1', '4')})}),
+             'dep': ('06', '13', {'frac': '12'}), 'bank': ('06', '17', {'frac': '14'}), 'pf': '8', 'toform': ('06', '34', {'stacked': ('1', '2')})}),
     (228.4, {'train': '301', 'trip': '3', 'crew': '1', 'siding': ('06', '16'), 'arr': ('06', '16', {'frac': '34'}),
-             'dep': ('06', '18'), 'bank': ('06', '22', {'frac': '14'}), 'pf': '7', 'toform': ('06', '24')}),
+             'dep': ('06', '18'), 'bank': ('06', '22', {'frac': '12'}), 'pf': '7', 'toform': ('06', '24')}),
 ])
 # A Saturday page: never read.
 out.append('  <page width="595.220000" height="842.000000">')

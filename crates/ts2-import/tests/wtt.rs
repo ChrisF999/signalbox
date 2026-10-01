@@ -25,12 +25,13 @@ fn at(s: &str) -> Option<u32> {
     parse_hms(s)
 }
 
-/// What the synthetic WTT says about itself.
+/// What the synthetic WTT says about itself (fictional figures, like the
+/// rest of it).
 fn checks() -> Checks {
     Checks {
-        running: vec![("7", Bound::West, 210), ("8", Bound::West, 240), ("7", Bound::East, 255), ("8", Bound::East, 240)],
+        running: vec![("7", Bound::West, 195), ("8", Bound::West, 225), ("7", Bound::East, 270), ("8", Bound::East, 225)],
         snapshots: vec![(at("05:51").unwrap(), 0), (at("06:10").unwrap(), 2), (at("06:36").unwrap(), 1)],
-        intervals: vec![(at("06:00").unwrap(), at("06:40").unwrap(), 585)],
+        intervals: vec![(at("06:00").unwrap(), at("06:40").unwrap(), 590)],
     }
 }
 
@@ -47,12 +48,13 @@ fn every_monday_to_friday_column_is_read() {
     let t = find(&ts, 301, 2);
     assert_eq!(t.bound, Bound::West);
     assert_eq!(t.platform.as_deref(), Some("7"));
-    assert_eq!((t.bank, t.arr, t.dep, t.siding, t.to_form), (at("06:09"), at("06:12:30"), at("06:13:30"), at("06:14:30"), at("06:16")));
+    assert_eq!((t.bank, t.arr, t.dep, t.siding, t.to_form), (at("06:09"), at("06:12:15"), at("06:13:30"), at("06:14:30"), at("06:16")));
     // Fractions: `12` = ½, `14` = ¼, `34` = ¾, and a numerator stacked on its denominator.
     assert_eq!(find(&ts, 302, 3).arr, at("06:12:45"));
-    assert_eq!(find(&ts, 302, 5).bank, at("06:34:15"));
+    assert_eq!(find(&ts, 302, 5).bank, at("06:34:30"));
     assert_eq!(find(&ts, 302, 5).arr, at("06:38:15"));
-    assert_eq!(find(&ts, 302, 3).to_form, at("06:34:15"));
+    assert_eq!(find(&ts, 302, 3).to_form, at("06:34:30"));
+    assert_eq!(find(&ts, 302, 3).bank, at("06:17:15"));
     // `06z30` is 06:30 with the train-wash mark; `Stop` ends a working.
     let t = find(&ts, 301, 4);
     assert_eq!((t.depot, t.wash, t.to_form), (at("06:30:30"), true, None));
@@ -62,7 +64,7 @@ fn every_monday_to_friday_column_is_read() {
     assert_eq!((t.starts_in.as_deref(), t.dep, t.depot), (Some("26"), at("05:50"), at("05:52")));
     assert!(t.has("Start") && t.has("Ety"));
     let t = find(&ts, 301, 1);
-    assert_eq!((t.bound, t.depot, t.arr, t.dep, t.bank), (Bound::East, at("06:00"), at("06:01:30"), at("06:03"), at("06:07:15")));
+    assert_eq!((t.bound, t.depot, t.arr, t.dep, t.bank), (Bound::East, at("06:00"), at("06:01:30"), at("06:03"), at("06:07:30")));
 }
 
 #[test]
@@ -82,7 +84,7 @@ fn a_day_is_checked_against_what_the_wtt_says() {
     let day = wtt::on_day(&trips(), Day::Wed).unwrap();
     let r = wtt::check(&day, &checks()).unwrap();
     assert_eq!((r.trips, r.trains, r.running_exact, r.running_longer, r.links), (8, 3, 7, 0, 5));
-    assert_eq!(r.intervals, vec![(at("06:00").unwrap(), at("06:40").unwrap(), 585)]);
+    assert_eq!(r.intervals, vec![(at("06:00").unwrap(), at("06:40").unwrap(), 590)]);
     let mut c = checks();
     c.snapshots[1].1 = 3;
     assert!(matches!(wtt::check(&day, &c), Err(WttError::Check(m)) if m.contains("2 trains in service at 06:10:00")));
@@ -150,4 +152,29 @@ fn a_wrong_file_is_refused() {
     assert_eq!(wtt::parse("<html><body>not a timetable</body></html>"), Err(WttError::NoPages));
     let text = std::fs::read_to_string(SYNTHETIC).unwrap().replacen(">06</word>", ">6a</word>", 1);
     assert!(matches!(wtt::parse(&text), Err(WttError::Format(..))), "a garbled time");
+}
+
+/// A word tag cut short is an error naming its page, not a panic.
+#[test]
+fn a_malformed_word_is_refused() {
+    let text = std::fs::read_to_string(SYNTHETIC).unwrap();
+    let bad = text.replacen(r#"">WESTBOUND</word>"#, r#""</word>"#, 1);
+    assert_ne!(bad, text);
+    assert!(matches!(wtt::parse(&bad), Err(WttError::Format(2, m)) if m.contains("malformed")), "{:?}", wtt::parse(&bad));
+}
+
+/// Minutes past 59 and hours past 27 are errors naming the page; hours
+/// 24–27 are how a WTT may write times after midnight.
+#[test]
+fn out_of_range_times_are_refused() {
+    let text = std::fs::read_to_string(SYNTHETIC).unwrap();
+    // 303/1 leaves at 05:50: its minutes are the first `50` word.
+    let minutes = text.replacen(">50</word>", ">75</word>", 1);
+    assert!(matches!(wtt::parse(&minutes), Err(WttError::Format(2, m)) if m.contains("minutes 75")), "{:?}", wtt::parse(&minutes));
+    assert!(wtt::parse(&text.replacen(">06</word>", ">24</word>", 1)).is_ok(), "24:05 is after midnight");
+    let hours = text.replacen(">06</word>", ">29</word>", 1);
+    assert!(matches!(wtt::parse(&hours), Err(WttError::Format(_, m)) if m.contains("hours 29")), "{:?}", wtt::parse(&hours));
+    let wash = text.replacen(">06z30</word>", ">06z61</word>", 1);
+    assert_ne!(wash, text);
+    assert!(matches!(wtt::parse(&wash), Err(WttError::Format(_, m)) if m.contains("minutes 61")), "{:?}", wtt::parse(&wash));
 }
