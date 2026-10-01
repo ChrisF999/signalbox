@@ -6,7 +6,8 @@ Runs headless Chromium three ways against a dev-login front at BASE and
 prints one ok/FAIL line per case; exits 1 if any case fails. Screenshots and
 each case's browser console go to OUTDIR.
 
-  webgl2  no flags: Chromium has the WebGPU API but no adapter, so the client
+  webgl2  no WebGPU flag (--enable-unsafe-swiftshader keeps software WebGL):
+          Chromium has the WebGPU API but no adapter, so the client
           must fall back to WebGL2 (asserted first, so the case cannot pass
           vacuously); the lobby and a Drain game must be drawn.
   webgpu  --enable-unsafe-webgpu: a software WebGPU adapter; the client must
@@ -18,6 +19,7 @@ each case's browser console go to OUTDIR.
 import json
 import struct
 import sys
+import time
 import zlib
 
 from playwright.sync_api import sync_playwright
@@ -79,6 +81,20 @@ def not_blank(rows):
     return 1.0 - max(seen.values()) / total
 
 
+DEADLINE_S = 60
+
+
+def wait_until(page, ready, seconds=DEADLINE_S):
+    """Polls ready() every 250 ms (letting the page run) until it is true or
+    the deadline passes; returns whether it became true."""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if ready():
+            return True
+        page.wait_for_timeout(250)
+    return ready()
+
+
 def run_case(p, name, flags):
     """Returns a list of failure reasons (empty: ok) and writes OUT/name-*.png
     and OUT/name-console.txt."""
@@ -93,7 +109,16 @@ def run_case(p, name, flags):
     page.route_web_socket("**/ws", lambda ws: sockets.append(ws.connect_to_server()))
     page.goto(f"{BASE}/auth/dev?user=check")
     no_adapter = page.evaluate(NO_ADAPTER)
-    page.wait_for_timeout(4000)
+    if name == "none":
+        try:
+            page.wait_for_selector("#fallback:not([hidden])", timeout=DEADLINE_S * 1000)
+        except Exception:
+            pass
+    else:
+        wait_until(page, lambda: any("signalbox: drawing with" in line for line in logs))
+        if name == "webgl2":
+            wait_until(page, lambda: bool(sockets))
+        page.wait_for_timeout(500)  # one more frame or two after the backend line
     page.screenshot(path=f"{OUT}/{name}-lobby.png")
     if name == "webgl2":
         if not no_adapter:
@@ -107,14 +132,19 @@ def run_case(p, name, flags):
             fails.append("the client opened no socket")
         else:
             sockets[-1].send(json.dumps({"type": "create_game", "layout": "drain", "seed": 1}))
-            page.wait_for_timeout(6000)
-            shot = page.screenshot(path=f"{OUT}/{name}-game.png")
-            _, _, rows = pixels(shot)
-            grey, cyan = count(rows, TRACK_GREY), count(rows, HEADCODE_CYAN)
-            if grey < 2000:
-                fails.append(f"only {grey} track-grey pixels in the game")
-            if cyan < 20:
-                fails.append(f"only {cyan} headcode-cyan pixels in the game")
+            seen = {}
+
+            def game_drawn():
+                seen["shot"] = page.screenshot(path=f"{OUT}/{name}-game.png")
+                _, _, rows = pixels(seen["shot"])
+                seen["grey"], seen["cyan"] = count(rows, TRACK_GREY), count(rows, HEADCODE_CYAN)
+                return seen["grey"] >= 2000 and seen["cyan"] >= 20
+
+            game_drawn() or wait_until(page, game_drawn)
+            if seen["grey"] < 2000:
+                fails.append(f"only {seen['grey']} track-grey pixels in the game after {DEADLINE_S} s")
+            if seen["cyan"] < 20:
+                fails.append(f"only {seen['cyan']} headcode-cyan pixels in the game after {DEADLINE_S} s")
     elif name == "webgpu":
         if no_adapter:
             fails.append("no WebGPU adapter even with --enable-unsafe-webgpu")
