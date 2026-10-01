@@ -616,7 +616,7 @@ H4–H6 with the lessons and their CI play-through.
 | M15 | Form errors at the top shift every row; a junk seed becomes random | Seed and Start are checked as typed, the problem shown in a fixed slot beside each field, Create greyed until both are right; the front's answers show in a fixed line below the form |
 | M16 | Tutorial highlights weak or over what they point at | The pulse never drops below 60 %; every highlight stroke has a black underlay; points are outlined along their legs, not ringed; a signal's ring is kept clear so the placer moves its number off it |
 
-### 10.2 Design choices for the owner (proposed — needs owner OK)
+### 10.2 Design choices for the owner (owner approved 2026-10-01)
 
 The findings are approved; these are the choices made in specifying them. Each is what the plan implements, so a
 "no" means a change to its task.
