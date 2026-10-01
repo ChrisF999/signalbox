@@ -506,7 +506,7 @@ async fn a_later_start_is_prepared_before_anyone_plays() {
     assert!((27000.0..27001.0).contains(&v.sim_time), "the game opens at 07:30: {}", v.sim_time);
     write_frame(&mut sock, &ToGame::Shutdown).await.unwrap();
     assert_eq!(exit_code(&mut child).await, Some(0));
-    assert!(stderr_of(&mut child).await.contains("prepared 07:00:00 → 07:30:00 in "));
+    assert!(stderr_of(&mut child).await.contains("prepared 07:00:00 to 07:30:00 in "));
     let sum = game::save::read_summary(&dir.join("g.sqlite")).unwrap();
     assert_eq!(sum.creator.as_deref(), Some("ann"));
     assert!(sum.sim_time >= 27000.0);
@@ -532,7 +532,7 @@ async fn preparing_past_its_budget_fails_with_seed_too_slow_and_leaves_nothing()
     let _sock = connect(&dir.join("g.sock")).await;
     assert_eq!(exit_code(&mut child).await, Some(i32::from(EXIT_SEED_TOO_SLOW)));
     let err = stderr_of(&mut child).await;
-    assert!(err.trim_end().lines().last().unwrap().starts_with("signalbox-game: seed_too_slow: preparing 07:00:00 → 23:00:00 took longer than 0.001 s"), "{err}");
+    assert!(err.trim_end().lines().last().unwrap().starts_with("signalbox-game: seed_too_slow: preparing 07:00:00 to 23:00:00 took longer than 0.001 s"), "{err}");
     assert!(!dir.join("g.sqlite").exists());
     assert!(!game::seed::temp_path(&dir.join("g.sqlite")).exists());
 }

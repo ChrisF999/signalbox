@@ -578,3 +578,33 @@ fn an_unreadable_frame_in_the_lobby_refreshes_the_lobby() {
     assert!(app.lobby_note().unwrap().starts_with("Unreadable message from the server"));
     assert_eq!(h.take_sent(), [lobby(LobbyMsg::ListGames)]);
 }
+
+/// Timetables spec §3.4: the game we wait in is listed as being prepared;
+/// if it could not be prepared in time we are back in the lobby, told why.
+#[test]
+fn a_game_being_prepared_and_one_that_was_too_slow() {
+    let (mut app, h) = open_app();
+    h.push(joined("g-one"));
+    let prep = Preparing { from: 20_400.0, to: 27_000.0 };
+    let info = GameInfo {
+        id: s("g-one"),
+        layout: s("drain"),
+        state: GameState::Running,
+        sim_time: 21_000.0,
+        areas: vec![],
+        players: vec![],
+        error: None,
+        creator: Some(s("ann")),
+        can_delete: false,
+        preparing: Some(prep),
+    };
+    h.push(ServerFrame::Lobby(LobbyReply::Games { games: vec![info] }));
+    app.tick(1.0);
+    assert_eq!(app.preparing(), Some(prep));
+    assert_eq!(client_core::text::preparing_text(&prep), "Preparing 05:40 to 07:30…");
+    h.push(ServerFrame::error(codes::SEED_TOO_SLOW, "The game could not be prepared in time."));
+    app.tick(2.0);
+    assert!(app.game().is_none());
+    assert_eq!(app.preparing(), None);
+    assert_eq!(app.lobby_note(), Some("The game could not be prepared in time."));
+}

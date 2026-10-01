@@ -366,6 +366,9 @@ impl App {
                     self.to_lobby(Some(TUTORIAL_ENDED.into()));
                 } else if code == codes::GAME_STOPPED {
                     self.to_lobby(Some("The game stopped. Join it again to resume it.".into()));
+                } else if code == codes::SEED_TOO_SLOW {
+                    // The game being prepared for us was not created.
+                    self.to_lobby(Some(message));
                 } else if joining.is_some_and(|j| j.rejoin) {
                     self.to_lobby(Some(format!("Could not rejoin the game: {message}")));
                 } else if let Some(g) = self.game.as_mut() {
@@ -454,6 +457,12 @@ impl App {
 
     pub fn games(&self) -> &[GameInfo] {
         &self.games
+    }
+
+    /// The game we are in, while the front lists it as being prepared.
+    pub fn preparing(&self) -> Option<protocol::Preparing> {
+        let id = &self.game.as_ref()?.id;
+        self.games.iter().find(|g| &g.id == id)?.preparing
     }
 
     pub fn layouts(&self) -> &[LayoutInfo] {

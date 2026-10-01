@@ -283,6 +283,9 @@ impl UiApp {
                     ui.label(&g.id);
                     ui.label(&g.layout);
                     let state = match g.state {
+                        GameState::Running if g.preparing.is_some() => {
+                            g.preparing.as_ref().map(client_core::text::preparing_text).unwrap_or_default()
+                        }
                         GameState::Running => "running".to_string(),
                         GameState::Saved => "saved".to_string(),
                         GameState::Crashed => format!("crashed: {}", g.error.as_deref().unwrap_or("?")),
@@ -636,7 +639,12 @@ impl UiApp {
         self.diagram = Some(rect);
         painter.rect_filled(rect, CornerRadius::ZERO, BG);
         let Some(scene) = &self.scene else {
-            let msg = if has_layout { "No diagram for this layout" } else { "Waiting for the layout…" };
+            let preparing = self.core.preparing().map(|p| client_core::text::preparing_text(&p));
+            let msg = match preparing {
+                _ if has_layout => "No diagram for this layout".to_string(),
+                Some(text) => text,
+                None => "Waiting for the layout…".to_string(),
+            };
             painter.text(rect.center(), Align2::CENTER_CENTER, msg, FontId::proportional(16.0), paint::LABEL);
             return;
         };

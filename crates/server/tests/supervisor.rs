@@ -1172,7 +1172,7 @@ async fn preparing_too_slowly_is_seed_too_slow_and_leaves_no_game() {
     rig.lobby(&ann, LobbyMsg::CreateGame { layout: s("twobox"), seed: Some(5), start: Some(s("23:00")) });
     let got = until(&ann, |f| error_code(f) == Some(codes::SEED_TOO_SLOW)).await;
     let Some(ServerFrame::Lobby(LobbyReply::Error { message, .. })) = got.last() else { unreachable!() };
-    assert!(message.contains("07:00:00 → 23:00:00"), "{message}");
+    assert!(message.contains("07:00:00 to 23:00:00"), "{message}");
     let id = joined_id(&got);
     for _ in 0..100 {
         if rig.sup.live_count() == 0 {

@@ -1,7 +1,7 @@
 //! Words for the screen: times, commands, refusals, notices, votes.
 //! Signals are named as the screen shows them (`Names`).
 
-use protocol::{ExitName, Notice, PlayerCommand, PointsPos, Proposal, Rejection, TrainState, VoteView};
+use protocol::{ExitName, Notice, PlayerCommand, PointsPos, Preparing, Proposal, Rejection, TrainState, VoteView};
 
 use crate::names::Names;
 
@@ -9,6 +9,14 @@ use crate::names::Names;
 pub fn fmt_hms(s: f64) -> String {
     let t = if s.is_finite() && s >= 0.0 { s.floor() as u64 % 86_400 } else { 0 };
     format!("{:02}:{:02}:{:02}", t / 3600, t / 60 % 60, t % 60)
+}
+
+/// A game still being prepared (timetables spec §3.4), for the lobby and
+/// the wait before its layout: "Preparing 05:40 to 07:30…" (the spec's
+/// arrow has no glyph in egui's default fonts).
+pub fn preparing_text(p: &Preparing) -> String {
+    let hm = |s: f64| fmt_hms(s)[..5].to_string();
+    format!("Preparing {} to {}…", hm(p.from), hm(p.to))
 }
 
 pub fn exit_text(e: &ExitName) -> &str {

@@ -458,7 +458,7 @@ async fn prepare(
     let elapsed = started.elapsed().as_secs_f64();
     match r {
         Ok(Progress::Reached) => {
-            eprintln!("signalbox-game: prepared {} → {} in {elapsed:.1} s", fmt_hms(from_s), fmt_hms(to_s));
+            eprintln!("signalbox-game: prepared {} to {} in {elapsed:.1} s", fmt_hms(from_s), fmt_hms(to_s));
             Ok(Some((seeding.finish().map_err(|e| format!("preparing: {e}"))?, held)))
         }
         Ok(Progress::Stopped) if stopping => {
@@ -469,7 +469,7 @@ async fn prepare(
             let got = fmt_hms(seeding.game().sim().now_s());
             seeding.abandon();
             Err(format!(
-                "{}: preparing {} → {} took longer than {} s (it reached {got})",
+                "{}: preparing {} to {} took longer than {} s (it reached {got})",
                 codes::SEED_TOO_SLOW,
                 fmt_hms(from_s),
                 fmt_hms(to_s),

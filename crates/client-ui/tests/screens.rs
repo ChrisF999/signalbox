@@ -681,3 +681,36 @@ fn the_enquiry_window_closes_with_its_cross() {
     assert!(!has_text(&out, "Train 1E01") && r.ui.enquiry().is_none(), "{:?}", texts(&out));
     assert!(r.ui.settings().enquiry, "closing the window leaves the setting on");
 }
+
+/// A game being prepared (timetables spec §3.4) says so in the lobby, and
+/// its creator, joined but without a layout yet, sees the same words.
+#[test]
+fn a_game_being_prepared_says_so_in_the_lobby_and_while_waiting() {
+    let mut r = Rig::lobby(drawn_twobox());
+    let info = GameInfo {
+        id: s("g-prep"),
+        layout: s("twobox"),
+        state: GameState::Running,
+        sim_time: 22_000.0,
+        areas: vec![],
+        players: vec![],
+        error: None,
+        creator: Some(s("ann")),
+        can_delete: false,
+        preparing: Some(Preparing { from: 20_400.0, to: 27_000.0 }),
+    };
+    r.h.push(ServerFrame::Lobby(LobbyReply::Games { games: vec![info] }));
+    r.frame();
+    let out = r.frame();
+    assert!(has_text(&out, "Preparing 05:40 to 07:30…"), "{:?}", texts(&out));
+    assert!(!has_text(&out, "running"));
+    r.h.push(ServerFrame::Lobby(LobbyReply::Joined { game: s("g-prep"), you: s("ann") }));
+    r.frame();
+    let out = r.frame();
+    assert!(has_text(&out, "Preparing 05:40 to 07:30…"), "{:?}", texts(&out));
+    assert!(!has_text(&out, "Waiting for the layout"));
+    let missing: Vec<char> = r.ctx.fonts_mut(|f| {
+        "Preparing 05:40 to 07:30…".chars().filter(|&c| c != ' ' && !f.has_glyph(&egui::FontId::proportional(16.0), c)).collect()
+    });
+    assert!(missing.is_empty(), "no glyph for {missing:?}");
+}
