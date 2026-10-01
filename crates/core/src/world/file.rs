@@ -223,12 +223,29 @@ pub struct PositionFile {
     pub direction: Dir,
 }
 
+/// One band of a delay generator: `weight` (relative, e.g. percent) of the
+/// draws fall uniformly in `[lo_s, hi_s]` seconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DelayBandFile {
+    pub lo_s: i32,
+    pub hi_s: i32,
+    pub weight: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct OptionsFile {
     pub start_time: String,
     pub entry_delay_s: [u32; 2],
     pub min_dwell_s: [u32; 2],
+    /// Weighted entry-delay bands (TS2's `[lo, hi, percent]`); when present
+    /// they replace `entry_delay_s`, which then only describes their span.
+    /// A negative delay enters early.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entry_delay_bands: Vec<DelayBandFile>,
+    /// Weighted minimum-dwell bands; when present they replace `min_dwell_s`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub min_dwell_bands: Vec<DelayBandFile>,
     pub overlap_release_s: f64,
     pub approach_lock_s: f64,
     pub late_penalty_per_min: i64,
@@ -243,6 +260,8 @@ impl Default for OptionsFile {
             start_time: "06:00:00".into(),
             entry_delay_s: [0, 0],
             min_dwell_s: [30, 30],
+            entry_delay_bands: Vec::new(),
+            min_dwell_bands: Vec::new(),
             overlap_release_s: 60.0,
             approach_lock_s: 120.0,
             late_penalty_per_min: 1,

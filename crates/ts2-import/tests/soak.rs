@@ -129,3 +129,19 @@ fn liverpool_street_metrics() {
     println!("liverpool-st seed {LIVERPOOL_SEED}: {}", m.summary());
     println!("{:?}", m.report);
 }
+
+/// Liverpool Street with its options stripped to what converters wrote
+/// before delay bands: it must run bit-identically to before bands existed.
+/// No signaller (the robot's choices may change; saves replay commands).
+#[test]
+fn liverpool_street_without_bands_hashes_as_before() {
+    let text = std::fs::read_to_string(format!("{}/tests/data/liverpool-st.json", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    let mut v = serde_json::to_value(ts2_import::convert(&text).unwrap().world).unwrap();
+    let o = v["options"].as_object_mut().unwrap();
+    o.remove("entry_delay_bands");
+    o.remove("min_dwell_bands");
+    let world = World::from_json(&v.to_string()).unwrap();
+    let mut sim = Sim::new(world, LIVERPOOL_SEED);
+    sim.run_for(3600.0);
+    assert_eq!(sim.state_hash(), 0x6437f3c3617813e5);
+}

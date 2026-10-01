@@ -481,6 +481,18 @@ fn build_timetable(f: &WorldFile, net: &Network) -> Result<Timetable, LoadError>
     if o.entry_delay_s[0] > o.entry_delay_s[1] || o.min_dwell_s[0] > o.min_dwell_s[1] {
         return Err(other("options: ranges must be [min, max]".into()));
     }
+    let bands = |what: &str, v: &[crate::world::file::DelayBandFile], min: i32| -> Result<Vec<DelayBand>, LoadError> {
+        if v.iter().any(|b| b.lo_s > b.hi_s || b.lo_s < min) {
+            return Err(other(format!("options: {what} must be [lo_s <= hi_s] bands from {min} s")));
+        }
+        if !v.is_empty() && v.iter().map(|b| u64::from(b.weight)).sum::<u64>() == 0 {
+            return Err(other(format!("options: {what} need a positive total weight")));
+        }
+        Ok(v.iter().map(|b| DelayBand { lo_s: b.lo_s, hi_s: b.hi_s, weight: b.weight }).collect())
+    };
+    // An entry can come at most a day early (keeps time sums far from overflow).
+    let entry_delay_bands = bands("entry_delay_bands", &o.entry_delay_bands, -86_400)?;
+    let min_dwell_bands = bands("min_dwell_bands", &o.min_dwell_bands, 0)?;
     for (what, v) in [("overlap_release_s", o.overlap_release_s), ("approach_lock_s", o.approach_lock_s)] {
         if !(v.is_finite() && v >= 0.0) {
             return Err(other(format!("options: {what} must be finite and not negative")));
@@ -490,6 +502,8 @@ fn build_timetable(f: &WorldFile, net: &Network) -> Result<Timetable, LoadError>
         start_s: time(&o.start_time, "options")?,
         entry_delay_s: (o.entry_delay_s[0], o.entry_delay_s[1]),
         min_dwell_s: (o.min_dwell_s[0], o.min_dwell_s[1]),
+        entry_delay_bands,
+        min_dwell_bands,
         overlap_release_s: o.overlap_release_s,
         approach_lock_s: o.approach_lock_s,
         late_penalty_per_min: o.late_penalty_per_min,

@@ -32,7 +32,9 @@ fn mini_timetable() {
     assert_eq!(tt.entries[0].time, "06:00:00");
     assert_eq!(tt.options.start_time, "06:00:00");
     assert_eq!(tt.options.min_dwell_s, [20, 120]);
-    assert_eq!(r.count(report::DELAY), 1, "two dwell bands merged");
+    let dwell: Vec<(i32, i32, u32)> = tt.options.min_dwell_bands.iter().map(|b| (b.lo_s, b.hi_s, b.weight)).collect();
+    assert_eq!(dwell.len(), 2, "both dwell bands kept: {dwell:?}");
+    assert_eq!(r.count(report::DELAY), 0, "bands are kept, not merged");
 }
 
 #[test]
@@ -173,4 +175,18 @@ fn initial_speed_that_overflows_when_converted_skips_the_train() {
     let c = convert_edited(|v| v["trains"][0]["initialSpeed"] = serde_json::json!(1e308));
     assert!(c.world.entries.is_empty());
     assert_eq!(c.report.count(report::TRAIN_SKIPPED), 1);
+}
+
+#[test]
+fn liverpool_street_keeps_its_delay_bands() {
+    let (tt, _) = convert("liverpool-st");
+    let bands = |v: &[signalbox_core::world::file::DelayBandFile]| v.iter().map(|b| (b.lo_s, b.hi_s, b.weight)).collect::<Vec<_>>();
+    assert_eq!(
+        bands(&tt.options.entry_delay_bands),
+        vec![(-120, -60, 15), (-60, 180, 50), (120, 300, 30), (300, 3600, 5)]
+    );
+    assert_eq!(bands(&tt.options.min_dwell_bands), vec![(45, 75, 90), (75, 180, 10)]);
+    // The merged range stays, for display and older readers.
+    assert_eq!(tt.options.entry_delay_s, [0, 3600]);
+    assert_eq!(tt.options.min_dwell_s, [45, 180]);
 }

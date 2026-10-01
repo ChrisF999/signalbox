@@ -1,6 +1,6 @@
 //! The simulation: world + state, stepped in fixed ticks.
 
-use rand::{Rng, SeedableRng};
+use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +14,7 @@ use crate::network::{Dir, Network, NodeKind};
 use crate::occupancy::Occupancy;
 use crate::points::PointsTable;
 use crate::scoring::Scores;
-use crate::timetable::{EndAction, EntryStart};
+use crate::timetable::{EndAction, EntryStart, draw_delay, earliest_delay_s};
 use crate::trains::{Dwell, Train};
 use crate::world::World;
 
@@ -342,16 +342,22 @@ impl Sim {
 
     /// Offer due entries to the fringe berth, then put waiting trains on the
     /// network when their entry section is free.
+    ///
+    /// Each entry is offered (and its delay drawn, in entry order) at its
+    /// booked time plus the earliest delay its bands allow (0 without bands,
+    /// so worlds without bands behave exactly as before), which lets a
+    /// negative delay bring a train in early, as in TS2.
     fn spawn_entries(&mut self, now: f64) -> Vec<Event> {
         let mut ev = Vec::new();
-        while self.st.next_entry < self.world.entries.len() && self.world.entries[self.st.next_entry].time_s <= now {
+        let lead = f64::from(earliest_delay_s(&self.world.options.entry_delay_bands));
+        while self.st.next_entry < self.world.entries.len() && self.world.entries[self.st.next_entry].time_s + lead <= now {
             let i = self.st.next_entry;
             self.st.next_entry += 1;
             if self.world.entries[i].on_demand {
                 continue;
             }
-            let (lo, hi) = self.world.options.entry_delay_s;
-            let delay = f64::from(self.rng.random_range(lo..=hi));
+            let o = &self.world.options;
+            let delay = f64::from(draw_delay(&o.entry_delay_bands, o.entry_delay_s, &mut self.rng));
             ev.extend(self.offer(i, self.world.entries[i].time_s + delay));
         }
         let mut used: Vec<SectionId> = Vec::new();
@@ -580,8 +586,7 @@ impl Sim {
                             ev.push(Event::WrongPlatform { train: t.id, platform: p, expected: want.clone() });
                         }
                     }
-                    let (lo, hi) = w.options.min_dwell_s;
-                    let dwell = f64::from(self.rng.random_range(lo..=hi));
+                    let dwell = f64::from(draw_delay(&w.options.min_dwell_bands, w.options.min_dwell_s, &mut self.rng));
                     t.dwell = Some(Dwell { platform: p, depart_at_s: c.dep_s.unwrap_or(0.0).max(now + dwell) });
                 }
             }

@@ -212,10 +212,14 @@ pub fn build(ts2: &Ts2, g: &Graph, report: &mut Report) -> Timetable {
         report::OPTIONS_IGNORED,
         "timeFactor, trackCircuitBased, warningSpeed, wrongDestinationPenalty, currentScore and clientToken have no equivalent",
     );
+    let (entry_delay_s, entry_delay_bands) = delay_gen(&o.default_delay_at_entry, "entry delay", i32::MIN, report);
+    let (min_dwell_s, min_dwell_bands) = delay_gen(&o.default_minimum_stop_time, "minimum stop time", 0, report);
     let options = OptionsFile {
         start_time: o.current_time.clone(),
-        entry_delay_s: delay_range(&o.default_delay_at_entry, "entry delay", report),
-        min_dwell_s: delay_range(&o.default_minimum_stop_time, "minimum stop time", report),
+        entry_delay_s,
+        min_dwell_s,
+        entry_delay_bands,
+        min_dwell_bands,
         late_penalty_per_min: o.late_penalty,
         wrong_platform_penalty: o.wrong_platform_penalty,
         ..OptionsFile::default()
@@ -223,27 +227,35 @@ pub fn build(ts2: &Ts2, g: &Graph, report: &mut Report) -> Timetable {
     Timetable { train_types, services, entries, options }
 }
 
-/// A TS2 delay generator (seconds, or `[lo, hi, percent]` bands) as `[min, max]`.
-fn delay_range(v: &serde_json::Value, what: &str, report: &mut Report) -> [u32; 2] {
+/// A TS2 delay generator (seconds, or `[lo, hi, percent]` bands) as its
+/// `[min, max]` span (clamped at 0: what older readers and displays use) and
+/// its weighted bands (none for a plain number), with negative bounds
+/// clamped to `floor`. The sim draws from the bands when there are any.
+fn delay_gen(v: &serde_json::Value, what: &str, floor: i32, report: &mut Report) -> ([u32; 2], Vec<DelayBandFile>) {
     let clamp = |x: f64| x.max(0.0).round() as u32;
     if let Some(n) = v.as_f64() {
-        return [clamp(n), clamp(n)];
+        return ([clamp(n), clamp(n)], Vec::new());
     }
-    if let Some(bands) = v.as_array() {
-        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
-        for b in bands.iter().filter_map(|b| b.as_array()) {
-            if let (Some(l), Some(h)) = (b.first().and_then(|x| x.as_f64()), b.get(1).and_then(|x| x.as_f64())) {
-                lo = lo.min(l);
-                hi = hi.max(h);
+    let secs = |x: f64| (x.round().clamp(-86_400.0, 86_400.0) as i32).max(floor);
+    let mut bands = Vec::new();
+    for b in v.as_array().into_iter().flatten() {
+        let b = b.as_array();
+        let num = |i: usize| b.and_then(|b| b.get(i)).and_then(|x| x.as_f64()).filter(|x| x.is_finite());
+        match (num(0), num(1), num(2)) {
+            (Some(l), Some(h), Some(p)) if l <= h && p >= 0.0 => {
+                bands.push(DelayBandFile { lo_s: secs(l), hi_s: secs(h), weight: p.round() as u32 });
             }
-        }
-        if lo.is_finite() && hi.is_finite() {
-            if bands.len() > 1 {
-                report.warn(report::DELAY, format!("{what}: {} bands merged into [{lo}, {hi}] s", bands.len()));
-            }
-            let (l, h) = (clamp(lo), clamp(hi));
-            return [l, h.max(l)];
+            _ => report.warn(report::DELAY, format!("{what}: band {} is not [lo, hi, percent]; dropped", serde_json::json!(b))),
         }
     }
-    [0, 0]
+    if bands.iter().all(|b| b.weight == 0) {
+        if !bands.is_empty() {
+            report.warn(report::DELAY, format!("{what}: bands have no weight; no delay"));
+        }
+        return ([0, 0], Vec::new());
+    }
+    let lo = bands.iter().map(|b| b.lo_s).min().unwrap_or(0);
+    let hi = bands.iter().map(|b| b.hi_s).max().unwrap_or(0);
+    let (l, h) = (clamp(f64::from(lo)), clamp(f64::from(hi)));
+    ([l, h.max(l)], bands)
 }
