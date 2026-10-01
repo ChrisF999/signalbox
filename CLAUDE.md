@@ -208,9 +208,11 @@ output is byte-identical for the same input.
   `--seed-budget-ms` for tests), else it exits 3 and the lobby gets
   `seed_too_slow`. Any other failure while preparing exits 4
   (`EXIT_NOT_PREPARED`, error prefix `preparing failed`); a stop (Shutdown,
-  SIGTERM) exits 0 with no save. Either way the create is not listed: the
-  front removes the half-built save and sends `not_created` (or
-  `seed_too_slow`). The front sweeps stale `*.sqlite.seeding*` at startup;
+  SIGTERM) exits 0 with no save. The front decides by the save alone: a
+  create whose process is gone and left no save was never created, whatever
+  its exit status (lost if the front had to kill it). It is not listed; the
+  half-built save is removed and players get `not_created` (or
+  `seed_too_slow`, also read from the last stderr line). The front sweeps stale `*.sqlite.seeding*` at startup;
   more than `MAX_HELD` (1000) front frames while preparing fail the create.
   The budget is per game: several big seeds at once share the CPU.
   Cost (release): Liverpool St 05:00→23:00 about 9 s (`--test seed_timing`).

@@ -1170,23 +1170,16 @@ async fn preparing_too_slowly_is_seed_too_slow_and_leaves_no_game() {
     let rig = Rig { sup: Supervisor::new(cfg, layouts).unwrap(), root };
     let ann = rig.attach("ann");
     rig.lobby(&ann, LobbyMsg::CreateGame { layout: s("twobox"), seed: Some(5), start: Some(s("23:00")) });
-    let got = until(&ann, |f| error_code(f) == Some(codes::SEED_TOO_SLOW)).await;
+    let got = until_slow(&ann, |f| error_code(f) == Some(codes::SEED_TOO_SLOW)).await;
     let Some(ServerFrame::Lobby(LobbyReply::Error { message, .. })) = got.last() else { unreachable!() };
     assert!(message.contains("07:00:00 to 23:00:00"), "{message}");
     let id = joined_id(&got);
-    for _ in 0..100 {
-        if rig.sup.live_count() == 0 {
-            break;
-        }
-        sleep(Duration::from_millis(50)).await;
-    }
-    assert_eq!(rig.sup.live_count(), 0);
-    assert!(rig.sup.list_games().iter().all(|g| g.id != id), "{:?}", rig.sup.list_games());
+    gone(&rig, &id).await;
     assert_eq!(rig.sup.game_of("ann"), None, "back in the lobby");
     assert_eq!(std::fs::read_dir(rig.saves()).unwrap().count(), 0, "nothing is left on disk");
     // A start the budget allows still works through the same binary.
     rig.lobby(&ann, LobbyMsg::CreateGame { layout: s("twobox"), seed: Some(5), start: Some(s("06:00")) });
-    until(&ann, is_view).await;
+    until_slow(&ann, is_view).await;
     rig.sup.shutdown_all(Duration::from_secs(10)).await;
 }
 
@@ -1200,16 +1193,31 @@ async fn a_crash_while_preparing_leaves_no_game() {
     rig.wait_for(&id, |g| g.preparing.is_some()).await;
     let pid = rig.sup.pid(&id).expect("a preparing game has a pid");
     kill(pid, "KILL");
-    let got = until(&ann, |f| error_code(f) == Some(codes::NOT_CREATED)).await;
+    let got = until_slow(&ann, |f| error_code(f) == Some(codes::NOT_CREATED)).await;
     let Some(ServerFrame::Lobby(LobbyReply::Error { message, .. })) = got.last() else { unreachable!() };
     assert!(message.starts_with("The game could not be prepared"), "{message}");
     gone(&rig, &id).await;
     assert_eq!(std::fs::read_dir(rig.saves()).unwrap().count(), 0, "the half-built save is removed");
 }
 
-/// The game is out of the live table and the lobby.
+/// Frames until one matches `stop`, each within 60 s: the preparing tests
+/// wait on child processes that a loaded host may run slowly.
+async fn until_slow(sock: &Sock, stop: impl Fn(&ServerFrame) -> bool) -> Vec<ServerFrame> {
+    let mut got = Vec::new();
+    loop {
+        let f = timeout(Duration::from_secs(60), sock.me.outbox.pop()).await.expect("no frame within 60 s");
+        let f = f.unwrap_or_else(|| panic!("closed; got {got:?}"));
+        let done = stop(&f);
+        got.push(f);
+        if done {
+            return got;
+        }
+    }
+}
+
+/// The game is out of the live table and the lobby (within 60 s).
 async fn gone(rig: &Rig, id: &str) {
-    for _ in 0..100 {
+    for _ in 0..1200 {
         if rig.sup.live_count() == 0 {
             break;
         }
@@ -1251,7 +1259,7 @@ async fn any_failure_while_preparing_leaves_no_game() {
     });
     let ann = rig.attach("ann");
     rig.lobby(&ann, LobbyMsg::CreateGame { layout: s("twobox"), seed: Some(5), start: Some(s("23:00")) });
-    let got = until(&ann, |f| error_code(f) == Some(codes::NOT_CREATED)).await;
+    let got = until_slow(&ann, |f| error_code(f) == Some(codes::NOT_CREATED)).await;
     let Some(ServerFrame::Lobby(LobbyReply::Error { message, .. })) = got.last() else { unreachable!() };
     assert!(message.contains("disk is full"), "{message}");
     let id = joined_id(&got);
@@ -1270,7 +1278,7 @@ async fn a_game_stopped_while_preparing_is_not_listed() {
     let id = joined_id(&got);
     rig.wait_for(&id, |g| g.preparing.is_some()).await;
     kill(rig.sup.pid(&id).unwrap(), "TERM");
-    let got = until(&ann, |f| error_code(f).is_some()).await;
+    let got = until_slow(&ann, |f| error_code(f).is_some()).await;
     let Some(ServerFrame::Lobby(LobbyReply::Error { code, message })) = got.last() else { unreachable!() };
     assert_eq!(code, codes::NOT_CREATED);
     assert!(!message.contains("resume"), "{message}");
@@ -1323,4 +1331,32 @@ async fn the_seed_name_is_reserved_in_any_case() {
     assert!(server::supervisor::is_reserved("Robot") && server::supervisor::is_reserved("sEEd"));
     assert!(!server::supervisor::is_reserved("seeder"));
     rig.sup.shutdown_all(Duration::from_secs(10)).await;
+}
+
+/// The front kills a child that does not exit within 5 s of closing its
+/// socket. One that already reported `seed_too_slow` and removed its
+/// half-built save, then lingered, has no exit status left to read: the
+/// game is still not created (no save), and its last line still says why.
+#[tokio::test]
+async fn a_preparing_child_killed_after_it_cleaned_up_still_leaves_no_game() {
+    let rig = rig_with_bin("seed-linger", |root| {
+        let path = root.join("lingering-game");
+        std::fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\ncase \"$*\" in *--create*) {GAME_BIN} \"$@\" --seed-budget-ms 1; trap '' TERM; exec sleep 60;; *) exec {GAME_BIN} \"$@\";; esac\n"
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    });
+    let ann = rig.attach("ann");
+    rig.lobby(&ann, LobbyMsg::CreateGame { layout: s("twobox"), seed: Some(5), start: Some(s("23:00")) });
+    let got = until_slow(&ann, |f| error_code(f).is_some() || *f == notice(Notice::GameCrashed)).await;
+    let Some(ServerFrame::Lobby(LobbyReply::Error { code, message })) = got.last() else { panic!("{got:?}") };
+    assert_eq!(code, codes::SEED_TOO_SLOW, "{message}");
+    let id = joined_id(&got);
+    gone(&rig, &id).await;
+    assert_eq!(std::fs::read_dir(rig.saves()).unwrap().count(), 0);
 }

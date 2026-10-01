@@ -32,7 +32,7 @@ use tokio::time::{Instant, sleep, timeout};
 use crate::layouts::{Layouts, new_game_id, valid_game_id};
 use crate::lessons::Lessons;
 use crate::outbox::{Outbox, Pushed};
-use crate::process::{EXIT_NOT_PREPARED, EXIT_SEED_TOO_SLOW, PREPARING_FAILED, normalise_start};
+use crate::process::{EXIT_SEED_TOO_SLOW, PREPARING_FAILED, normalise_start};
 
 /// Game processes running at once, at most (tutorials not counted).
 pub const MAX_LIVE_GAMES: usize = 8;
@@ -788,24 +788,26 @@ impl Supervisor {
             let _ = timeout(Duration::from_secs(1), t).await;
         }
         let line = last_line.lock().expect("stderr lock").clone();
-        // A new game that failed or was stopped while it was being prepared
-        // has no save: it is not listed (timetables spec §3.4).
-        if matches!(start, Start::Create { .. }) {
+        // A new game with no save once its process is gone was never
+        // created (a ready game always has its save): it failed or was
+        // stopped while it was being prepared, and it is not listed
+        // (timetables spec §3.4). This holds whatever the exit status, which
+        // is lost when the front had to kill a child that had already
+        // cleaned up; its last line then still tells `seed_too_slow`.
+        if matches!(start, Start::Create { .. }) && !self.save_path(&id).exists() {
             let save = self.save_path(&id);
+            game::seed::remove_partial(&save);
             let code = status.and_then(|s| s.code());
-            let stopped = trouble.is_none() && code == Some(0) && !save.exists();
-            let failed = code == Some(i32::from(EXIT_NOT_PREPARED)) || game::seed::temp_path(&save).exists();
-            let too_slow = code == Some(i32::from(EXIT_SEED_TOO_SLOW));
-            if stopped || failed || too_slow {
-                game::seed::remove_partial(&save);
-                let why = match (stopped, line.is_empty(), trouble.clone()) {
-                    (true, _, _) => None,
-                    (false, false, _) => Some(line.clone()),
-                    (false, true, Some(t)) => Some(t),
-                    (false, true, None) => Some("the game process ended".into()),
-                };
-                return self.not_created(&id, too_slow, why);
-            }
+            let too_slow = code == Some(i32::from(EXIT_SEED_TOO_SLOW))
+                || line.starts_with(&format!("signalbox-game: {}: ", codes::SEED_TOO_SLOW));
+            let stopped = !too_slow && trouble.is_none() && code == Some(0);
+            let why = match (stopped, line.is_empty(), trouble.clone()) {
+                (true, _, _) => None,
+                (false, false, _) => Some(line.clone()),
+                (false, true, Some(t)) => Some(t),
+                (false, true, None) => Some("the game process ended".into()),
+            };
+            return self.not_created(&id, too_slow, why);
         }
         if trouble.is_none() && status.is_some_and(|s| s.success()) {
             self.finished(&id);
