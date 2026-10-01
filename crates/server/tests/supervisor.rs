@@ -740,8 +740,12 @@ async fn the_creator_deletes_their_saved_game_and_everyone_sees_it_go() {
     games_list(&ann).await;
     let g = rig.wait_for(&id, |g| g.state == GameState::Saved).await;
     assert_eq!((g.creator.as_deref(), g.can_delete), (Some("ann"), false), "the plain list is nobody's");
-    std::fs::write(rig.saves().join(format!("{id}.sqlite-wal")), "").unwrap();
-    std::fs::write(rig.saves().join(format!("{id}.sqlite-shm")), "").unwrap();
+    // Make sure the -wal and -shm exist without emptying them: a WAL the
+    // game could not checkpoint on close (the front's lobby scan had the
+    // file open) still holds the save.
+    for ext in ["-wal", "-shm"] {
+        std::fs::OpenOptions::new().create(true).append(true).open(rig.saves().join(format!("{id}.sqlite{ext}"))).unwrap();
+    }
     assert_eq!(listed(&rig, &ann).await[0].can_delete, true);
     assert_eq!(listed(&rig, &bob).await[0].can_delete, false);
     rig.lobby(&bob, LobbyMsg::DeleteGame { game: id.clone() });
