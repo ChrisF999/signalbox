@@ -68,6 +68,8 @@ pub const GAP: f32 = 0.5;
 /// The non-lying leg, and a crossover's middle while neither end lies over
 /// it, are drawn this fraction of the track's width (polish spec M12).
 pub const UNUSED_W: f32 = 0.4;
+/// A thinned leg shorter than this on screen is drawn at full width instead.
+pub const THIN_MIN_PX: f32 = 3.0;
 /// The ○A button's circle.
 pub const AUTO_R: f32 = 4.0;
 /// Headcodes: text size in pixels.
@@ -281,25 +283,62 @@ fn points_shapes(out: &mut Vec<Shape>, p: &PointsMark, to: &dyn Fn(Pos2) -> Pos2
         let end = leg_end(p, c, far, meets);
         let gap_end = c + (far - c) * GAP;
         // The other leg: thin, and short of the points (polish spec M12).
-        bar(out, gap_end, end, w * UNUSED_W, colour, p.fringe);
+        // Not so short that it would vanish: under THIN_MIN_PX it keeps the full width.
+        let thin = if (end - gap_end).length() < THIN_MIN_PX { w } else { w * UNUSED_W };
+        bar(out, gap_end, end, thin, colour, p.fringe);
     }
 }
 
-/// Sections lying beyond the non-lying leg of two or more points: the middle
-/// of a crossover neither end of which is set over it (polish spec M12).
+/// The middle of a crossover neither end of which is set over it (polish
+/// spec M12): a section that at least two points reach, every one of them
+/// through its non-lying leg, that holds no points itself and that no points
+/// lie over or have their toe on. Platform loops are not crossovers: when two
+/// of those points are otherwise joined by track they share (a loop between
+/// them), the section is left full width. Points missing from the view are
+/// taken as lying normal.
 pub fn unused_crossovers(scene: &Scene, view: Option<&View>) -> std::collections::BTreeSet<String> {
-    let mut seen: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    use std::collections::{BTreeMap, BTreeSet};
+    #[derive(Default)]
+    struct Touch<'a> {
+        unused: Vec<&'a PointsMark>,
+        used: bool,
+    }
+    let mut seen: BTreeMap<&str, Touch> = BTreeMap::new();
     for p in &scene.points {
         let lying = view.and_then(|v| v.points.get(&p.name)).map_or(PointsPos::Normal, |v| v.position);
-        let other = match lying {
-            PointsPos::Normal => &p.reverse_meets,
-            PointsPos::Reverse => &p.normal_meets,
+        let (lie, other) = match lying {
+            PointsPos::Normal => (&p.normal_meets, &p.reverse_meets),
+            PointsPos::Reverse => (&p.reverse_meets, &p.normal_meets),
         };
+        seen.entry(p.section.as_str()).or_default().used = true;
+        for m in p.toe_meets.iter().chain(lie) {
+            seen.entry(m.as_str()).or_default().used = true;
+        }
         for m in other {
-            *seen.entry(m.as_str()).or_default() += 1;
+            seen.entry(m.as_str()).or_default().unused.push(p);
         }
     }
-    seen.into_iter().filter(|(_, n)| *n >= 2).map(|(s, _)| s.to_string()).collect()
+    // Every section a points' legs reach or that holds it, bar `except`.
+    fn around<'a>(p: &'a PointsMark, except: &str) -> BTreeSet<&'a str> {
+        [&p.toe_meets, &p.normal_meets, &p.reverse_meets]
+            .into_iter()
+            .flatten()
+            .map(String::as_str)
+            .chain([p.section.as_str()])
+            .filter(|s| *s != except)
+            .collect()
+    }
+    seen.into_iter()
+        .filter(|(s, t)| {
+            !t.used
+                && t.unused.len() >= 2
+                && !t.unused.iter().enumerate().any(|(i, a)| {
+                    let near = around(a, s);
+                    t.unused[i + 1..].iter().any(|b| around(b, s).iter().any(|x| near.contains(x)))
+                })
+        })
+        .map(|(s, _)| s.to_string())
+        .collect()
 }
 
 fn track_shapes(d: &mut Drawing, t: &TrackLine, to: &dyn Fn(Pos2) -> Pos2, st: &PaintState, w: f32, unused: bool) {

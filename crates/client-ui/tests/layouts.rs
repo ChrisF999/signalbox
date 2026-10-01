@@ -135,8 +135,8 @@ fn every_lesson_draws_with_its_highlights() {
     }
 }
 
-/// Polish spec M12: Liverpool Street's crossovers are found, and a
-/// crossover's middle stops counting as unused once an end lies over it.
+/// Polish spec M12: crossover middles are found (and only those), and one
+/// stops counting as unused once an end lies over it.
 #[test]
 fn crossovers_neither_end_of_which_is_set_are_found() {
     let mut g = Game::new(world("liverpool-st"), GameMeta { layout: "liverpool-st".into(), seed: 1 });
@@ -144,9 +144,80 @@ fn crossovers_neither_end_of_which_is_set_are_found() {
     let (l, mut v) = (g.layout_of("sam").unwrap(), g.view_of("sam").unwrap());
     let sc = Scene::build(&l).unwrap();
     let unused = client_ui::paint::unused_crossovers(&sc, Some(&v));
-    assert!(unused.len() >= 4, "{unused:?}");
+    for running in ["T172", "T198", "T200", "T267", "T272"] {
+        assert!(!unused.contains(running), "{running} is a running line, not a crossover middle");
+    }
+    let expected = [
+        "T135", "T162", "T168", "T213", "T216", "T227", "T229", "T231", "T233", "T240", "T245", "T251", "T253", "T258", "T260", "T288",
+        "T291", "T294",
+    ];
+    assert_eq!(unused.iter().map(String::as_str).collect::<Vec<_>>(), expected);
+    // Nothing flagged has points lying over it, a toe on it, or points in it.
+    for s in &unused {
+        assert!(sc.points.iter().all(|p| p.section != *s && !p.toe_meets.contains(s) && !p.normal_meets.contains(s)), "{s}");
+    }
     let middle = unused.iter().next().unwrap().clone();
     let end = sc.points.iter().find(|p| p.reverse_meets.contains(&middle)).unwrap();
     v.points.get_mut(&end.name).unwrap().position = protocol::PointsPos::Reverse;
     assert!(!client_ui::paint::unused_crossovers(&sc, Some(&v)).contains(&middle), "{} lies over it", end.name);
+}
+
+/// A crossover middle is drawn thin, full width once its end is set over it.
+#[test]
+fn a_crossover_middle_is_drawn_thin() {
+    let screen = Rect::from_min_size(pos2(0.0, 40.0), vec2(950.0, 700.0));
+    let mut g = Game::new(world("liverpool-st"), GameMeta { layout: "liverpool-st".into(), seed: 1 });
+    g.connect("sam");
+    let (l, mut v) = (g.layout_of("sam").unwrap(), g.view_of("sam").unwrap());
+    let sc = Scene::build(&l).unwrap();
+    let cam = Camera::fit(sc.fit_bounds().unwrap(), screen);
+    let names = Names::new(&l);
+    let w = client_ui::paint::track_w(cam.scale);
+    let unused = client_ui::paint::unused_crossovers(&sc, Some(&v));
+    let middle = unused.iter().next().unwrap().clone();
+    let widths = |v: &protocol::View| {
+        let st = PaintState { view: Some(v), selected: None, exits: &[], refused: None, blocking: None, time: 0.0, aspects: AspectMode::RedGreen, numbers: true, names: &names, highlight: &[] };
+        let d = draw(&sc, &cam, screen, &st);
+        let t = sc.tracks.iter().find(|t| t.section == middle).unwrap();
+        let (a, b) = (cam.to_screen(screen, t.a), cam.to_screen(screen, t.b));
+        d.shapes
+            .iter()
+            .filter_map(|s| match s {
+                Shape::LineSegment { points, stroke }
+                    if stroke.color == client_ui::paint::TRACK_FREE
+                        && ((points[0].distance(a) < 1.5 && points[1].distance(b) < 1.5) || (points[0].distance(b) < 1.5 && points[1].distance(a) < 1.5)) =>
+                {
+                    Some(stroke.width)
+                }
+                _ => None,
+            })
+            .fold(f32::MIN, f32::max)
+    };
+    let thin = widths(&v);
+    assert!(thin < w, "drawn thin: {thin} vs {w}");
+    let end = sc.points.iter().find(|p| p.reverse_meets.contains(&middle)).unwrap();
+    v.points.get_mut(&end.name).unwrap().position = protocol::PointsPos::Reverse;
+    assert!((widths(&v) - w).abs() < 0.01, "full width with an end over it");
+}
+
+/// Platform roads of the lessons are loops, not crossovers: never thin.
+#[test]
+fn lesson_platform_roads_are_never_thin() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../lessons");
+    for id in ["02-setting-routes", "03-running-trains"] {
+        let lesson = game::lesson::load_lesson(&std::path::Path::new(dir).join(id)).unwrap();
+        let (mut g, mut r) = game::lesson::start(lesson);
+        r.connect(&mut g, "pat");
+        let (l, mut v) = (g.layout_of("pat").unwrap(), g.view_of("pat").unwrap());
+        let sc = Scene::build(&l).unwrap();
+        for reversed in [false, true] {
+            if reversed {
+                for p in v.points.values_mut() {
+                    p.position = protocol::PointsPos::Reverse;
+                }
+            }
+            let unused = client_ui::paint::unused_crossovers(&sc, Some(&v));
+            assert!(!unused.contains("TD") && !unused.contains("TC"), "{id} reversed={reversed}: {unused:?}");
+        }
+    }
 }

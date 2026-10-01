@@ -252,6 +252,22 @@ fn points_show_the_lying_leg_whole_and_a_gap_in_the_other() {
     assert!(has(&lines_of(&r.draw(None, &[], None, 0.3), TRACK_FREE, w), c, rv_end), "swung: steady");
 }
 
+/// A thinned half-leg under THIN_MIN_PX on screen keeps the full width, so it
+/// never vanishes when the layout is small (polish spec M12).
+#[test]
+fn a_very_short_thin_leg_keeps_the_full_width() {
+    let mut r = Rig::new(Some("East"));
+    r.cam.scale = 0.3;
+    let w = r.w();
+    let (c, rv) = (r.at(207.5, 0.0), r.at(215.0, 10.0));
+    let end = short(rv, c);
+    let from = c + (rv - c) * GAP;
+    assert!((end - from).length() < THIN_MIN_PX, "setup: the half-leg is {} px", (end - from).length());
+    let d = r.idle();
+    assert!(has(&lines_of(&d, TRACK_FREE, w), from, end), "full width");
+    assert!(!has(&lines_of(&d, TRACK_FREE, w * UNUSED_W), from, end), "not thin");
+}
+
 /// W1 faces right (+x): its post goes up (the left of travel, y grows
 /// downwards) and hooks right. W2 faces left: down, and hooks left.
 #[test]
