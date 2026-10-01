@@ -111,6 +111,11 @@ Then open `https://ra.tail3e0c1e.ts.net:50160/` in a browser: after the
 Authentik login the signalbox lobby loads (WebGPU in Chrome/Edge, WebGL2 in
 Firefox).
 
+After every deploy, reload any signalbox tab that was open over it. A tab
+still running the old web client cannot read messages the new front added
+(a vote's `vote_ended` notice, for one): it logs "Unreadable message from the
+server" and resyncs each time one arrives, until it is reloaded.
+
 ## The Waterloo & City timetable (optional)
 
 Before `docker build`, copy the owner's WTT PDF into `external/wtt/` of the
@@ -136,7 +141,8 @@ SIGTERM the front stops accepting connections before it shuts the games down.
 Build a new `local/signalbox:<rev>`, retag it `current`, and
 `sudo docker compose up -d` in `/opt/stack/apps/signalbox`. The front saves
 every game on SIGTERM (up to 10 s; compose allows 20). To roll back, retag the
-previous `<rev>` as `current` and `up -d` again. Saves are forward-compatible
+previous `<rev>` as `current` and `up -d` again. Either way, reload any open
+signalbox tabs afterwards (see Build and run). Saves are forward-compatible
 only within save schema 2; a newer schema refuses old saves with
 `unsupported save schema N`.
 
