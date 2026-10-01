@@ -296,7 +296,7 @@ fn the_auto_button_is_the_menus_auto_working_command() {
     v.routes.insert(s("S1-S2"), RouteView { state: RouteState::Cancelling, auto_working: true });
     assert!(!select::auto_working(&l, &v, "S1"), "a cancelling route is not live");
     assert_eq!(select::auto_toggle(&l, &v, "S1"), None);
-    assert_eq!(select::describe_auto(&theirs, &v, "S1"), "Auto-working S1 (B): set a route first");
+    assert_eq!(select::describe_auto(&theirs, &v, "S1"), "Auto-working S1 (B): its route is cancelling");
 }
 
 #[test]
@@ -438,4 +438,17 @@ fn a_click_that_chooses_nothing_says_why_once() {
         t.log_lines(),
         [(s("C is not in your area"), false), (s("Auto-working TAW1: set a route from it first"), false)]
     );
+}
+
+/// Fix round 1: the dead ○A click on a route being cancelled says so, not
+/// that no route is set.
+#[test]
+fn a_dead_auto_click_on_a_cancelling_route_says_it_is_cancelling() {
+    let t = Table::new("ann", Some("West"));
+    let mut l = t.layout().clone();
+    let mut v = t.view().clone();
+    let r = l.routes.iter().find(|r| r.entrance == "W1").unwrap().name.clone();
+    v.routes.insert(r, RouteView { state: RouteState::Cancelling, auto_working: false });
+    l.signals.iter_mut().for_each(|s| s.operable = s.operable || s.name == "W1");
+    assert_eq!(select::describe_auto(&l, &v, "W1"), "Auto-working TAW1: its route is cancelling");
 }

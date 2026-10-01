@@ -59,7 +59,11 @@ impl App {
             None => {
                 let Some(g) = self.game.as_mut() else { return };
                 let Some(l) = g.bot.layout() else { return };
-                let why = if l.signals.iter().any(|s| s.name == signal && s.operable) {
+                let operable = l.signals.iter().any(|s| s.name == signal && s.operable);
+                let cancelling = g.bot.view().is_some_and(|v| select::cancelling_from(l, v, signal));
+                let why = if operable && cancelling {
+                    format!("Auto-working {}: its route is cancelling", g.names.signal(signal))
+                } else if operable {
                     format!("Auto-working {}: set a route from it first", g.names.signal(signal))
                 } else {
                     select::why_not_entrance(l, signal)

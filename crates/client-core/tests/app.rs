@@ -696,3 +696,37 @@ fn a_late_start_claims_after_preparing_not_during() {
     app.tick(2.0);
     assert!(h.take_sent().is_empty(), "no stale claim");
 }
+
+/// Fix round 1: a create the front refuses takes its claim with it, and a
+/// creator whose area was taken first is told the claim failed.
+#[test]
+fn a_refused_create_drops_the_claim_and_a_taken_area_says_who() {
+    let (mut app, h) = open_app();
+    h.take_sent();
+    app.create_game_in("twobox", None, Some(s("99:99")), Some("West"));
+    h.take_sent();
+    h.push(ServerFrame::error("bad_request", "Not a time."));
+    app.tick(1.0);
+    assert_eq!(app.lobby_note(), Some("Not a time."));
+    app.join("g-other");
+    h.take_sent();
+    h.push(joined("g-other"));
+    h.push(layout("ann"));
+    app.tick(2.0);
+    assert!(h.take_sent().is_empty(), "the refused create left no claim");
+
+    let (mut app, h) = open_app();
+    h.take_sent();
+    app.create_game_in("twobox", None, None, Some("West"));
+    h.push(joined("g-new"));
+    h.push(layout("ann"));
+    app.tick(1.0);
+    assert_eq!(h.take_sent().len(), 2);
+    h.push(ServerFrame::Game(ServerMsg::Notice(Notice::AreaTaken { area: s("West"), holder: s("bob") })));
+    app.tick(2.0);
+    let lines: Vec<String> = app.game().unwrap().log().entries().map(|e| e.text.clone()).collect();
+    assert_eq!(lines, [s("Could not claim West: bob took it first")]);
+    h.push(ServerFrame::Game(ServerMsg::Notice(Notice::AreaTaken { area: s("West"), holder: s("bob") })));
+    app.tick(3.0);
+    assert_eq!(app.game().unwrap().log().entries().last().unwrap().text, "West is now bob's", "only the creator's own claim");
+}

@@ -823,3 +823,21 @@ fn a_spectator_is_told_to_claim_an_area() {
     let mut r = Rig::in_game(drawn_twobox(), Some("West"));
     assert!(!has_text(&r.frame(), "You are watching"));
 }
+
+/// Fix round 1: with every area held, the spectator is not told to claim.
+#[test]
+fn a_spectator_is_not_told_to_claim_when_every_area_is_held() {
+    let mut r = Rig::in_game(drawn_twobox(), None);
+    for (who, area) in [("bob", "West"), ("cat", "East")] {
+        r.game.connect(who);
+        for (to, m) in r.game.handle(who, ClientMsg::Claim { area: area.to_string() }) {
+            if to == "ann" {
+                r.h.push(ServerFrame::Game(m));
+            }
+        }
+    }
+    r.frame();
+    let out = r.frame();
+    assert!(has_text(&out, "All areas are held; you are watching"), "{:?}", texts(&out));
+    assert!(!has_text(&out, "Claim an area to signal"));
+}

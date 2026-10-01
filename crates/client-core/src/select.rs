@@ -88,6 +88,11 @@ fn live_from<'a>(l: &'a Layout, v: &'a View, entrance: &'a str) -> impl Iterator
     active_from(l, v, entrance).filter(|r| v.routes[&r.name].state != RouteState::Cancelling)
 }
 
+/// A route set from `entrance` is being cancelled (so nothing is live).
+pub fn cancelling_from(l: &Layout, v: &View, entrance: &str) -> bool {
+    active_from(l, v, entrance).any(|r| v.routes[&r.name].state == RouteState::Cancelling)
+}
+
 pub fn signal_menu(l: &Layout, v: &View, signal: &str) -> Vec<MenuItem> {
     if !l.signals.iter().any(|s| s.name == signal && s.operable) {
         return vec![];
@@ -143,6 +148,7 @@ pub fn auto_working(l: &Layout, v: &View, signal: &str) -> bool {
 /// dead click on it is explained.
 pub fn describe_auto(l: &Layout, v: &View, signal: &str) -> String {
     let state = match live_from(l, v, signal).next() {
+        None if cancelling_from(l, v, signal) => "its route is cancelling",
         None => "set a route first",
         Some(r) if v.routes[&r.name].auto_working => "on",
         Some(_) => "off",

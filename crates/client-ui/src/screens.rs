@@ -461,7 +461,9 @@ impl UiApp {
             ui.horizontal_wrapped(|ui| {
                 // Polish spec H2: a spectator's clicks do nothing; say so where they look.
                 if !holding && !lesson {
-                    ui.label(RichText::new("You are watching. Claim an area to signal:").color(paint::YELLOW));
+                    let free = areas.iter().any(|a| view.as_ref().and_then(|v| v.holders.get(a)).is_none_or(|h| h == "robot"));
+                    let hint = if free { "You are watching. Claim an area to signal:" } else { "All areas are held; you are watching" };
+                    ui.label(RichText::new(hint).color(paint::YELLOW));
                 }
                 ui.label("Players:");
                 for area in &areas {

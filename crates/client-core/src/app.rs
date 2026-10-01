@@ -189,6 +189,9 @@ pub struct App {
     /// With a late start that layout comes only when the game is ready, so
     /// nothing is claimed while it is being prepared.
     pub(crate) claim_on_join: Option<String>,
+    /// The area that claim asked for, until the answer shows: a refusal
+    /// then says the claim failed rather than who now holds the area.
+    pub(crate) claim_sent: Option<String>,
 }
 
 impl App {
@@ -212,6 +215,7 @@ impl App {
             last_frame: now,
             watchdog_join_sent: false,
             claim_on_join: None,
+            claim_sent: None,
         }
     }
 
@@ -330,6 +334,7 @@ impl App {
 
     fn to_lobby(&mut self, note: Option<String>) {
         self.claim_on_join = None;
+        self.claim_sent = None;
         self.game = None;
         self.rejoin = None;
         self.joining = None;
@@ -378,6 +383,10 @@ impl App {
             }
             LobbyReply::Error { code, message } => {
                 let joining = self.joining.take();
+                if joining.as_ref().is_some_and(|j| j.game.is_none()) {
+                    // The front refused a create: its claim goes with it.
+                    self.claim_on_join = None;
+                }
                 let tutorial = self.in_lesson();
                 if tutorial && (code == codes::GAME_STOPPED || joining.as_ref().is_some_and(|j| j.rejoin)) {
                     self.to_lobby(Some(TUTORIAL_ENDED.into()));
@@ -416,7 +425,12 @@ impl App {
                 return self.to_lobby(Some("The game stopped unexpectedly. Join it again to resume it.".into()));
             }
             ServerMsg::Notice(n) => {
-                let (text, alarm) = notice_text(n, &g.names);
+                let (mut text, alarm) = notice_text(n, &g.names);
+                if let Notice::AreaTaken { area, holder } = n {
+                    if self.claim_sent.take().is_some_and(|a| &a == area) {
+                        text = format!("Could not claim {area}: {holder} took it first");
+                    }
+                }
                 let t = g.sim_time();
                 g.log.push(t, text, alarm);
                 if let Notice::Rejected { cmd, .. } = n {
@@ -425,7 +439,13 @@ impl App {
                     }
                 }
             }
-            ServerMsg::Layout(_) => g.layout_gen += 1,
+            ServerMsg::Layout(l) => {
+                g.layout_gen += 1;
+                // A layout that is no longer a spectator's: the claim worked.
+                if l.area.is_some() {
+                    self.claim_sent = None;
+                }
+            }
             ServerMsg::Lesson(v) => {
                 g.lesson = Some(v.clone());
                 // Tell the new step what the screen shows.
@@ -453,6 +473,9 @@ impl App {
             self.send_game(r);
         }
         if let Some(c) = claim {
+            if let ClientMsg::Claim { area } = &c {
+                self.claim_sent = Some(area.clone());
+            }
             self.send_game(c);
         }
     }
