@@ -355,6 +355,9 @@ output is byte-identical for the same input.
   the simplifier does, `OT`/`3L` (polish spec M6).
 - The top bar never reflows (polish spec M5): buttons right-aligned in a fixed order, fixed-width clock controls, the vote on
   the second row; Release area asks first (M10).
+- The side panel can be hidden (top bar: Hide panel / Show panel) or dragged to 240 pt, where the simplifier
+  scrolls sideways, header and all; an untouched Fit follows the window's size, a view the player has panned or
+  zoomed is left alone (polish spec H7).
 
 ### Tutorials (`lessons/`, `game::lesson`)
 - Design: `docs/superpowers/specs/2026-10-01-tutorial-design.md`; decisions in

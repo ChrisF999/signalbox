@@ -34,21 +34,11 @@ const ZOOM_PER_POINT: f32 = 1.0 / 200.0;
 const SIMPLIFIER_COLUMNS: [f32; 8] = [38.0, 26.0, 50.0, 50.0, 56.0, 48.0, 46.0, 46.0];
 /// Between two simplifier cells.
 const CELL_GAP: f32 = 2.0;
-/// The simplifier's columns and the gaps between them.
-const SIMPLIFIER_WIDTH: f32 = {
-    let mut w = CELL_GAP * (SIMPLIFIER_COLUMNS.len() - 1) as f32;
-    let mut i = 0;
-    while i < SIMPLIFIER_COLUMNS.len() {
-        w += SIMPLIFIER_COLUMNS[i];
-        i += 1;
-    }
-    w
-};
+/// The side panel can be dragged this narrow (polish spec H7); the
+/// simplifier then scrolls sideways, its header with it.
+const SIDE_MIN_W: f32 = 240.0;
 /// The side panel's margins and a scroll bar, beside the simplifier.
 const SIDE_PAD: f32 = 24.0;
-/// The side panel's least width, and its width with the shortest headcodes:
-/// the simplifier's columns and `SIDE_PAD`, so the tabs never resize the panel.
-const SIDE_W: f32 = SIMPLIFIER_WIDTH + SIDE_PAD;
 
 /// The simplifier's columns with the Train column at least `train_w` wide
 /// (polish spec H3: Gretz's 8-character headcodes fit, not `W118...`).
@@ -68,14 +58,16 @@ const ENQUIRY_OFFSET_PX: f32 = 16.0;
 /// `8×`) and the pause/resume button.
 const CLOCK_STATE_W: f32 = 52.0;
 const PAUSE_W: f32 = 64.0;
+/// Hide panel / Show panel, one width so the buttons beside it stay put.
+const HIDE_PANEL_W: f32 = 82.0;
 /// "Release area" and its Cancel share this width, so a double-click on the
 /// one never lands on "Yes, release" (polish spec M10); the confirm's own
 /// slot keeps Settings and Fit from shifting while it shows.
 const RELEASE_W: f32 = 88.0;
 const CONFIRM_W: f32 = 96.0;
 /// Below this width the buttons wrap onto a row of their own rather than
-/// draw over the clock.
-const BAR_WRAP_W: f32 = 1000.0;
+/// draw over the clock (1000 before Hide panel joined them, polish spec H7).
+const BAR_WRAP_W: f32 = 1100.0;
 /// The lobby's layout list, wide enough for every name, so Create never moves.
 const LAYOUT_COMBO_W: f32 = 180.0;
 /// Repaint at least this often (ms): clocks, flashing, reconnect timers.
@@ -135,6 +127,12 @@ pub struct UiApp {
     simplifier_cols: [f32; 8],
     /// The Train column's width for (game, layout generation): it changes only with the layout.
     train_col: Option<((String, u64), f32)>,
+    /// The diagram's size when it was last fitted, and whether the player has
+    /// panned or zoomed since: an untouched fit follows a resize (polish spec H7).
+    fit_size: Option<egui::Vec2>,
+    cam_moved: bool,
+    /// The side panel is shown (polish spec H7: it can be hidden).
+    side_open: bool,
     /// The simplifier's lines (each marked if it is its row's first) for
     /// (layout generation, search).
     simplifier_lines: Option<((u64, String), Vec<(Line, bool)>)>,
@@ -174,6 +172,9 @@ impl UiApp {
             shown_game: None,
             simplifier_cols: SIMPLIFIER_COLUMNS,
             train_col: None,
+            fit_size: None,
+            cam_moved: false,
+            side_open: true,
             simplifier_lines: None,
             placement: None,
             simplifier_scroll: None,
@@ -439,10 +440,12 @@ impl UiApp {
         };
         self.simplifier_cols = simplifier_columns(train_w);
         let side_w = table_width(&self.simplifier_cols) + SIDE_PAD;
-        egui::Panel::right(egui::Id::new(("side", side_w.round() as i32)))
-            .default_size(side_w)
-            .min_size(SIDE_W)
-            .show(ui, |ui| self.side(ui, now));
+        if self.side_open {
+            egui::Panel::right(egui::Id::new(("side", side_w.round() as i32)))
+                .default_size(side_w)
+                .min_size(SIDE_MIN_W)
+                .show(ui, |ui| self.side(ui, now));
+        }
         // After the side panel, so a tab clicked this frame is told at once.
         let tab = match self.side_tab {
             SideTab::Trains => "trains",
@@ -475,7 +478,8 @@ impl UiApp {
         let mut settings = self.settings;
         let mut confirm_release = self.confirm_release && holding;
         let mut refit = false;
-        let buttons = |ui: &mut Ui, act: &mut Vec<Box<dyn FnOnce(&mut App)>>, settings: &mut Settings, confirm_release: &mut bool, refit: &mut bool| {
+        let mut side_open = self.side_open;
+        let buttons = |ui: &mut Ui, act: &mut Vec<Box<dyn FnOnce(&mut App)>>, settings: &mut Settings, confirm_release: &mut bool, refit: &mut bool, side_open: &mut bool| {
                 if ui.button("Leave").clicked() {
                     act.push(Box::new(|a| a.leave()));
                 }
@@ -507,6 +511,12 @@ impl UiApp {
                     ui.checkbox(&mut settings.numbers, "Signal numbers");
                 });
                 mark(ui, &menu.response, marked("settings"), now);
+                // Polish spec H7: the panel can make way for the diagram.
+                // Fixed width, so Fit and Settings do not shift with the label.
+                let label = if *side_open { "Hide panel" } else { "Show panel" };
+                if ui.add_sized([HIDE_PANEL_W, 18.0], egui::Button::new(label)).clicked() {
+                    *side_open = !*side_open;
+                }
                 if ui.button("Fit").clicked() {
                     *refit = true;
                 }
@@ -545,13 +555,13 @@ impl UiApp {
                     }
                 }
                 if !narrow {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| buttons(ui, &mut act, &mut settings, &mut confirm_release, &mut refit));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| buttons(ui, &mut act, &mut settings, &mut confirm_release, &mut refit, &mut side_open));
                 }
             });
             if narrow {
                 ui.horizontal(|ui| {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        buttons(ui, &mut act, &mut settings, &mut confirm_release, &mut refit)
+                        buttons(ui, &mut act, &mut settings, &mut confirm_release, &mut refit, &mut side_open)
                     });
                 });
             }
@@ -591,6 +601,7 @@ impl UiApp {
             });
         });
         self.confirm_release = confirm_release;
+        self.side_open = side_open;
         if refit {
             self.fitted = None;
         }
@@ -773,39 +784,42 @@ impl UiApp {
         let header = ["Train", "Late", "From", "To", "At", "Plat", "Arr", "Dep"];
         let cols = self.simplifier_cols;
         let names = g.names();
-        simplifier_row(ui, row_h, header.map(|h| RichText::new(h).strong()), &cols, Default::default());
-        let mut area = egui::ScrollArea::vertical().id_salt("simplifier").max_height(height);
-        if let Some(line) = self.simplifier_scroll.take() {
-            area = area.vertical_scroll_offset(line as f32 * (row_h + ui.spacing().item_spacing.y));
-        }
-        area.show_rows(ui, row_h, lines.len(), |ui, range| {
-            for (line, first) in &lines[range] {
-                let late = if *first { simplifier::lateness(Some(v), &line.headcode) } else { None };
-                let late = late.as_deref().unwrap_or("");
-                let cells = [
-                    RichText::new(g.names().headcode(&line.headcode)).monospace().color(paint::HEADCODE),
-                    RichText::new(late).color(if late == "OT" { paint::LABEL } else { ALARM }),
-                    RichText::new(&line.from),
-                    RichText::new(&line.to),
-                    RichText::new(&line.place),
-                    RichText::new(&line.platform),
-                    RichText::new(&line.arr),
-                    RichText::new(&line.dep),
-                ];
-                // Every cell's whole text on hover, places by name (polish spec H3, M2).
-                let place = |p: &str| if p.is_empty() { String::new() } else { names.place(p).to_string() };
-                let hovers = [
-                    names.headcode(&line.headcode).to_string(),
-                    String::new(),
-                    place(&line.from),
-                    place(&line.to),
-                    place(&line.place),
-                    line.platform.clone(),
-                    String::new(),
-                    String::new(),
-                ];
-                simplifier_row(ui, row_h, cells, &cols, hovers);
+        // Narrower than its columns, the table scrolls sideways, header and all.
+        egui::ScrollArea::horizontal().id_salt("simplifier_wide").show(ui, |ui| {
+            simplifier_row(ui, row_h, header.map(|h| RichText::new(h).strong()), &cols, Default::default());
+            let mut area = egui::ScrollArea::vertical().id_salt("simplifier").max_height(height);
+            if let Some(line) = self.simplifier_scroll.take() {
+                area = area.vertical_scroll_offset(line as f32 * (row_h + ui.spacing().item_spacing.y));
             }
+            area.show_rows(ui, row_h, lines.len(), |ui, range| {
+                for (line, first) in &lines[range] {
+                    let late = if *first { simplifier::lateness(Some(v), &line.headcode) } else { None };
+                    let late = late.as_deref().unwrap_or("");
+                    let cells = [
+                        RichText::new(g.names().headcode(&line.headcode)).monospace().color(paint::HEADCODE),
+                        RichText::new(late).color(if late == "OT" { paint::LABEL } else { ALARM }),
+                        RichText::new(&line.from),
+                        RichText::new(&line.to),
+                        RichText::new(&line.place),
+                        RichText::new(&line.platform),
+                        RichText::new(&line.arr),
+                        RichText::new(&line.dep),
+                    ];
+                    // Every cell's whole text on hover, places by name (polish spec H3, M2).
+                    let place = |p: &str| if p.is_empty() { String::new() } else { names.place(p).to_string() };
+                    let hovers = [
+                        names.headcode(&line.headcode).to_string(),
+                        String::new(),
+                        place(&line.from),
+                        place(&line.to),
+                        place(&line.place),
+                        line.platform.clone(),
+                        String::new(),
+                        String::new(),
+                    ];
+                    simplifier_row(ui, row_h, cells, &cols, hovers);
+                }
+            });
         });
     }
 
@@ -892,21 +906,29 @@ impl UiApp {
             painter.text(rect.center(), Align2::CENTER_CENTER, msg, FontId::proportional(16.0), paint::LABEL);
             return;
         };
-        if self.fitted.as_ref() != Some(&fit_key) || self.cam.is_none() {
+        // Fit again for a new game or area, after Fit, and when the diagram
+        // changes size while the player has not moved the view (polish spec H7).
+        let resized = self.fit_size.is_some_and(|s| (s - rect.size()).length() > 0.5);
+        if self.fitted.as_ref() != Some(&fit_key) || self.cam.is_none() || (resized && !self.cam_moved) {
             self.cam = Some(scene.fit_bounds().map_or(Camera { centre: rect.center(), scale: 1.0 }, |b| Camera::fit(b, rect)));
             self.fitted = Some(fit_key);
+            self.cam_moved = false;
         }
+        self.fit_size = Some(rect.size());
         let Some(cam) = self.cam.as_mut() else { return };
         if resp.dragged_by(PointerButton::Primary) {
             cam.pan(resp.drag_delta());
+            self.cam_moved = true;
         }
         if let Some(p) = resp.hover_pos() {
             let (scroll, zoom) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
             if scroll != 0.0 {
                 cam.zoom_at(rect, p, (scroll * ZOOM_PER_POINT).exp());
+                self.cam_moved = true;
             }
             if zoom != 1.0 {
                 cam.zoom_at(rect, p, zoom);
+                self.cam_moved = true;
             }
         }
         let cam = *cam;

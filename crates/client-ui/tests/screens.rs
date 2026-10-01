@@ -19,6 +19,8 @@ struct Rig {
     events: Vec<Event>,
     /// Lobby frames the app sent (game frames go to the game).
     lobby_sent: Vec<LobbyMsg>,
+    /// The window, 1280 × 800 unless a test resizes it.
+    size: egui::Vec2,
     /// Every command the app sent to the game.
     commands: Vec<PlayerCommand>,
 }
@@ -39,7 +41,7 @@ impl Rig {
             Some(st) => UiApp::with_store(core, Box::new(st)),
             None => UiApp::new(core),
         };
-        let mut r = Rig { ctx: egui::Context::default(), ui, h, game, t: 0.0, events: vec![], lobby_sent: vec![], commands: vec![] };
+        let mut r = Rig { ctx: egui::Context::default(), ui, h, game, t: 0.0, events: vec![], lobby_sent: vec![], size: vec2(1280.0, 800.0), commands: vec![] };
         r.frame();
         r.lobby_sent.clear();
         r.h.push(ServerFrame::Lobby(LobbyReply::Layouts { layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")] }] }));
@@ -70,14 +72,14 @@ impl Rig {
 
     /// One frame of 0.1 s; the game runs alongside and answers.
     fn frame(&mut self) -> FullOutput {
-        self.frame_at(1280.0)
+        self.frame_at(self.size.x)
     }
 
     /// A frame in a window `width` points wide.
     fn frame_at(&mut self, width: f32) -> FullOutput {
         self.t += 0.1;
         let input = RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 800.0))),
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, self.size.y))),
             time: Some(self.t),
             events: std::mem::take(&mut self.events),
             ..RawInput::default()
@@ -1037,7 +1039,7 @@ fn a_narrow_top_bar_wraps_its_buttons_clear_of_the_clock() {
         r.frame_at(width);
         let out = r.frame_at(width);
         let clock = texts(&out).into_iter().find(|(t, _)| t.contains(':') && t.len() == 8).expect("clock").1;
-        for b in ["Fit", "Settings", "Release area", "Leave"] {
+        for b in ["Fit", "Hide panel", "Settings", "Release area", "Leave"] {
             let at = text_at(&out, b);
             for left in ["Penalty 0", "pause", "8×"] {
                 assert!(!at.intersects(text_at(&out, left)), "{width}: {b} {at:?} over {left}");
@@ -1154,4 +1156,75 @@ fn a_simplifier_cell_shows_its_whole_text_on_hover() {
         seen |= has_text(&r.frame(), &name);
     }
     assert!(seen, "hover over {code} shows {name}");
+}
+
+/// Polish spec H7: the side panel can be hidden and dragged narrower, and
+/// an untouched Fit follows the window's size; a view the player has moved
+/// is left alone.
+#[test]
+fn the_panel_hides_and_the_fit_follows_the_window() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    r.size = vec2(1024.0, 700.0);
+    r.frame();
+    r.frame();
+    let narrow = (r.ui.diagram_rect().unwrap(), r.ui.camera().unwrap());
+    let out = r.frame();
+    click_text(&mut r, &out, "Hide panel");
+    r.frame();
+    let out = r.frame();
+    let wide = r.ui.diagram_rect().unwrap();
+    assert!(wide.width() > narrow.0.width() + 200.0, "{wide:?} vs {:?}", narrow.0);
+    assert!(r.ui.camera().unwrap().scale > narrow.1.scale, "fitted again, larger");
+    assert!(side_texts(&r, &out).iter().all(|t| t != "TRAINS"));
+    click_text(&mut r, &out, "Show panel");
+    // A moved view stays where the player put it.
+    let start = r.at(150.0, 0.0);
+    r.events.push(Event::PointerMoved(start));
+    r.events.push(Event::PointerButton { pos: start, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::default() });
+    r.frame();
+    r.events.push(Event::PointerMoved(start + vec2(40.0, 0.0)));
+    r.frame();
+    r.events.push(Event::PointerButton { pos: start + vec2(40.0, 0.0), button: PointerButton::Primary, pressed: false, modifiers: Modifiers::default() });
+    r.frame();
+    let moved = r.ui.camera().unwrap();
+    r.size = vec2(1280.0, 800.0);
+    r.frame();
+    r.frame();
+    assert_eq!(r.ui.camera().unwrap(), moved, "not refitted after a pan");
+}
+
+/// Polish spec H7, U3: the panel drags down to 240 pt, no further, and the
+/// simplifier (header with it) then scrolls sideways instead of being cut.
+#[test]
+fn a_narrow_panel_scrolls_the_simplifier_sideways() {
+    let mut r = Rig::in_game(converted("gretz-armainvilliers"), Some("Gretz"));
+    r.frame();
+    let out = r.frame();
+    click_text(&mut r, &out, "SIMPLIFIER");
+    r.frame();
+    let edge = r.ui.diagram_rect().unwrap().max.x;
+    let from = pos2(edge + 1.0, 400.0);
+    r.events.push(Event::PointerMoved(from));
+    r.frame();
+    r.events.push(Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::default() });
+    r.frame();
+    for dx in [200.0, 600.0] {
+        r.events.push(Event::PointerMoved(from + vec2(dx, 0.0)));
+        r.frame();
+    }
+    r.events.push(Event::PointerButton { pos: from + vec2(600.0, 0.0), button: PointerButton::Primary, pressed: false, modifiers: Modifiers::default() });
+    r.frame();
+    let out = r.frame();
+    let panel = 1280.0 - r.ui.diagram_rect().unwrap().max.x;
+    assert!((239.0..=245.0).contains(&panel), "dragged to the minimum, no further: {panel}");
+    // Header and rows share one sideways scroll: Dep starts out of the panel's reach.
+    let left = r.ui.diagram_rect().unwrap().max.x;
+    assert!(texts(&out).iter().all(|(t, _)| t != "Dep"), "Dep is out of view: {:?}", side_texts(&r, &out));
+    let at = pos2(left + panel / 2.0, 400.0);
+    r.events.push(Event::PointerMoved(at));
+    r.events.push(Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(-400.0, 0.0), modifiers: Modifiers::default(), phase: egui::TouchPhase::Move });
+    r.frame();
+    let out = r.frame();
+    let dep = text_at(&out, "Dep");
+    assert!(dep.min.x >= left && dep.max.x <= 1280.0, "Dep scrolled into the panel: {dep:?}");
 }
