@@ -730,3 +730,16 @@ fn a_refused_create_drops_the_claim_and_a_taken_area_says_who() {
     app.tick(3.0);
     assert_eq!(app.game().unwrap().log().entries().last().unwrap().text, "West is now bob's", "only the creator's own claim");
 }
+
+/// Polish spec M9: Leave gives a held area back before leaving.
+#[test]
+fn leave_releases_a_held_area_first() {
+    let mut t = Table::new("ann", Some("West"));
+    t.h.take_sent();
+    t.app.leave();
+    assert_eq!(t.h.take_sent(), [ClientFrame::Game(ClientMsg::Release), lobby(LobbyMsg::Leave)]);
+    let mut spec = Table::new("sam", None);
+    spec.h.take_sent();
+    spec.app.leave();
+    assert_eq!(spec.h.take_sent(), [lobby(LobbyMsg::Leave)], "nothing to release");
+}

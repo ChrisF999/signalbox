@@ -580,9 +580,14 @@ impl App {
         }
     }
 
-    /// Back to the lobby (the front answers with the games list).
+    /// Back to the lobby (the front answers with the games list). An area you
+    /// hold is released first, so it does not wait out the disconnect grace
+    /// as yours (polish spec M9); a tutorial ends anyway.
     pub fn leave(&mut self) {
         self.claim_on_join = None;
+        if self.game.as_ref().is_some_and(|g| g.area().is_some() && g.lesson.is_none()) {
+            self.send(ClientFrame::Game(ClientMsg::Release));
+        }
         self.send(ClientFrame::Lobby(LobbyMsg::Leave));
         self.game = None;
         self.rejoin = None;

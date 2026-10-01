@@ -604,6 +604,19 @@ impl Supervisor {
         }
     }
 
+    /// The games list to every client in the lobby (not in a game). Nobody
+    /// there: nothing is built, so no save is read (ruling D1).
+    fn broadcast_lobby_games(&self) {
+        if !self.lock().clients.values().any(|c| c.game.is_none()) {
+            return;
+        }
+        let games = self.list_games();
+        let st = self.lock();
+        for (user, c) in st.clients.iter().filter(|(_, c)| c.game.is_none()) {
+            push(&st, user, c, frame(LobbyReply::Games { games: self.for_user(games.clone(), user) }));
+        }
+    }
+
     // ---- the lobby ----
 
     /// The games list as `user` sees it (`can_delete` set for them).
@@ -850,14 +863,20 @@ impl Supervisor {
                 push(&st, &player, c, ServerFrame::Game(msg));
             }
             FromGame::Status(s) => {
-                // Everyone sees a game start and stop being prepared.
-                let mut changed = false;
+                // Everyone sees a game start and stop being prepared; the
+                // lobby hears who holds what and who is in at once (polish
+                // spec M9). A tutorial is never listed.
+                let (mut preparing, mut lobby) = (false, false);
                 if let Some(e) = self.lock().games.get_mut(id) {
-                    changed = e.status.as_ref().and_then(|o| o.preparing).is_some() != s.preparing.is_some();
+                    preparing = e.status.as_ref().and_then(|o| o.preparing).is_some() != s.preparing.is_some();
+                    lobby = e.owner.is_none()
+                        && e.status.as_ref().is_none_or(|o| o.holders != s.holders || o.players != s.players);
                     e.status = Some(s);
                 }
-                if changed {
+                if preparing {
                     self.broadcast_games();
+                } else if lobby {
+                    self.broadcast_lobby_games();
                 }
             }
             // The save file is the record; nothing to keep.

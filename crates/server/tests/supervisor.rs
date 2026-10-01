@@ -751,6 +751,9 @@ async fn games_list(sock: &Sock) -> Vec<GameInfo> {
 }
 
 async fn listed(rig: &Rig, sock: &Sock) -> Vec<GameInfo> {
+    // Lists the lobby was sent as holders and players changed (polish spec
+    // M9) may be waiting: drop them, so the answer read is this request's.
+    while let Ok(Some(_)) = timeout(Duration::from_millis(100), sock.me.outbox.pop()).await {}
     rig.lobby(sock, LobbyMsg::ListGames);
     games_list(sock).await
 }
@@ -1399,4 +1402,58 @@ async fn a_preparing_child_killed_after_it_cleaned_up_still_leaves_no_game() {
     let id = joined_id(&got);
     gone(&rig, &id).await;
     assert_eq!(std::fs::read_dir(rig.saves()).unwrap().count(), 0);
+}
+
+/// Polish spec M9: players in the lobby see a game's holders and players
+/// change without pressing Refresh.
+#[tokio::test]
+async fn the_lobby_hears_when_holders_change() {
+    let rig = rig("lobbypush", 600);
+    let ann = rig.attach("ann");
+    let id = create(&rig, &ann).await;
+    let cat = rig.attach("cat");
+    rig.lobby(&cat, LobbyMsg::ListGames);
+    rig.game_msg(&ann, ClientMsg::Claim { area: s("West") });
+    let held = |f: &ServerFrame| match f {
+        ServerFrame::Lobby(LobbyReply::Games { games, .. }) => games
+            .iter()
+            .any(|g| g.id == id && g.areas.iter().any(|a| a.holder.as_deref() == Some("ann"))),
+        _ => false,
+    };
+    until(&cat, held).await;
+    rig.sup.shutdown_all(Duration::from_secs(10)).await;
+}
+
+/// Polish spec M9: a tutorial is never listed, so its claims and players
+/// send the lobby nothing.
+#[tokio::test]
+async fn a_tutorial_sends_the_lobby_nothing() {
+    let rig = lesson_rig("lesson-nopush");
+    let cat = rig.attach("cat");
+    let ann = rig.attach("ann");
+    start_lesson(&rig, &ann).await;
+    let got = drain_for(&cat, Duration::from_millis(2500)).await;
+    assert!(!got.iter().any(is_games), "{got:?}");
+    rig.sup.shutdown_all(Duration::from_secs(10)).await;
+}
+
+/// Polish spec M9: a status that only moves the clock (once a second) sends
+/// the lobby nothing; only holders and players do.
+#[tokio::test]
+async fn the_lobby_is_not_sent_a_list_every_second() {
+    let rig = rig("lobbyquiet", 600);
+    let ann = rig.attach("ann");
+    let id = create(&rig, &ann).await;
+    let cat = rig.attach("cat");
+    rig.game_msg(&ann, ClientMsg::Claim { area: s("West") });
+    let held = |f: &ServerFrame| match f {
+        ServerFrame::Lobby(LobbyReply::Games { games }) => {
+            games.iter().any(|g| g.id == id && g.areas.iter().any(|a| a.holder.as_deref() == Some("ann")))
+        }
+        _ => false,
+    };
+    until(&cat, held).await;
+    let got = drain_for(&cat, Duration::from_millis(2500)).await;
+    assert!(!got.iter().any(is_games), "{got:?}");
+    rig.sup.shutdown_all(Duration::from_secs(10)).await;
 }

@@ -264,6 +264,10 @@ output is byte-identical for the same input.
   and deltas are dropped until the next full view). A second login of a name
   replaces the old socket without a `Disconnect` (C1's contract on
   `Game::connect`). A child that ends other than by exiting 0 is `crashed`.
+- The front sends the games list to every client in the lobby when a game's holders or
+  connected players change (`broadcast_lobby_games`, polish spec M9); never for a tutorial, and not at all
+  when nobody is in the lobby (no save is read then). A game starting or stopping being prepared still goes to
+  everyone (`broadcast_games`). The client's Leave releases a held area first (not in a tutorial).
 - Login is `server::oidc` (openidconnect: code flow, PKCE, nonce, one-shot state
   plus a signed login cookie); `admit` requires `groups` ∋ `signalbox-users`.
   Sessions are server-side and in memory. The `dev-auth` feature adds
