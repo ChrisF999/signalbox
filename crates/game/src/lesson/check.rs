@@ -262,6 +262,14 @@ impl Checker<'_> {
         if step.say.trim().is_empty() || step.say.chars().count() > MAX_SAY {
             return Err(format!("`say` must be 1 to {MAX_SAY} characters"));
         }
+        if let Some(done) = &step.done {
+            if done.trim().is_empty() || done.chars().count() > MAX_SAY {
+                return Err(format!("`done` must be 1 to {MAX_SAY} characters"));
+            }
+            if step.wait_for.needs_next() {
+                return Err("`done` is for a step whose task is not Next".into());
+            }
+        }
         step.highlight.iter().try_for_each(|h| self.highlight(h))?;
         step.actions.iter().try_for_each(|a| self.action(a))?;
         self.condition(&step.wait_for, step)?;

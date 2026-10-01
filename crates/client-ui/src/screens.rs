@@ -116,6 +116,9 @@ struct NewGame {
 
 pub struct UiApp {
     pub core: App,
+    /// The lesson step state (index, completed) a Next was sent in, until
+    /// the server's reply moves it on.
+    next_sent: Option<(u32, bool)>,
     scene: Option<Scene>,
     /// (game, layout generation) the scene was built for.
     scene_key: Option<(String, u64)>,
@@ -177,6 +180,7 @@ impl UiApp {
     pub fn new(core: App) -> UiApp {
         UiApp {
             core,
+            next_sent: None,
             scene: None,
             scene_key: None,
             cam: None,
@@ -754,8 +758,18 @@ impl UiApp {
         } else {
             ui.horizontal(|ui| {
                 let typing = ui.ctx().egui_wants_keyboard_input();
-                let enter = v.needs_next && !typing && ui.input(|i| i.key_pressed(Key::Enter));
-                if ui.add_enabled(v.needs_next, egui::Button::new("Next").min_size(vec2(LESSON_NEXT_W, 0.0))).clicked() || enter {
+                // One Next per step state until the server's reply changes it; a
+                // held Enter (key repeats) is not a press.
+                let state = (v.index, v.completed);
+                if !v.needs_next || self.next_sent.is_some_and(|s| s != state) {
+                    self.next_sent = None;
+                }
+                let ready = v.needs_next && self.next_sent.is_none();
+                let enter = ready
+                    && !typing
+                    && ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Key { key: Key::Enter, pressed: true, repeat: false, .. })));
+                if ui.add_enabled(ready, egui::Button::new("Next").min_size(vec2(LESSON_NEXT_W, 0.0))).clicked() || enter {
+                    self.next_sent = Some(state);
                     act = Some(App::lesson_next);
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -763,9 +777,11 @@ impl UiApp {
                         act = Some(App::leave);
                     }
                     if ui.button("Restart lesson").clicked() {
+                        self.next_sent = None;
                         act = Some(App::lesson_restart);
                     }
                     if ui.button("Restart step").clicked() {
+                        self.next_sent = None;
                         act = Some(App::lesson_restart_step);
                     }
                 });

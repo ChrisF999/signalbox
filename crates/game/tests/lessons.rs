@@ -174,9 +174,13 @@ fn play(dir: &PathBuf) -> f64 {
         let mut ticks = 0u32;
         while p.r.step() == i {
             // The task is done: the player looks, then presses Next (polish spec H5).
+            // A Next that does not move the lesson falls through to the clock
+            // and the step limit below, so a stuck step fails rather than hangs.
             if p.r.view().completed {
                 p.send(ClientMsg::LessonNext);
-                continue;
+                if p.r.step() != i {
+                    continue;
+                }
             }
             if trains {
                 p.drive();

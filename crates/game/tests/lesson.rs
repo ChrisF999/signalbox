@@ -624,3 +624,30 @@ fn a_done_step_waits_for_next_after_its_task() {
     let v = lessons(&rig.send(ClientMsg::LessonNext));
     assert_eq!((v[0].index, v[0].completed), (1, false));
 }
+
+/// Review M3: a `done` text on a step that waits for Next, or an empty one,
+/// is refused (it would never show).
+#[test]
+fn a_done_text_must_be_said_and_must_have_a_task_to_follow() {
+    let e = refused(json!([{"say": "x", "done": "Done.", "wait_for": next()}]));
+    assert_eq!(e, "lesson.json: step 1: `done` is for a step whose task is not Next");
+    let e = refused(json!([{"say": "x", "done": " ", "wait_for": {"clock": {"paused": true}}}]));
+    assert_eq!(e, "lesson.json: step 1: `done` must be 1 to 1200 characters");
+}
+
+/// Review M4: Restart step on a completed step clears the completion; the
+/// task must be done again.
+#[test]
+fn restart_step_clears_a_completed_step() {
+    let steps = json!([
+        {"say": "pause it", "done": "Paused.", "wait_for": {"clock": {"paused": true}}},
+        {"say": "end", "wait_for": next()}
+    ]);
+    let (mut rig, _) = Rig::new(&hollins(), "Hollins Cross", steps);
+    let v = lessons(&rig.send(ClientMsg::Vote { proposal: Proposal::Pause }));
+    assert!(v[0].completed);
+    let v = lessons(&rig.send(ClientMsg::LessonRestartStep));
+    assert_eq!((v[0].index, v[0].completed, v[0].after.clone()), (0, false, None));
+    rig.send(ClientMsg::LessonNext);
+    assert_eq!(rig.r.step(), 0, "Next does nothing until the task is done again");
+}

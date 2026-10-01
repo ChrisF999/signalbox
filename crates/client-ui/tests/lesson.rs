@@ -24,6 +24,8 @@ struct Rig {
     events: Vec<Event>,
     lobby_sent: Vec<LobbyMsg>,
     ticks: MemStore,
+    /// While set the game does not answer: what the client sent is kept here.
+    mute: Option<Vec<ClientMsg>>,
 }
 
 fn texts(out: &FullOutput) -> Vec<(String, Rect)> {
@@ -60,7 +62,7 @@ impl Rig {
         let mut store = ticks.clone();
         client_core::SettingsStore::save(&mut store, ticked);
         let ui = UiApp::with_stores(core, Box::new(MemStore::new()), Box::new(ticks.clone()));
-        let mut r = Rig { ctx: egui::Context::default(), ui, h, game: None, t: 0.0, events: vec![], lobby_sent: vec![], ticks };
+        let mut r = Rig { ctx: egui::Context::default(), ui, h, game: None, t: 0.0, events: vec![], lobby_sent: vec![], ticks, mute: None };
         r.frame();
         r.lobby_sent.clear();
         let mut dirs: Vec<_> = std::fs::read_dir(LESSONS).unwrap().map(|e| e.unwrap().path()).collect();
@@ -111,6 +113,7 @@ impl Rig {
         out.textures_delta.clear();
         for f in self.h.take_sent() {
             match f {
+                ClientFrame::Game(m) if self.mute.is_some() => self.mute.as_mut().unwrap().push(m),
                 ClientFrame::Game(m) => {
                     if let Some((g, r)) = self.game.as_mut() {
                         for (p, reply) in r.handle(g, "ann", m) {
@@ -365,4 +368,38 @@ fn every_tutorial_character_has_a_glyph() {
             .collect()
     });
     assert!(missing.is_empty(), "no glyph for {missing:?}");
+}
+
+fn enter(repeat: bool) -> Event {
+    Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat, modifiers: Modifiers::default() }
+}
+
+/// Polish spec H4 (review M2): a held Enter does not run through steps, and
+/// Next waits for the server's reply once pressed.
+#[test]
+fn enter_is_a_fresh_press_and_next_waits_for_its_reply() {
+    let mut r = Rig::in_lesson("01-reading-the-panel");
+    r.until("Step 1 of 10");
+    r.events.push(enter(false));
+    r.frame();
+    r.frame();
+    r.frame();
+    assert_eq!(r.step(), 1, "a press is Next");
+    // The key stays down: egui reports its repeats.
+    r.events.push(enter(true));
+    r.frame();
+    r.frame();
+    r.frame();
+    assert_eq!(r.step(), 1, "a key repeat is not a press");
+    r.mute = Some(vec![]);
+    r.events.push(enter(false));
+    r.frame();
+    r.events.push(enter(false));
+    r.frame();
+    let out = r.frame();
+    let next = find(&out, "Next");
+    r.click(next);
+    r.frame();
+    let sent = r.mute.take().unwrap();
+    assert_eq!(sent, [ClientMsg::LessonNext], "one Next until the reply comes");
 }
