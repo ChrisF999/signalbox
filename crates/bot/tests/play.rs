@@ -55,6 +55,7 @@ async fn decide_runs_at_most_twice_a_second_whoever_calls_it() {
         box_prefix: String::new(),
         workstations: BTreeMap::new(),
         simplifier: vec![],
+        display_headcodes: Default::default(),
     };
     let view = View {
         seq: 1,

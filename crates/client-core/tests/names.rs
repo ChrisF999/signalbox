@@ -35,6 +35,7 @@ fn one_box(prefix: &str, letters: &[(&str, &str)]) -> Layout {
         box_prefix: s(prefix),
         workstations: letters.iter().map(|(a, l)| (s(a), s(l))).collect::<BTreeMap<_, _>>(),
         simplifier: vec![],
+        display_headcodes: Default::default(),
     }
 }
 
@@ -78,4 +79,27 @@ fn alarms_and_commands_use_the_shown_names() {
         notice_text(&Notice::Spad { signal: s("C"), train: s("1E01") }, n),
         (s("SPAD: 1E01 passed TBC at danger"), true)
     );
+}
+
+fn wtt_box() -> Layout {
+    let mut l = one_box("W", &[]);
+    l.display_headcodes = [(s("301/1"), s("301")), (s("301/2"), s("301"))].into_iter().collect();
+    l
+}
+
+/// A service with a display headcode is shown by it (polish spec P18,
+/// amended: a WTT trip `301/1` shows its train number); any other text,
+/// such as a headcode a player interposed, is shown as it is.
+#[test]
+fn headcodes_are_shown_by_their_display_headcode() {
+    let n = Names::new(&wtt_box());
+    assert_eq!((n.headcode("301/1"), n.headcode("301/2"), n.headcode("1A01")), ("301", "301", "1A01"));
+    assert_eq!(Names::default().headcode("301/1"), "301/1", "before any layout");
+    assert_eq!(notice_text(&Notice::Spad { signal: s("121"), train: s("301/1") }, &n).0, "SPAD: 301 passed W121 at danger");
+    let late = Notice::Late { train: s("301/1"), place: s("BNK"), platform: s("7"), late_s: 120 };
+    assert_eq!(notice_text(&late, &n).0, "301 at BNK 7, 2 min late");
+    let wrong = Notice::WrongPlatform { train: s("301/2"), place: s("BNK"), platform: s("8"), expected: s("7") };
+    assert_eq!(notice_text(&wrong, &n).0, "301 at BNK platform 8, booked 7");
+    let handover = Notice::Handover { headcode: s("301/1"), from_area: s("West") };
+    assert_eq!(notice_text(&handover, &n).0, "301 offered from West");
 }

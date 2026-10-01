@@ -22,12 +22,17 @@ pub fn first_time(r: &SimplifierRow) -> Option<f64> {
     r.calls.iter().find_map(|c| c.arr.or(c.dep))
 }
 
-/// Rows whose headcode contains `search` (trimmed, any case), in running
-/// order: by first call (untimed last), then headcode, else as sent.
+/// Rows whose headcode or display headcode contains `search` (trimmed,
+/// any case), in running order: by first call (untimed last), then
+/// headcode, else as sent.
 pub fn rows<'a>(l: &'a Layout, search: &str) -> Vec<&'a SimplifierRow> {
     let want = search.trim().to_ascii_uppercase();
-    let mut out: Vec<&SimplifierRow> =
-        l.simplifier.iter().filter(|r| r.headcode.to_ascii_uppercase().contains(&want)).collect();
+    let matches = |h: &str| h.to_ascii_uppercase().contains(&want);
+    let mut out: Vec<&SimplifierRow> = l
+        .simplifier
+        .iter()
+        .filter(|r| matches(&r.headcode) || l.display_headcodes.get(&r.headcode).is_some_and(|d| matches(d)))
+        .collect();
     out.sort_by(|a, b| {
         match (first_time(a), first_time(b)) {
             (Some(x), Some(y)) => x.total_cmp(&y),
@@ -102,6 +107,23 @@ pub fn lateness(v: Option<&View>, headcode: &str) -> Option<String> {
         return None;
     }
     Some(late_text(t.late_s))
+}
+
+/// The headcode a berth's text stands for: itself when it is a headcode
+/// the layout or view knows; else (what a player interposed, e.g. a train
+/// number) the one running train whose display headcode it is; else
+/// itself.
+pub fn resolve(l: &Layout, v: Option<&View>, text: &str) -> String {
+    let known = l.simplifier.iter().any(|r| r.headcode == text) || v.is_some_and(|v| v.trains.contains_key(text));
+    if !known {
+        let mut running = v.into_iter().flat_map(|v| &v.trains).filter(|(h, r)| {
+            r.state != TrainState::Due && l.display_headcodes.get(h.as_str()).is_some_and(|d| d == text)
+        });
+        if let (Some((h, _)), None) = (running.next(), running.next()) {
+            return h.clone();
+        }
+    }
+    text.to_string()
 }
 
 /// What the enquiry window shows for one headcode.

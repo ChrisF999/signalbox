@@ -161,7 +161,13 @@ pub struct TrainTypeFile {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceFile {
+    /// Unique per service: entries, `form` and the describer use it.
     pub headcode: String,
+    /// What the panel shows for this service where that differs from its
+    /// headcode (a WTT trip `301/1` shows its train number `301`); absent
+    /// means the headcode itself, so other worlds are written unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
     pub train_type: String,
     #[serde(default)]
     pub calls: Vec<CallFile>,

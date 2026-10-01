@@ -442,7 +442,11 @@ fn build_timetable(f: &WorldFile, net: &Network) -> Result<Timetable, LoadError>
         if end != EndAction::Exit && !calls.iter().any(|c| c.stop) {
             return Err(other(format!("{}: a service that forms or stables must have a stopping call", s.headcode)));
         }
-        services.push(Service { headcode: s.headcode.clone(), train_type, calls, end });
+        let display = s.display.clone().unwrap_or_else(|| s.headcode.clone());
+        if display.is_empty() {
+            return Err(other(format!("{}: empty display headcode", s.headcode)));
+        }
+        services.push(Service { headcode: s.headcode.clone(), display, train_type, calls, end });
     }
     let mut entries = Vec::new();
     for e in &f.entries {

@@ -2,7 +2,9 @@
 //! `<box><workstation><name>` (`LA9`, `LB72`), without the workstation
 //! letter on a single-area layout (`L9`). Display only: everything sent
 //! keeps the plain name. Other names (berths, points, track, nodes) are
-//! shown as they are.
+//! shown as they are. A headcode is shown by its service's display
+//! headcode where the layout gives one (`Layout::display_headcodes`: a WTT
+//! trip `301/1` shows `301`, polish spec P18 amended).
 
 use std::collections::BTreeMap;
 
@@ -14,6 +16,8 @@ pub struct Names {
     signals: BTreeMap<String, String>,
     /// Area → workstation letter; empty on a single-area layout.
     workstations: BTreeMap<String, String>,
+    /// Headcode → display headcode, where they differ.
+    headcodes: BTreeMap<String, String>,
 }
 
 impl Names {
@@ -22,7 +26,12 @@ impl Names {
         let letter = |area: &str| if single { "" } else { l.workstations.get(area).map_or("", String::as_str) };
         let signals = l.signals.iter().map(|s| (s.name.clone(), format!("{}{}{}", l.box_prefix, letter(&s.area), s.name))).collect();
         let workstations = if single { BTreeMap::new() } else { l.workstations.clone() };
-        Names { signals, workstations }
+        Names { signals, workstations, headcodes: l.display_headcodes.clone() }
+    }
+
+    /// How a headcode is shown: its display headcode, else as it is.
+    pub fn headcode<'a>(&'a self, headcode: &'a str) -> &'a str {
+        self.headcodes.get(headcode).map_or(headcode, String::as_str)
     }
 
     /// How a signal is shown; a name the layout does not list stays plain.

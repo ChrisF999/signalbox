@@ -528,7 +528,7 @@ impl UiApp {
             let Some(v) = g.view() else { return };
             egui::Grid::new("train_list").striped(true).show(ui, |ui| {
                 for (h, r) in train_list(v) {
-                    let code = RichText::new(h).monospace().color(paint::HEADCODE);
+                    let code = RichText::new(g.names().headcode(h)).monospace().color(paint::HEADCODE);
                     // With the enquiry on, a headcode opens its window.
                     if enquiry {
                         if ui.add(egui::Label::new(code).sense(Sense::click())).clicked() {
@@ -585,7 +585,7 @@ impl UiApp {
                 let late = if *first { simplifier::lateness(v, &line.headcode) } else { None };
                 let late = late.as_deref().unwrap_or("");
                 let cells = [
-                    RichText::new(&line.headcode).monospace().color(paint::HEADCODE),
+                    RichText::new(g.names().headcode(&line.headcode)).monospace().color(paint::HEADCODE),
                     RichText::new(late).color(if late == "OT" { paint::LABEL } else { ALARM }),
                     RichText::new(&line.from),
                     RichText::new(&line.to),
@@ -605,7 +605,7 @@ impl UiApp {
         let Some(g) = self.core.game() else { return };
         let (Some(l), v) = (g.layout(), g.view()) else { return };
         let e = simplifier::enquiry(l, v, &h);
-        egui::Window::new(format!("Train {h}")).id(egui::Id::new("enquiry")).open(&mut open).resizable(false).show(ui.ctx(), |ui| {
+        egui::Window::new(format!("Train {}", g.names().headcode(&h))).id(egui::Id::new("enquiry")).open(&mut open).resizable(false).show(ui.ctx(), |ui| {
             ui.label(e.live_text());
             if e.rows.is_empty() {
                 ui.label("Not in the simplifier for this area");

@@ -465,6 +465,20 @@ fn headcodes_sit_in_the_track_behind_their_signal_and_empty_berths_are_not_drawn
     assert_eq!((t.colour, t.monospace, t.size, t.at), (HEADCODE, true, HEADCODE_PX, knockouts(&d)[0].center()));
 }
 
+/// A berth shows its service's display headcode (polish spec P18, amended:
+/// a WTT trip `301/1` shows `301`); what a player typed shows as it is.
+#[test]
+fn berths_show_display_headcodes() {
+    let mut layout = layout_for(Some("West"));
+    layout.display_headcodes.insert(s("301/1"), s("301"));
+    let mut r = Rig::of(layout, view_for(Some("West")));
+    r.view.berths.insert(s("BA"), s("301/1"));
+    r.view.berths.insert(s("BW"), s("2Z99"));
+    let d = r.idle();
+    let texts: Vec<&str> = d.texts.iter().filter(|t| t.size == HEADCODE_PX).map(|t| t.text.as_str()).collect();
+    assert!(texts.contains(&"301") && texts.contains(&"2Z99") && !texts.contains(&"301/1"), "{texts:?}");
+}
+
 #[test]
 fn a_boundary_berth_sits_inside_its_boundary() {
     let mut r = Rig::new(Some("West"));

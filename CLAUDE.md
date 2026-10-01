@@ -146,6 +146,15 @@ output is byte-identical for the same input.
 - `game::display` reads those display keys once per game (defaults: the
   title's first letter, A, B, C... in area order) and builds each area's
   simplifier from the timetable; every `Layout` carries them.
+- A service may have a display headcode (`ServiceFile.display`, absent =
+  its headcode, so other worlds are written unchanged): the WTT's trips
+  are `<train>/<trip>` but show the train number (polish spec P18,
+  amended). The sim, the describer, saves and the wire keep the unique
+  headcode; `Layout::display_headcodes` (only those that differ, whole
+  world) lets the client show the display one wherever a headcode is shown
+  (`client_core::Names::headcode`: berths, train list, simplifier, enquiry,
+  hover, menus, the log). A berth holding a typed train number opens the
+  enquiry of the one running train shown by it (`simplifier::resolve`).
 - Clock votes (realism owner decision 12): holders vote; while nobody holds
   an area every connected player does (`Game::voters`), re-settled on every
   claim, release, grace expiry, connect and spectator disconnect.

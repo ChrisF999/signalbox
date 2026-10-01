@@ -138,3 +138,27 @@ fn rejects_infinite_segment_speed() {
     let e = signalbox_core::world::World::from_file(f).unwrap_err();
     assert!(matches!(e, LoadError::Other(ref m) if m.contains("segment `a`")), "{e:?}");
 }
+
+/// A service may carry the headcode the panel shows (`display`, e.g. the
+/// train number `301` of trip `301/1`); without one it shows its headcode.
+#[test]
+fn a_service_shows_its_display_headcode_or_its_own() {
+    let w = load_with("plain_line", |v| v["services"][0]["display"] = json!("301")).unwrap();
+    assert_eq!((w.services[0].headcode.as_str(), w.services[0].display.as_str()), ("2A01", "301"));
+    let w = world("plain_line");
+    assert_eq!(w.services[0].display, "2A01");
+    let e = load_with("plain_line", |v| v["services"][0]["display"] = json!("")).unwrap_err();
+    assert!(e.to_string().contains("2A01: empty display headcode"), "{e}");
+}
+
+/// A world without display headcodes is written exactly as before.
+#[test]
+fn a_world_without_display_headcodes_writes_none() {
+    let f: signalbox_core::world::file::WorldFile = serde_json::from_value(fixture_json("plain_line")).unwrap();
+    assert!(f.services.iter().all(|s| s.display.is_none()));
+    let text = serde_json::to_string(&f).unwrap();
+    assert!(!text.contains("\"display\""), "{text}");
+    let mut f = f;
+    f.services[0].display = Some("301".into());
+    assert!(serde_json::to_string(&f).unwrap().contains("\"display\":\"301\""));
+}

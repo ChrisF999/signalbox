@@ -156,6 +156,20 @@ fn berths_interpose_a_typed_headcode_and_cancel_it() {
     );
 }
 
+/// A berth holding a service with a display headcode shows that in its
+/// hover text and menu (polish spec P18, amended).
+#[test]
+fn berths_show_display_headcodes() {
+    let mut t = Table::new("ann", Some("West"));
+    t.app.interpose("BA", "2Z99");
+    t.pump();
+    t.run(0.5);
+    let mut l = t.layout().clone();
+    l.display_headcodes.insert(s("2Z99"), s("299"));
+    assert_eq!(select::describe_berth(&l, t.view(), "BA"), "Berth BA: 299");
+    assert_eq!(select::berth_menu(&l, t.view(), "BA")[0].label, "Cancel 299");
+}
+
 fn auto_layout() -> Layout {
     let route = |entrance: &str, name: &str, exit: &str, automatic: bool| RouteInfo {
         name: s(name),
@@ -190,6 +204,7 @@ fn auto_layout() -> Layout {
         box_prefix: String::new(),
         workstations: BTreeMap::new(),
         simplifier: vec![],
+        display_headcodes: Default::default(),
     }
 }
 

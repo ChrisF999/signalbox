@@ -60,15 +60,17 @@ pub fn notice_text(n: &Notice, names: &Names) -> (String, bool) {
             (format!("Refused: {} ({})", command_text(cmd, names), rejection_text(*reason)), true)
         }
         Notice::NotYourArea { area } => (format!("Not your area: that is in {area}"), true),
-        Notice::Spad { signal, train } => (format!("SPAD: {train} passed {} at danger", names.signal(signal)), true),
+        Notice::Spad { signal, train } => (format!("SPAD: {} passed {} at danger", names.headcode(train), names.signal(signal)), true),
         Notice::Collision { section } => (format!("COLLISION on {section}"), true),
         Notice::Late { train, place, platform, late_s } => {
-            (format!("{train} at {place} {platform}, {} min late", late_s / 60), false)
+            (format!("{} at {place} {platform}, {} min late", names.headcode(train), late_s / 60), false)
         }
         Notice::WrongPlatform { train, place, platform, expected } => {
-            (format!("{train} at {place} platform {platform}, booked {expected}"), true)
+            (format!("{} at {place} platform {platform}, booked {expected}", names.headcode(train)), true)
         }
-        Notice::Handover { headcode, from_area } => (format!("{headcode} offered from {from_area}"), false),
+        Notice::Handover { headcode, from_area } => {
+            (format!("{} offered from {from_area}", names.headcode(headcode)), false)
+        }
         Notice::AreaTaken { area, holder } => (format!("{area} is now {holder}'s"), false),
         Notice::Replaced => ("This login was opened somewhere else".to_string(), true),
         Notice::GameCrashed => ("The game stopped unexpectedly".to_string(), true),

@@ -117,6 +117,25 @@ fn the_game_puts_them_in_every_layout() {
     assert_eq!(d.simplifier(g.sim().world().net.area("East")).len(), 2);
 }
 
+/// Every layout carries the display headcodes that differ from the
+/// headcode, for the whole world (a berth can hold any train), and none
+/// when there are none.
+#[test]
+fn display_headcodes_go_into_every_layout() {
+    let mut g = Game::new(twobox(), GameMeta { layout: s("twobox"), seed: 1 });
+    let ServerMsg::Layout(l) = &g.connect("sam")[0].1 else { panic!() };
+    assert!(l.display_headcodes.is_empty());
+    let w = twobox_mut(|j| {
+        j["services"][0]["display"] = json!("E1");
+        j["services"][2]["display"] = json!("1N02");
+    });
+    let mut g = Game::new(w, GameMeta { layout: s("twobox"), seed: 1 });
+    let ServerMsg::Layout(l) = &g.connect("sam")[0].1 else { panic!() };
+    assert_eq!(l.display_headcodes, map(&[("1E01", s("E1"))]), "1N02 shows itself");
+    let ServerMsg::Layout(l) = &g.handle("sam", protocol::ClientMsg::Claim { area: s("West") })[0].1 else { panic!() };
+    assert_eq!(l.display_headcodes, map(&[("1E01", s("E1"))]), "whatever the area");
+}
+
 /// The three boxes of Liverpool Street, as shipped.
 #[test]
 fn liverpool_street_has_its_prefixes_and_a_simplifier_per_box() {

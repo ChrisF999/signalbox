@@ -38,6 +38,12 @@ pub struct Layout {
     /// order (realism spec §3).
     #[serde(default)]
     pub simplifier: Vec<SimplifierRow>,
+    /// Headcode → what the panel shows for it, for every service of the
+    /// world whose display headcode differs (a WTT trip `301/1` shows its
+    /// train number `301`). Everything sent keeps the headcode; berths,
+    /// the train list, the simplifier, the enquiry and the log show this.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub display_headcodes: BTreeMap<String, String>,
 }
 
 /// One service in the simplifier: where it runs from and to, and its calls

@@ -3,7 +3,7 @@
 mod common;
 
 use client_core::Target;
-use client_core::simplifier::{Line, enquiry, fmt_wtt, lateness, lines, rows};
+use client_core::simplifier::{Line, enquiry, fmt_wtt, lateness, lines, resolve, rows};
 use common::*;
 use protocol::*;
 
@@ -97,4 +97,33 @@ fn the_enquiry_has_the_rows_and_the_live_state_and_never_routes() {
     let e = enquiry(t.layout(), Some(t.view()), "1E01");
     assert!(e.live_text().ends_with(", OT"), "{}", e.live_text());
     assert!(t.h.take_sent().is_empty(), "looking a headcode up sends nothing");
+}
+
+/// The search finds a service by its display headcode too (a WTT train
+/// number finds all its trips).
+#[test]
+fn search_finds_display_headcodes() {
+    let t = Table::new("sam", None);
+    let mut l = t.layout().clone();
+    l.display_headcodes = [(s("1N02"), s("77")), (s("2W04"), s("77"))].into_iter().collect();
+    let found: Vec<&str> = rows(&l, "77").iter().map(|r| r.headcode.as_str()).collect();
+    assert_eq!(found, ["1N02", "2W04"]);
+}
+
+/// A berth holding what a player typed (a train number, say) opens the
+/// enquiry of the one running train shown by it; anything else is looked up
+/// as it is.
+#[test]
+fn a_typed_display_headcode_finds_its_running_train() {
+    let mut t = Table::new("sam", None);
+    t.run(3.0);
+    let mut l = t.layout().clone();
+    l.display_headcodes = [(s("1E01"), s("E1")), (s("1N02"), s("E1"))].into_iter().collect();
+    let v = t.view();
+    assert_ne!(v.trains["1E01"].state, TrainState::Due);
+    assert_eq!(v.trains.get("1N02").map(|r| r.state), Some(TrainState::Due));
+    assert_eq!(resolve(&l, Some(v), "E1"), "1E01", "1N02 is only due");
+    assert_eq!(resolve(&l, Some(v), "1N02"), "1N02", "a headcode is itself");
+    assert_eq!(resolve(&l, Some(v), "9Z99"), "9Z99");
+    assert_eq!(resolve(&l, None, "E1"), "E1");
 }

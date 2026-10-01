@@ -449,7 +449,7 @@ pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawi
         d.texts.push(TextItem {
             at: r.center(),
             anchor: Align2::CENTER_CENTER,
-            text: h.clone(),
+            text: st.names.headcode(h).to_string(),
             size: HEADCODE_PX,
             colour: if b.fringe { FRINGE } else { HEADCODE },
             monospace: true,

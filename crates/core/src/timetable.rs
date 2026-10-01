@@ -41,6 +41,8 @@ pub enum EndAction {
 #[derive(Clone, Debug)]
 pub struct Service {
     pub headcode: String,
+    /// What the panel shows: the world file's `display`, else the headcode.
+    pub display: String,
     pub train_type: TrainTypeId,
     pub calls: Vec<Call>,
     pub end: EndAction,

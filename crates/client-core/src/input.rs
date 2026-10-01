@@ -5,6 +5,7 @@ use protocol::ExitName;
 
 use crate::app::App;
 use crate::select::{self, Click, MenuItem};
+use crate::simplifier;
 
 /// Something on the diagram under the pointer.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -96,10 +97,13 @@ impl App {
     }
 
     /// The headcode shown at `target`, if it is a berth holding one: what a
-    /// click opens the enquiry for (realism spec §3). Never routes.
+    /// click opens the enquiry for (realism spec §3), as `simplifier::resolve`
+    /// reads it. Never routes.
     pub fn headcode_at(&self, target: &Target) -> Option<String> {
         let Target::Berth(b) = target else { return None };
-        self.game.as_ref()?.bot.view()?.berths.get(b).cloned()
+        let bot = &self.game.as_ref()?.bot;
+        let (l, v) = (bot.layout()?, bot.view()?);
+        Some(simplifier::resolve(l, Some(v), v.berths.get(b)?))
     }
 
     /// Hover text.

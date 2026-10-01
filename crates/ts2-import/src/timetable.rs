@@ -141,6 +141,7 @@ pub fn build(ts2: &Ts2, g: &Graph, report: &mut Report) -> Timetable {
         }
         services.push(ServiceFile {
             headcode: s.service_code.clone(),
+            display: None,
             train_type: s.planned_train_type.clone(),
             calls,
             end,

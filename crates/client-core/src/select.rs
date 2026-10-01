@@ -150,6 +150,11 @@ pub fn points_menu(l: &Layout, v: &View, points: &str) -> Vec<MenuItem> {
     vec![MenuItem { label: format!("Swing {points} {}", pos_text(to)), cmd: PlayerCommand::SwingPoints { points: points.to_string(), to } }]
 }
 
+/// How a headcode is shown (`Names::headcode`, without building `Names`).
+fn shown_headcode<'a>(l: &'a Layout, h: &'a str) -> &'a str {
+    l.display_headcodes.get(h).map_or(h, String::as_str)
+}
+
 /// Cancelling a berth's headcode; interposing needs a headcode typed in,
 /// so the screen offers it separately (`operable_berth`).
 pub fn berth_menu(l: &Layout, v: &View, berth: &str) -> Vec<MenuItem> {
@@ -157,7 +162,10 @@ pub fn berth_menu(l: &Layout, v: &View, berth: &str) -> Vec<MenuItem> {
         return vec![];
     }
     match v.berths.get(berth) {
-        Some(h) => vec![MenuItem { label: format!("Cancel {h}"), cmd: PlayerCommand::CancelBerth { berth: berth.to_string() } }],
+        Some(h) => vec![MenuItem {
+            label: format!("Cancel {}", shown_headcode(l, h)),
+            cmd: PlayerCommand::CancelBerth { berth: berth.to_string() },
+        }],
         None => vec![],
     }
 }
@@ -221,7 +229,8 @@ pub fn describe_points(l: &Layout, v: &View, points: &str) -> String {
 
 pub fn describe_berth(l: &Layout, v: &View, berth: &str) -> String {
     let area = l.berths.iter().find(|b| b.name == berth).map(|b| area_note(l, &b.area)).unwrap_or_default();
-    format!("Berth {berth}{area}: {}", v.berths.get(berth).map_or("empty", String::as_str))
+    let held = v.berths.get(berth).map_or("empty", |h| shown_headcode(l, h));
+    format!("Berth {berth}{area}: {held}")
 }
 
 pub fn describe_section(l: &Layout, v: &View, section: &str) -> String {
