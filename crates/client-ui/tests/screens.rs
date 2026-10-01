@@ -522,7 +522,15 @@ fn a_headcode_in_the_train_list_opens_the_enquiry() {
     r.click(at, PointerButton::Primary);
     let out = r.frame();
     assert!(has_text(&out, "Train 1E01"), "{:?}", texts(&out));
-    assert!(has_text(&out, "EST to EST") && has_text(&out, "EST 1 07:04 07:05"), "East's simplifier row");
+    // Polish spec M7: labelled, with what the train does next, and opened
+    // beside the click, clear of the top bar's Players row.
+    for want in ["State", "Next", "arrive EST 1 at 07:04", "Runs", "EST to EST", "Place", "Plat", "07:04", "07:05"] {
+        assert!(has_text(&out, want), "{want} in {:?}", texts(&out));
+    }
+    let win = r.ctx.memory(|m| m.area_rect(egui::Id::new("enquiry"))).unwrap();
+    let players = texts(&out).into_iter().find(|(t, _)| t == "Players:").unwrap().1;
+    assert!(win.min.y > players.max.y, "{win:?} below {players:?}");
+    assert!((win.min.y - at.y).abs() < 40.0, "{win:?} level with {at:?} (kept on screen sideways)");
 }
 
 // ---- fix round 1: per-game state, the simplifier's cache and scroll, the enquiry's ways out ----

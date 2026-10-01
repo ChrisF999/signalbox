@@ -47,6 +47,8 @@ const SIMPLIFIER_WIDTH: f32 = {
 /// margins and a scroll bar, so the table never scrolls sideways (its
 /// header would slip off its columns) and the tabs never resize the panel.
 const SIDE_W: f32 = SIMPLIFIER_WIDTH + 24.0;
+/// The enquiry window opens this far right of and below where it was asked for.
+const ENQUIRY_OFFSET_PX: f32 = 16.0;
 /// The top bar's fixed widths (polish spec M5): the clock state (`paused`,
 /// `8×`) and the pause/resume button.
 const CLOCK_STATE_W: f32 = 52.0;
@@ -108,6 +110,9 @@ pub struct UiApp {
     search: String,
     /// The headcode whose enquiry window is open.
     enquiry: Option<String>,
+    /// Where the pointer was when it opened: the window opens beside it
+    /// (polish spec M7).
+    enquiry_at: Option<egui::Pos2>,
     /// The game drawn last frame; another (or the lobby) forgets the
     /// enquiry, the search and the simplifier lines.
     shown_game: Option<String>,
@@ -146,6 +151,7 @@ impl UiApp {
             side_tab: SideTab::default(),
             search: String::new(),
             enquiry: None,
+            enquiry_at: None,
             shown_game: None,
             simplifier_lines: None,
             placement: None,
@@ -682,6 +688,7 @@ impl UiApp {
         });
         if open.is_some() {
             self.enquiry = open;
+            self.enquiry_at = ui.ctx().pointer_interact_pos();
         }
     }
 
@@ -736,24 +743,55 @@ impl UiApp {
         });
     }
 
+    /// The headcode enquiry (realism spec §3; polish spec M7): opened beside
+    /// where it was asked for, its facts in a labelled grid, then the
+    /// timetable rows with headed columns.
     fn enquiry_window(&mut self, ui: &mut Ui) {
         let Some(h) = self.enquiry.clone() else { return };
         let mut open = true;
         let Some(g) = self.core.game() else { return };
         let (Some(l), v) = (g.layout(), g.view()) else { return };
         let e = simplifier::enquiry(l, v, &h);
-        egui::Window::new(format!("Train {}", g.names().headcode(&h))).id(egui::Id::new("enquiry")).open(&mut open).resizable(false).show(ui.ctx(), |ui| {
-            ui.label(e.live_text());
+        let names = g.names();
+        let place = |p: Option<&str>| p.map_or("?", |p| names.place(p)).to_string();
+        let mut w = egui::Window::new(format!("Train {}", names.headcode(&h))).id(egui::Id::new("enquiry")).open(&mut open).resizable(false);
+        if let Some(at) = self.enquiry_at {
+            w = w.default_pos(at + vec2(ENQUIRY_OFFSET_PX, ENQUIRY_OFFSET_PX));
+        }
+        w.show(ui.ctx(), |ui| {
+            egui::Grid::new("enquiry_facts").num_columns(2).show(ui, |ui| {
+                ui.label(RichText::new("State").strong());
+                ui.label(e.live_text());
+                ui.end_row();
+                if let Some(next) = e.next_text(names) {
+                    ui.label(RichText::new("Next").strong());
+                    ui.label(next);
+                    ui.end_row();
+                }
+                if let Some(r) = e.rows.first() {
+                    ui.label(RichText::new("Runs").strong());
+                    ui.label(format!("{} to {}", place(r.origin.as_deref()), place(r.destination.as_deref())));
+                    ui.end_row();
+                }
+            });
             if e.rows.is_empty() {
                 ui.label("Not in the simplifier for this area");
             }
-            for r in &e.rows {
-                let names = g.names();
-                let place = |p: Option<&str>| p.map_or("?", |p| names.place(p)).to_string();
-                ui.label(format!("{} to {}", place(r.origin.as_deref()), place(r.destination.as_deref())));
-                for line in simplifier::lines(r) {
-                    ui.label(format!("{} {} {} {}", names.place(&line.place), line.platform, line.arr, line.dep));
-                }
+            for (i, r) in e.rows.iter().enumerate() {
+                ui.separator();
+                egui::Grid::new(("enquiry_calls", i)).striped(true).show(ui, |ui| {
+                    for head in ["Place", "Plat", "Arr", "Dep"] {
+                        ui.label(RichText::new(head).strong());
+                    }
+                    ui.end_row();
+                    for line in simplifier::lines(r) {
+                        ui.label(names.place(&line.place));
+                        ui.label(&line.platform);
+                        ui.label(&line.arr);
+                        ui.label(&line.dep);
+                        ui.end_row();
+                    }
+                });
             }
         });
         if !open {
@@ -853,7 +891,10 @@ impl UiApp {
         match click {
             // With the enquiry on, a headcode opens its window and nothing else.
             Some(Some(t)) => match self.core.headcode_at(&t).filter(|_| self.settings.enquiry) {
-                Some(h) => self.enquiry = Some(h),
+                Some(h) => {
+                    self.enquiry = Some(h);
+                    self.enquiry_at = ui.ctx().pointer_interact_pos();
+                }
                 None => self.core.click(&t),
             },
             Some(None) => self.core.escape(),

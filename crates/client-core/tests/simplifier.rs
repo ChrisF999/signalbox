@@ -145,3 +145,30 @@ fn the_simplifier_opens_at_the_first_train_not_yet_finished() {
     assert_eq!(now_line(&rows, 250.0), 3, "after 1A01's two lines and 1A02's one");
     assert_eq!(now_line(&rows, 600.0), 6, "a row with no times never finishes");
 }
+
+/// Polish spec M7: the enquiry says what the train does next.
+#[test]
+fn the_enquiry_says_what_the_train_does_next() {
+    let mut t = Table::new("eve", Some("East"));
+    let row = |state, arr, dep| TrainRow {
+        next_place: Some(s("EST")),
+        next_platform: Some(s("1")),
+        booked: arr,
+        arr,
+        dep,
+        late_s: 0,
+        state,
+    };
+    let names = client_core::Names::default();
+    let l = t.layout().clone();
+    let mut v = t.view().clone();
+    v.trains.insert(s("1E01"), row(TrainState::AtPlatform, Some(25_440.0), Some(25_500.0)));
+    assert_eq!(enquiry(&l, Some(&v), "1E01").next_text(&names).as_deref(), Some("depart EST 1 at 07:05"));
+    v.trains.insert(s("1E01"), row(TrainState::InArea, Some(25_440.0), Some(25_500.0)));
+    assert_eq!(enquiry(&l, Some(&v), "1E01").next_text(&names).as_deref(), Some("arrive EST 1 at 07:04"));
+    v.trains.insert(s("1E01"), row(TrainState::Approaching, None, Some(25_530.0)));
+    assert_eq!(enquiry(&l, Some(&v), "1E01").next_text(&names).as_deref(), Some("pass EST 1 at 07:05½"));
+    v.trains.insert(s("1E01"), row(TrainState::Due, Some(25_440.0), None));
+    assert_eq!(enquiry(&l, Some(&v), "1E01").next_text(&names), None);
+    t.run(0.1);
+}

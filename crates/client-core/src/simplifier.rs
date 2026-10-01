@@ -158,6 +158,24 @@ pub fn enquiry<'a>(l: &'a Layout, v: Option<&'a View>, headcode: &str) -> Enquir
 }
 
 impl Enquiry<'_> {
+    /// What the train does next (polish spec M7): `depart LIVERPOOL STREET 10
+    /// at 06:00` standing at a platform, else `arrive ... at ...` (or `pass
+    /// ... at ...`); `None` when not running or its timetable is done.
+    pub fn next_text(&self, names: &crate::Names) -> Option<String> {
+        let t = self.train.filter(|t| t.state != TrainState::Due)?;
+        let place = names.place(t.next_place.as_deref()?);
+        let at = match &t.next_platform {
+            Some(pf) => format!("{place} {pf}"),
+            None => place.to_string(),
+        };
+        let time = |v: Option<f64>| v.map(|s| format!(" at {}", fmt_wtt(s))).unwrap_or_default();
+        Some(match (t.state, t.arr) {
+            (TrainState::AtPlatform, _) => format!("depart {at}{}", time(t.dep)),
+            (_, Some(_)) => format!("arrive {at}{}", time(t.arr)),
+            (_, None) => format!("pass {at}{}", time(t.dep)),
+        })
+    }
+
     /// `in area, 3L`, `due`, or `not in your train list`.
     pub fn live_text(&self) -> String {
         match self.train {
