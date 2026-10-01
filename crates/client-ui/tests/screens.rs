@@ -1175,7 +1175,7 @@ fn the_panel_hides_and_the_fit_follows_the_window() {
     let wide = r.ui.diagram_rect().unwrap();
     assert!(wide.width() > narrow.0.width() + 200.0, "{wide:?} vs {:?}", narrow.0);
     assert!(r.ui.camera().unwrap().scale > narrow.1.scale, "fitted again, larger");
-    assert!(side_texts(&r, &out).iter().all(|t| t != "TRAINS"));
+    assert!(!has_text(&out, "TRAINS"), "the panel is gone");
     click_text(&mut r, &out, "Show panel");
     // A moved view stays where the player put it.
     let start = r.at(150.0, 0.0);
@@ -1227,4 +1227,50 @@ fn a_narrow_panel_scrolls_the_simplifier_sideways() {
     let out = r.frame();
     let dep = text_at(&out, "Dep");
     assert!(dep.min.x >= left && dep.max.x <= 1280.0, "Dep scrolled into the panel: {dep:?}");
+}
+
+/// Fit clears a moved view: pan, Fit, resize, and the fit follows again.
+#[test]
+fn fit_after_a_pan_follows_the_window_again() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    r.frame();
+    r.frame();
+    let start = r.at(150.0, 0.0);
+    r.events.push(Event::PointerMoved(start));
+    r.events.push(Event::PointerButton { pos: start, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::default() });
+    r.frame();
+    r.events.push(Event::PointerMoved(start + vec2(40.0, 0.0)));
+    r.frame();
+    r.events.push(Event::PointerButton { pos: start + vec2(40.0, 0.0), button: PointerButton::Primary, pressed: false, modifiers: Modifiers::default() });
+    r.frame();
+    let out = r.frame();
+    click_text(&mut r, &out, "Fit");
+    r.frame();
+    let fitted = r.ui.camera().unwrap();
+    r.size = vec2(1024.0, 700.0);
+    r.frame();
+    r.frame();
+    assert_ne!(r.ui.camera().unwrap(), fitted, "refitted to the smaller window");
+}
+
+/// A press held still past egui's click time is a drag that moves nothing:
+/// it does not count as a pan, so the fit still follows the window.
+#[test]
+fn a_press_held_still_does_not_stop_the_fit_following() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    r.frame();
+    r.frame();
+    let start = r.at(150.0, 0.0);
+    r.events.push(Event::PointerMoved(start));
+    r.events.push(Event::PointerButton { pos: start, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::default() });
+    for _ in 0..12 {
+        r.frame();
+    }
+    r.events.push(Event::PointerButton { pos: start, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::default() });
+    r.frame();
+    let before = r.ui.camera().unwrap();
+    r.size = vec2(1024.0, 700.0);
+    r.frame();
+    r.frame();
+    assert_ne!(r.ui.camera().unwrap(), before, "still follows the window");
 }

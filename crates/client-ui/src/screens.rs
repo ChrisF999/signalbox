@@ -127,8 +127,8 @@ pub struct UiApp {
     simplifier_cols: [f32; 8],
     /// The Train column's width for (game, layout generation): it changes only with the layout.
     train_col: Option<((String, u64), f32)>,
-    /// The diagram's size when it was last fitted, and whether the player has
-    /// panned or zoomed since: an untouched fit follows a resize (polish spec H7).
+    /// The diagram's size last frame, and whether the player has panned or
+    /// zoomed since the last fit: an untouched fit follows a resize (polish spec H7).
     fit_size: Option<egui::Vec2>,
     cam_moved: bool,
     /// The side panel is shown (polish spec H7: it can be hidden).
@@ -440,7 +440,9 @@ impl UiApp {
         };
         self.simplifier_cols = simplifier_columns(train_w);
         let side_w = table_width(&self.simplifier_cols) + SIDE_PAD;
-        if self.side_open {
+        // A tutorial's panel carries the lesson box: it is never hidden there.
+        let lesson = self.core.game().is_some_and(|g| g.lesson().is_some());
+        if self.side_open || lesson {
             egui::Panel::right(egui::Id::new(("side", side_w.round() as i32)))
                 .default_size(side_w)
                 .min_size(SIDE_MIN_W)
@@ -514,7 +516,7 @@ impl UiApp {
                 // Polish spec H7: the panel can make way for the diagram.
                 // Fixed width, so Fit and Settings do not shift with the label.
                 let label = if *side_open { "Hide panel" } else { "Show panel" };
-                if ui.add_sized([HIDE_PANEL_W, 18.0], egui::Button::new(label)).clicked() {
+                if !lesson && ui.add_sized([HIDE_PANEL_W, 18.0], egui::Button::new(label)).clicked() {
                     *side_open = !*side_open;
                 }
                 if ui.button("Fit").clicked() {
@@ -916,8 +918,10 @@ impl UiApp {
         }
         self.fit_size = Some(rect.size());
         let Some(cam) = self.cam.as_mut() else { return };
-        if resp.dragged_by(PointerButton::Primary) {
-            cam.pan(resp.drag_delta());
+        // A press held still (a slow click) is a drag to egui but moves nothing.
+        let drag = resp.drag_delta();
+        if resp.dragged_by(PointerButton::Primary) && drag != vec2(0.0, 0.0) {
+            cam.pan(drag);
             self.cam_moved = true;
         }
         if let Some(p) = resp.hover_pos() {

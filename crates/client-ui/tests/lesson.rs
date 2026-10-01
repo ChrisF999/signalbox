@@ -320,6 +320,15 @@ fn leave_in_the_lesson_box_goes_back_to_the_lobby() {
     assert!(r.ui.core.game().is_none());
 }
 
+/// The panel carries the lesson box, so a tutorial has no Hide panel.
+#[test]
+fn a_tutorial_panel_cannot_be_hidden() {
+    let mut r = Rig::in_lesson("02-setting-routes");
+    let out = r.frame();
+    assert!(!has_text(&out, "Hide panel") && !has_text(&out, "Show panel"), "{:?}", texts(&out));
+    assert!(has_text(&out, "Restart lesson") || has_text(&out, "Leave"));
+}
+
 /// egui's default fonts draw a box for a missing glyph: the Tutorial list,
 /// the lesson box and every lesson's text must all have theirs.
 #[test]
