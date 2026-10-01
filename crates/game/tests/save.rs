@@ -340,7 +340,7 @@ fn rejections_of_commands_queued_before_a_resume_reach_their_sender() {
     let mut resumed = Game::resume(&path).unwrap();
     rejoin(&mut resumed);
     let out = resumed.advance(0.1);
-    assert_eq!(notices(&out, "alice"), vec![Notice::Rejected { cmd: cancel, reason: Rejection::RouteNotSet }]);
+    assert_eq!(notices(&out, "alice"), vec![Notice::Rejected { cmd: cancel, reason: Rejection::RouteNotSet, by: None }]);
     assert_eq!(resumed.stats().sim_rejections, 1);
 }
 

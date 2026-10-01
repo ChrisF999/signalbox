@@ -79,6 +79,7 @@ impl Rig {
             selected,
             exits,
             refused,
+            blocking: None,
             time,
             aspects: self.aspects,
             numbers: self.numbers,
@@ -372,6 +373,7 @@ fn no_view_yet_draws_everything_idle() {
         selected: None,
         exits: &[],
         refused: None,
+        blocking: None,
         time: 0.0,
         aspects: AspectMode::RedGreen,
         numbers: true,
@@ -630,7 +632,7 @@ fn absurdly_long_runs_have_a_bounded_number_of_arrows() {
     }];
     sc.tracks.clear();
     let names = Names::new(&r.layout);
-    let st = PaintState { view: None, selected: None, exits: &[], refused: None, time: 0.0, aspects: AspectMode::RedGreen, numbers: true, names: &names, highlight: &[] };
+    let st = PaintState { view: None, selected: None, exits: &[], refused: None, blocking: None, time: 0.0, aspects: AspectMode::RedGreen, numbers: true, names: &names, highlight: &[] };
     let cam = Camera { centre: pos2(0.0, 0.0), scale: client_ui::camera::MAX_SCALE };
     let d = draw(&sc, &cam, screen(), &st);
     let arrows: Vec<Pos2> = d
@@ -658,7 +660,7 @@ fn a_backward_runs_arrow_is_on_the_right_of_its_travel() {
         loose_end: false,
     }];
     let names = Names::new(&r.layout);
-    let st = PaintState { view: None, selected: None, exits: &[], refused: None, time: 0.0, aspects: AspectMode::RedGreen, numbers: true, names: &names, highlight: &[] };
+    let st = PaintState { view: None, selected: None, exits: &[], refused: None, blocking: None, time: 0.0, aspects: AspectMode::RedGreen, numbers: true, names: &names, highlight: &[] };
     let d = draw(&sc, &r.cam, screen(), &st);
     let tips: Vec<Pos2> = d
         .shapes
@@ -715,6 +717,7 @@ fn a_lesson_highlight_outlines_what_it_names_and_pulses() {
             selected: None,
             exits: &[],
             refused: None,
+            blocking: None,
             time,
             aspects: AspectMode::RedGreen,
             numbers: true,
@@ -847,4 +850,30 @@ fn berth_boxes_fit_the_worlds_display_headcodes() {
     l.display_headcodes.insert(s("X/1"), s("W1184000"));
     let sc = Scene::build(&l).unwrap();
     assert!(sc.berths.iter().all(|b| b.width_px == berth_width(8)));
+}
+
+/// Polish spec M4 (U10): the entrance of the route in the way of a refused
+/// command gets the same steady ring as the refused entrance.
+#[test]
+fn the_route_in_the_way_is_ringed_like_the_refusal() {
+    let r = Rig::new(Some("West"));
+    let at = |time| {
+        let st = PaintState {
+            view: Some(&r.view),
+            selected: None,
+            exits: &[],
+            refused: Some("W2"),
+            blocking: Some("W1"),
+            time,
+            aspects: r.aspects,
+            numbers: r.numbers,
+            names: &r.names,
+            highlight: &[],
+        };
+        draw(&r.sc, &r.cam, screen(), &st)
+    };
+    let ringed = |d: &Drawing, sig: &str| circles(d).iter().any(|c| c.0 == r.disc(sig) && c.3 == REFUSED && c.1 == LAMP_R + 6.0);
+    assert!(ringed(&at(0.0), "W1") && ringed(&at(0.0), "W2"));
+    assert_eq!(at(0.0), at(0.3), "steady");
+    assert!(!ringed(&r.draw(None, &[], Some("W2"), 0.0), "W1"));
 }

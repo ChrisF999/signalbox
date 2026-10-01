@@ -87,6 +87,7 @@ fn every_view_is_legible_at_every_zoom() {
                         selected: None,
                         exits: &[],
                         refused: None,
+                        blocking: None,
                         time: 0.0,
                         aspects: AspectMode::RedGreen,
                         numbers: true,

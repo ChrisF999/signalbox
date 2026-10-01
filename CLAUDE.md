@@ -190,6 +190,9 @@ output is byte-identical for the same input.
   `(player, ServerMsg)` pairs. It maps every command to its subject's area
   (`game::areas::AreaMap`), refuses commands outside the sender's area, and runs
   `robot::commands` every `ROBOT_EVERY_TICKS` for areas nobody holds.
+- A refusal names the route in its way when the interlocking can say
+  (`Notice::Rejected.by`, `game::names::blocker`, polish spec M4); the client
+  outlines that route's entrance too.
 - Views are built from sim state per player (`game::view::build_view`) — own area
   plus a fringe walked along the track to the first signal — and sent as deltas
   (`protocol::diff`, `View::apply`); a client that sees a `seq` gap resyncs.

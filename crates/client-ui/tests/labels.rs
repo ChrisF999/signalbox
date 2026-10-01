@@ -216,6 +216,7 @@ fn a_plan_depends_on_neither_pan_nor_trains() {
             selected: None,
             exits: &[],
             refused: None,
+            blocking: None,
             time: 0.0,
             aspects: AspectMode::RedGreen,
             numbers: true,

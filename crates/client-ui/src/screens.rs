@@ -743,6 +743,7 @@ impl UiApp {
             selected: g.selected(),
             exits: &exits,
             refused: g.refused(),
+            blocking: g.blocking(),
             time: now,
             aspects: self.settings.aspects,
             numbers: self.settings.numbers,

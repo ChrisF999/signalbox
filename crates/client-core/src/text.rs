@@ -72,8 +72,9 @@ pub fn rejection_text(r: Rejection) -> &'static str {
 /// A notice as one log line, and whether it is an alarm.
 pub fn notice_text(n: &Notice, names: &Names) -> (String, bool) {
     match n {
-        Notice::Rejected { cmd, reason } => {
-            (format!("Refused: {} ({})", command_text(cmd, names), rejection_text(*reason)), true)
+        Notice::Rejected { cmd, reason, by } => {
+            let by = by.as_ref().map(|r| format!(": {}", names.route(r))).unwrap_or_default();
+            (format!("Refused: {} ({}{by})", command_text(cmd, names), rejection_text(*reason)), true)
         }
         Notice::NotYourArea { area } => (format!("Not your area: that is in {area}"), true),
         Notice::Spad { signal, train } => (format!("SPAD: {} passed {} at danger", names.headcode(train), names.signal(signal)), true),

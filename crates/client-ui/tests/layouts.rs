@@ -57,7 +57,7 @@ fn every_shipped_layout_draws_for_every_box() {
             let cam = Camera::fit(sc.fit_bounds().unwrap(), screen);
             let names = Names::new(&l);
             for (time, aspects) in [(0.0, AspectMode::RedGreen), (0.3, AspectMode::Real)] {
-                let st = PaintState { view: Some(&v), selected: None, exits: &[], refused: None, time, aspects, numbers: true, names: &names, highlight: &[] };
+                let st = PaintState { view: Some(&v), selected: None, exits: &[], refused: None, blocking: None, time, aspects, numbers: true, names: &names, highlight: &[] };
                 let d = draw(&sc, &cam, screen, &st);
                 assert!(d.shapes.iter().all(finite), "{name} {area:?}");
                 assert!(d.texts.iter().all(|t| t.at.is_finite() && t.size.is_finite()), "{name} {area:?}: texts");
@@ -113,7 +113,7 @@ fn every_lesson_draws_with_its_highlights() {
             let names = Names::new(&l);
             for step in &steps {
                 let diagram: Vec<_> = step.highlight.iter().filter(|h| !matches!(h, protocol::Highlight::Ui(u) if !u.starts_with("auto:"))).cloned().collect();
-                let st = |highlight| PaintState { view: Some(&v), selected: None, exits: &[], refused: None, time: 0.25, aspects: AspectMode::Real, numbers: true, names: &names, highlight };
+                let st = |highlight| PaintState { view: Some(&v), selected: None, exits: &[], refused: None, blocking: None, time: 0.25, aspects: AspectMode::Real, numbers: true, names: &names, highlight };
                 let dr = draw(&sc, &cam, screen, &st(&diagram));
                 assert!(dr.shapes.iter().all(finite), "{}", d.display());
                 if who == "pat" {

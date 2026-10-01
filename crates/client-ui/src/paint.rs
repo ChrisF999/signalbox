@@ -181,6 +181,8 @@ pub struct PaintState<'a> {
     pub exits: &'a [ExitName],
     /// The signal outlined for a refused command.
     pub refused: Option<&'a str>,
+    /// The entrance of the route in its way, outlined the same (polish spec M4).
+    pub blocking: Option<&'a str>,
     /// Seconds, for flashing.
     pub time: f64,
     pub aspects: AspectMode,
@@ -417,7 +419,7 @@ fn signal_shapes(d: &mut Drawing, s: &SignalMark, cam: &Camera, screen: Rect, st
     if st.exits.contains(&ExitName::Signal(s.name.clone())) {
         d.shapes.push(Shape::circle_stroke(disc, LAMP_R + 3.5, Stroke::new(2.0, SELECT)));
     }
-    if st.refused == Some(s.name.as_str()) {
+    if st.refused == Some(s.name.as_str()) || st.blocking == Some(s.name.as_str()) {
         d.shapes.push(Shape::circle_stroke(disc, LAMP_R + 6.0, Stroke::new(2.0, REFUSED)));
     }
     d.keep.rounds.push((disc, LAMP_R));

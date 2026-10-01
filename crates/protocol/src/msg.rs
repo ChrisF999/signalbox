@@ -81,7 +81,13 @@ pub enum ServerMsg {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Notice {
     /// The command was refused (unknown name, or by the interlocking).
-    Rejected { cmd: PlayerCommand, reason: Rejection },
+    /// `by`: the route in the way, when the interlocking can say (polish spec M4).
+    Rejected {
+        cmd: PlayerCommand,
+        reason: Rejection,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        by: Option<String>,
+    },
     /// The command's subject lies in `area`, which is not yours.
     NotYourArea { area: String },
     Spad { signal: String, train: String },

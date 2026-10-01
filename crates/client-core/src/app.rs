@@ -58,6 +58,8 @@ pub struct InGame {
     pub(crate) layout_gen: u64,
     pub(crate) selected: Option<String>,
     pub(crate) refused: Option<(String, f64)>,
+    /// The entrance of the route in the way of that command (polish spec M4).
+    pub(crate) blocking: Option<String>,
     pub(crate) log: Log,
     /// Display names for the layout held (rebuilt with every layout).
     pub(crate) names: Names,
@@ -76,6 +78,7 @@ impl InGame {
             layout_gen: 0,
             selected: None,
             refused: None,
+            blocking: None,
             log: Log::default(),
             names: Names::default(),
             lesson: None,
@@ -110,6 +113,12 @@ impl InGame {
     /// The chosen entrance signal.
     pub fn selected(&self) -> Option<&str> {
         self.selected.as_deref()
+    }
+
+    /// The entrance of the route that was in the way of the command just
+    /// refused, outlined with it (polish spec M4).
+    pub fn blocking(&self) -> Option<&str> {
+        self.refused.as_ref().and(self.blocking.as_deref())
     }
 
     /// The entrance of a command just refused, outlined for `REFUSED_S`.
@@ -433,9 +442,12 @@ impl App {
                 }
                 let t = g.sim_time();
                 g.log.push(t, text, alarm);
-                if let Notice::Rejected { cmd, .. } = n {
-                    if let Some(e) = entrance_of(cmd) {
-                        g.refused = Some((e.to_string(), self.now + REFUSED_S));
+                if let Notice::Rejected { cmd, by, .. } = n {
+                    g.blocking = by.as_deref().and_then(|r| g.names.route_entrance(r)).map(str::to_string);
+                    match entrance_of(cmd) {
+                        Some(e) => g.refused = Some((e.to_string(), self.now + REFUSED_S)),
+                        // Points have no entrance: outline the blocking route alone.
+                        None => g.refused = g.blocking.clone().map(|b| (b, self.now + REFUSED_S)),
                     }
                 }
             }

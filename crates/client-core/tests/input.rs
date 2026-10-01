@@ -130,12 +130,36 @@ fn a_refused_command_outlines_its_entrance_and_raises_an_alarm() {
     t.run(0.2);
     let g = t.app.game().unwrap();
     assert_eq!(g.refused(), Some("D"));
+    // Polish spec M4: the route in the way is named and outlined too.
+    assert_eq!(g.blocking(), Some("C"));
     assert_eq!(
         t.log_lines().last().unwrap(),
-        &(s("Refused: set route TBD to TAW2 (conflicts with a route already set)"), true)
+        &(s("Refused: set route TBD to TAW2 (conflicts with a route already set: TBC to TAW2)"), true)
     );
     t.run(REFUSED_S);
-    assert_eq!(t.app.game().unwrap().refused(), None);
+    assert_eq!((t.app.game().unwrap().refused(), t.app.game().unwrap().blocking()), (None, None));
+}
+
+/// Polish spec M4 (U10): points have no entrance, so a refused swing rings
+/// only the entrance of the route holding them.
+#[test]
+fn a_refused_points_swing_outlines_only_the_route_holding_them() {
+    let mut t = Table::new("eve", Some("East"));
+    t.app.click(&sig("C"));
+    t.app.click(&sig("W2"));
+    t.pump();
+    t.run(0.5);
+    t.app.command(PlayerCommand::SwingPoints { points: s("P"), to: PointsPos::Reverse });
+    t.pump();
+    t.run(0.2);
+    let g = t.app.game().unwrap();
+    assert_eq!((g.refused(), g.blocking()), (Some("C"), Some("C")));
+    assert_eq!(
+        t.log_lines().last().unwrap(),
+        &(s("Refused: swing TBP reverse (points locked: TBC to TAW2)"), true)
+    );
+    t.run(REFUSED_S);
+    assert_eq!((t.app.game().unwrap().refused(), t.app.game().unwrap().blocking()), (None, None));
 }
 
 #[test]

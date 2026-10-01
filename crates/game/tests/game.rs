@@ -149,10 +149,10 @@ fn unknown_names_and_non_points_are_rejected_before_the_sim() {
     join(&mut g, "alice", Some("East"));
     let bad = PlayerCommand::CancelRoute { entrance: s("Z9") };
     let out = command(&mut g, "alice", bad.clone());
-    assert_eq!(notices(&out, "alice"), vec![Notice::Rejected { cmd: bad, reason: Rejection::UnknownId }]);
+    assert_eq!(notices(&out, "alice"), vec![Notice::Rejected { cmd: bad, reason: Rejection::UnknownId, by: None }]);
     let joint = PlayerCommand::SwingPoints { points: s("J2"), to: PointsPos::Reverse };
     let out = command(&mut g, "alice", joint.clone());
-    assert_eq!(notices(&out, "alice"), vec![Notice::Rejected { cmd: joint, reason: Rejection::NotPoints }]);
+    assert_eq!(notices(&out, "alice"), vec![Notice::Rejected { cmd: joint, reason: Rejection::NotPoints, by: None }]);
     g.advance(0.1);
     assert!(g.sim().log().is_empty());
 }
@@ -165,7 +165,7 @@ fn sim_rejections_go_back_to_the_sender() {
     let cancel = PlayerCommand::CancelRoute { entrance: s("W1") };
     assert!(command(&mut g, "alice", cancel.clone()).is_empty());
     let out = g.advance(0.1);
-    assert_eq!(notices(&out, "alice"), vec![Notice::Rejected { cmd: cancel, reason: Rejection::RouteNotSet }]);
+    assert_eq!(notices(&out, "alice"), vec![Notice::Rejected { cmd: cancel, reason: Rejection::RouteNotSet, by: None }]);
     assert!(notices(&out, "bob").is_empty());
     assert_eq!(g.stats().sim_rejections, 1);
 }
@@ -537,4 +537,22 @@ fn a_demonstration_acts_in_any_area_and_tells_nobody() {
     let w = g.sim().world();
     assert!(g.sim().interlocking().active_route_from(w, w.net.signal("C").unwrap()).is_some(), "East's route, while alice holds West");
     assert_eq!(g.stats().sim_rejections, 1);
+}
+
+/// Polish spec M4: a refusal names the route in the way: one holding the
+/// track a route needs, or the points being swung.
+#[test]
+fn a_refusal_names_the_route_in_the_way() {
+    let mut g = game();
+    join(&mut g, "bob", Some("East"));
+    assert!(command(&mut g, "bob", set_route("C", ExitName::Signal(s("W2")))).is_empty());
+    g.advance(0.1);
+    let d = set_route("D", ExitName::Signal(s("W2")));
+    command(&mut g, "bob", d.clone());
+    let out = g.advance(0.1);
+    assert_eq!(notices(&out, "bob"), vec![Notice::Rejected { cmd: d, reason: Rejection::ConflictingRoute, by: Some(s("C-W2")) }]);
+    let swing = PlayerCommand::SwingPoints { points: s("P"), to: PointsPos::Reverse };
+    command(&mut g, "bob", swing.clone());
+    let out = g.advance(0.1);
+    assert_eq!(notices(&out, "bob"), vec![Notice::Rejected { cmd: swing, reason: Rejection::PointsLocked, by: Some(s("C-W2")) }]);
 }

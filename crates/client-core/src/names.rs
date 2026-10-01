@@ -29,6 +29,8 @@ pub struct Names {
     platforms: BTreeMap<String, Vec<String>>,
     /// Place code → name.
     places: BTreeMap<String, String>,
+    /// Route name → (entrance, `LA31 to LA29`).
+    routes: BTreeMap<String, (String, String)>,
 }
 
 /// A points name's number for display: the digits after a leading `N` or
@@ -58,7 +60,22 @@ impl Names {
                 }
             }
         }
-        Names { signals, workstations, headcodes: l.display_headcodes.clone(), points, berths, platforms, places: l.places.clone() }
+        let mut n = Names {
+            signals,
+            workstations,
+            headcodes: l.display_headcodes.clone(),
+            points,
+            berths,
+            platforms,
+            places: l.places.clone(),
+            routes: BTreeMap::new(),
+        };
+        n.routes = l
+            .routes
+            .iter()
+            .map(|r| (r.name.clone(), (r.entrance.clone(), format!("{} to {}", n.signal(&r.entrance), n.exit(&r.exit)))))
+            .collect();
+        n
     }
 
     /// How points are shown (`LAP153`); a name the layout does not list stays plain.
@@ -83,6 +100,16 @@ impl Names {
             Some(p) => format!("Track at {}", p.join(", ")),
             None => "Track".to_string(),
         }
+    }
+
+    /// A route as `LA31 to LA29`; a route the layout does not list is `another route`.
+    pub fn route(&self, name: &str) -> String {
+        self.routes.get(name).map_or_else(|| "another route".to_string(), |r| r.1.clone())
+    }
+
+    /// The entrance signal of a route the layout lists.
+    pub fn route_entrance(&self, name: &str) -> Option<&str> {
+        self.routes.get(name).map(|r| r.0.as_str())
     }
 
     /// A place's name (`LIVERPOOL STREET`), else its code.

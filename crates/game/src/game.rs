@@ -19,7 +19,7 @@ use crate::clock::{GameClock, VoteError};
 use crate::display::Display;
 use crate::geometry::WorldGeometry;
 use crate::layout::build_layout;
-use crate::names::{resolve, to_player_command, valid_headcode};
+use crate::names::{blocker, resolve, to_player_command, valid_headcode};
 use crate::notices::area_notices;
 use crate::save::{Logged, SaveDb, SaveError, refresh_display, resume_sim};
 use crate::view::{Shared, build_view};
@@ -661,7 +661,7 @@ impl Game {
     }
 
     fn command(&mut self, player: &str, cmd: PlayerCommand) -> Vec<Out> {
-        let reject = |reason| vec![notice(player, Notice::Rejected { cmd: cmd.clone(), reason })];
+        let reject = |reason| vec![notice(player, Notice::Rejected { cmd: cmd.clone(), reason, by: None })];
         let Some(core) = resolve(self.sim.world(), &cmd) else { return reject(Rejection::UnknownId) };
         if let PlayerCommand::Interpose { headcode, .. } = &cmd {
             if !valid_headcode(headcode) {
@@ -824,7 +824,8 @@ impl Game {
                         let who = &queued[i].0;
                         if self.players.get(who).is_some_and(|p| p.connected) {
                             let named = to_player_command(self.sim.world(), cmd);
-                            out.push(notice(who, Notice::Rejected { cmd: named, reason: *reason }));
+                            let by = blocker(self.sim.world(), self.sim.interlocking(), cmd, *reason);
+                            out.push(notice(who, Notice::Rejected { cmd: named, reason: *reason, by }));
                         }
                     }
                 }

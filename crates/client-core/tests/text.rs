@@ -24,7 +24,7 @@ fn commands_and_refusals() {
     let plain = Names::default();
     assert_eq!(command_text(&c, &plain), "set route 39,1V1 to N12");
     assert_eq!(
-        notice_text(&Notice::Rejected { cmd: c, reason: Rejection::PointsLocked }, &plain),
+        notice_text(&Notice::Rejected { cmd: c, reason: Rejection::PointsLocked, by: None }, &plain),
         (s("Refused: set route 39,1V1 to N12 (points locked)"), true)
     );
     assert_eq!(

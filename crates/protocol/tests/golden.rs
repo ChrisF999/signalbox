@@ -78,8 +78,16 @@ fn player_commands() {
 fn notices() {
     let cases = vec![
         (
-            Notice::Rejected { cmd: PlayerCommand::CancelRoute { entrance: s("A") }, reason: Rejection::RouteNotSet },
+            Notice::Rejected { cmd: PlayerCommand::CancelRoute { entrance: s("A") }, reason: Rejection::RouteNotSet, by: None },
             json!({"kind": "rejected", "cmd": {"cmd": "cancel_route", "entrance": "A"}, "reason": "route_not_set"}),
+        ),
+        (
+            Notice::Rejected {
+                cmd: PlayerCommand::SwingPoints { points: s("P"), to: PointsPos::Reverse },
+                reason: Rejection::PointsLocked,
+                by: Some(s("A-E")),
+            },
+            json!({"kind": "rejected", "cmd": {"cmd": "swing_points", "points": "P", "to": "reverse"}, "reason": "points_locked", "by": "A-E"}),
         ),
         (Notice::NotYourArea { area: s("East") }, json!({"kind": "not_your_area", "area": "East"})),
         (Notice::Spad { signal: s("A"), train: s("1A01") }, json!({"kind": "spad", "signal": "A", "train": "1A01"})),
