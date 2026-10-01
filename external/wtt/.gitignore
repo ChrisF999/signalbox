@@ -1,0 +1,4 @@
+# The owner's WTT and everything made from it stay out of the repository.
+*
+!.gitignore
+!README.md

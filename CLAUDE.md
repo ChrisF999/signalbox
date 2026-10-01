@@ -35,6 +35,7 @@ scripts/cargo run -p sim-cli -- replay crates/core/tests/fixtures/junction.json 
 scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/drain.json -o /w/target/drain.json
 scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/liverpool-st.json -o /w/target/lst.json --areas /w/layouts/liverpool-st.areas.json --lines /w/layouts/liverpool-st.lines.json
 scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/drain.json -o /w/target/drain.json --areas /w/layouts/drain.areas.json --lines /w/layouts/drain.lines.json --wtt /w/external/wtt/wtt.bbox.html   # the real WTT: external/wtt/README.md
+scripts/cargo test --release -p ts2-import --test wtt_day -- --ignored --nocapture   # the real WTT, a whole day under the robot (skips without it; pending robot-fixes + P22)
 ```
 
 Paths passed through `scripts/cargo` resolve inside the container (`/w` = repo root).
@@ -155,6 +156,9 @@ output is byte-identical for the same input.
   are never committed (`external/wtt/`, git-ignored); CI tests only the
   synthetic `tests/data/wtt-synthetic.bbox.html` (written by
   `wtt-synthetic.py`, fictional trains 301–303).
+  The image converts Drain with it when `external/wtt/` holds exactly one
+  PDF (the Dockerfile's `wtt` stage runs `pdftotext -bbox`); otherwise
+  Drain keeps its TS2 timetable.
 - `game::display` reads those display keys once per game (defaults: the
   title's first letter, A, B, C... in area order) and builds each area's
   simplifier from the timetable; every `Layout` carries them.

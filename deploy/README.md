@@ -9,8 +9,8 @@ checks the `groups` claim). Nothing is on the public edge.
 
 | File | What |
 |---|---|
-| `Dockerfile` | release image: both binaries, the browser client (`/opt/signalbox/web`, built by the `wasm-tools` and `web` stages) and the converted layouts `liverpool-st`, `drain`, `gretz-armainvilliers` with their areas, box prefixes and line names from `layouts/` (no dev login) |
-| `Dockerfile.dockerignore` | keeps `target/`, `.cargo-home/`, `.git/` out of the build context |
+| `Dockerfile` | release image: both binaries, the browser client (`/opt/signalbox/web`, built by the `wasm-tools` and `web` stages) and the converted layouts `liverpool-st`, `drain`, `gretz-armainvilliers` with their areas, box prefixes and line names from `layouts/`, and Drain with the real Waterloo & City timetable when `external/wtt/` holds the owner's WTT (its `wtt` stage runs `pdftotext -bbox`; without one, Drain's TS2 timetable) (no dev login) |
+| `Dockerfile.dockerignore` | keeps `target/`, `.cargo-home/`, `.git/` out of the build context (`external/wtt/` stays in, for the `wtt` stage) |
 | `docker-compose.yml` | the service; copied to `/opt/stack/apps/signalbox/` |
 | `authentik/signalbox-oidc-blueprint.yaml.example` | OAuth2 provider + application; rendered with the real secret into the vault |
 | `authentik/signalbox-access.yaml.example` | the `signalbox-users` group and its binding, for the stack's blueprints |
@@ -107,6 +107,17 @@ sudo -n tailscale serve --bg --https=50160 http://127.0.0.1:9160
 Then open `https://ra.tail3e0c1e.ts.net:50160/` in a browser: after the
 Authentik login the signalbox lobby loads (WebGPU in Chrome/Edge, WebGL2 in
 Firefox).
+
+## The Waterloo & City timetable (optional)
+
+Before `docker build`, copy the owner's WTT PDF into `external/wtt/` of the
+checkout being built (the only PDF there; `external/wtt/README.md`). The
+build log shows its sha256 and the converter's summary (`Wednesday, 585
+trips of 7 trains; …`, `574 services, 5 entries from 05:40:00; …`); a WTT
+that fails the checks fails the build. Without a PDF the log says `Drain
+keeps its TS2 timetable`. An image built with it holds a timetable made
+from TfL's document: it stays on ra and is never pushed to a public
+registry. Old Drain saves keep the timetable they were created with.
 
 ## What `smoke.sh` expects
 
