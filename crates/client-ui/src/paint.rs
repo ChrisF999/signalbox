@@ -65,6 +65,9 @@ pub const NUMBER_MAX_PX: f32 = 11.0;
 pub const NUMBER_MIN_PX: f32 = 7.0;
 /// Where the non-lying leg of points starts, as a fraction of its length.
 pub const GAP: f32 = 0.5;
+/// The non-lying leg, and a crossover's middle while neither end lies over
+/// it, are drawn this fraction of the track's width (polish spec M12).
+pub const UNUSED_W: f32 = 0.4;
 /// The ○A button's circle.
 pub const AUTO_R: f32 = 4.0;
 /// Headcodes: text size in pixels.
@@ -259,10 +262,16 @@ fn points_shapes(out: &mut Vec<Shape>, p: &PointsMark, to: &dyn Fn(Pos2) -> Pos2
     let c = to(p.at);
     // The toe and the lying leg carry the route; an overlap held here ends
     // in a tick at the far end of each that nothing held goes on from.
-    for (leg, meets) in [(p.toe, &p.toe_meets), lie] {
+    // While the points move, the leg they move to flashes: its first half
+    // shows only in the bright half of the blink (polish spec M12).
+    for (i, (leg, meets)) in [(p.toe, &p.toe_meets), lie].into_iter().enumerate() {
         let Some(l) = leg else { continue };
         let end = leg_end(p, c, to(l), meets);
-        bar(out, c, end, w, colour, p.fringe);
+        if i == 1 && moving && !blink_on(st.time) {
+            bar(out, c + (to(l) - c) * GAP, end, w, colour, p.fringe);
+        } else {
+            bar(out, c, end, w, colour, p.fringe);
+        }
         if overlap && !meets.iter().any(|m| held(m)) {
             tick(out, end, end - c, w);
         }
@@ -271,19 +280,35 @@ fn points_shapes(out: &mut Vec<Shape>, p: &PointsMark, to: &dyn Fn(Pos2) -> Pos2
         let far = to(o);
         let end = leg_end(p, c, far, meets);
         let gap_end = c + (far - c) * GAP;
-        bar(out, gap_end, end, w, colour, p.fringe);
-        // While moving the gap flashes: closed in the dark half of the blink.
-        if moving && !blink_on(st.time) {
-            bar(out, c, gap_end, w, colour, p.fringe);
-        }
+        // The other leg: thin, and short of the points (polish spec M12).
+        bar(out, gap_end, end, w * UNUSED_W, colour, p.fringe);
     }
 }
 
-fn track_shapes(d: &mut Drawing, t: &TrackLine, to: &dyn Fn(Pos2) -> Pos2, st: &PaintState, w: f32) {
+/// Sections lying beyond the non-lying leg of two or more points: the middle
+/// of a crossover neither end of which is set over it (polish spec M12).
+pub fn unused_crossovers(scene: &Scene, view: Option<&View>) -> std::collections::BTreeSet<String> {
+    let mut seen: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for p in &scene.points {
+        let lying = view.and_then(|v| v.points.get(&p.name)).map_or(PointsPos::Normal, |v| v.position);
+        let other = match lying {
+            PointsPos::Normal => &p.reverse_meets,
+            PointsPos::Reverse => &p.normal_meets,
+        };
+        for m in other {
+            *seen.entry(m.as_str()).or_default() += 1;
+        }
+    }
+    seen.into_iter().filter(|(_, n)| *n >= 2).map(|(s, _)| s.to_string()).collect()
+}
+
+fn track_shapes(d: &mut Drawing, t: &TrackLine, to: &dyn Fn(Pos2) -> Pos2, st: &PaintState, w: f32, unused: bool) {
     let section = |name: &str| st.view.and_then(|v| v.sections.get(name));
     let held = |name: &str| section(name).is_some_and(|s| s.held != Held::Free);
     let (a, b) = trimmed(t, to(t.a), to(t.b));
-    bar(&mut d.shapes, a, b, w, track_colour(section(&t.section)), t.fringe);
+    // An unused crossover's middle is thin unless something is on it or holds it.
+    let thin = unused && section(&t.section).is_none_or(|s| !s.occupied && s.held == Held::Free);
+    bar(&mut d.shapes, a, b, if thin { w * UNUSED_W } else { w }, track_colour(section(&t.section)), t.fringe);
     d.keep.bars.push((a, b, w));
     // End of overlap: an end of an overlap section where nothing held goes on.
     if section(&t.section).is_some_and(|s| s.held == Held::Overlap) {
@@ -490,8 +515,9 @@ pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawi
         let text = TextItem { at: r.center(), anchor: Align2::CENTER_CENTER, text: p.label.clone(), size: 9.0 * glyph(cam.scale), colour: BG, monospace: false };
         d.movable_text(text, Role::Platform, Vec::new(), Some(r));
     }
+    let unused = unused_crossovers(scene, st.view);
     for t in &scene.tracks {
-        track_shapes(&mut d, t, &to, st, w);
+        track_shapes(&mut d, t, &to, st, w, unused.contains(&t.section));
     }
     for p in &scene.points {
         points_shapes(&mut d.shapes, p, &to, st, track_colour(section(&p.section)), w);

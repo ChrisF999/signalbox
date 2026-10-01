@@ -134,3 +134,19 @@ fn every_lesson_draws_with_its_highlights() {
         }
     }
 }
+
+/// Polish spec M12: Liverpool Street's crossovers are found, and a
+/// crossover's middle stops counting as unused once an end lies over it.
+#[test]
+fn crossovers_neither_end_of_which_is_set_are_found() {
+    let mut g = Game::new(world("liverpool-st"), GameMeta { layout: "liverpool-st".into(), seed: 1 });
+    g.connect("sam");
+    let (l, mut v) = (g.layout_of("sam").unwrap(), g.view_of("sam").unwrap());
+    let sc = Scene::build(&l).unwrap();
+    let unused = client_ui::paint::unused_crossovers(&sc, Some(&v));
+    assert!(unused.len() >= 4, "{unused:?}");
+    let middle = unused.iter().next().unwrap().clone();
+    let end = sc.points.iter().find(|p| p.reverse_meets.contains(&middle)).unwrap();
+    v.points.get_mut(&end.name).unwrap().position = protocol::PointsPos::Reverse;
+    assert!(!client_ui::paint::unused_crossovers(&sc, Some(&v)).contains(&middle), "{} lies over it", end.name);
+}

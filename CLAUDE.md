@@ -361,6 +361,9 @@ output is byte-identical for the same input.
 - Zoom: ×1.2 a wheel notch, + and − buttons and keys ×1.25 (they count as moving the view; Fit clears that); signal
   glyphs grow with the zoom once the track is at its widest, up to twice their size (`paint::glyph`, a function of
   the zoom alone so placement never jumps; polish spec M11).
+- Points show which way they lie (polish spec M12, U17): the non-lying leg, and a crossover's middle while no end lies
+  over it (`paint::unused_crossovers`), are drawn at `UNUSED_W` (0.4) of the current track width; the leg moving points
+  swing to blinks its first half at 2 Hz (only moving points flash). Labels still keep clear of the full width.
 
 ### Tutorials (`lessons/`, `game::lesson`)
 - Design: `docs/superpowers/specs/2026-10-01-tutorial-design.md`; decisions in

@@ -237,15 +237,19 @@ fn points_show_the_lying_leg_whole_and_a_gap_in_the_other() {
     let (n_end, rv_end) = (short(n, c), short(rv, c));
     let legs = lines_of(&r.idle(), TRACK_FREE, w);
     assert!(has(&legs, c, n_end), "normal lies: whole up to its joint {legs:?}");
-    assert!(has(&legs, c + (rv - c) * GAP, rv_end), "reverse: from the gap");
+    // Polish spec M12: the other leg is thin as well as short of the points.
+    let thin = lines_of(&r.idle(), TRACK_FREE, w * UNUSED_W);
+    assert!(has(&thin, c + (rv - c) * GAP, rv_end), "reverse: thin, from the gap {thin:?}");
+    assert!(!has(&legs, c + (rv - c) * GAP, rv_end), "not at full width");
+    // Moving to reverse: the reverse leg flashes, whole then gapped; normal is thin.
     r.view.points.insert(s("P"), PointsView { position: PointsPos::Reverse, moving: true, locked: false });
-    let open = lines_of(&r.draw(None, &[], None, 0.0), TRACK_FREE, w);
-    assert!(has(&open, c, rv_end) && has(&open, c + (n - c) * GAP, n_end));
-    assert!(!has(&open, c, c + (n - c) * GAP), "the gap open");
-    let shut = lines_of(&r.draw(None, &[], None, 0.3), TRACK_FREE, w);
-    assert!(has(&shut, c, c + (n - c) * GAP), "while moving, the gap flashes");
+    let lit = r.draw(None, &[], None, 0.0);
+    assert!(has(&lines_of(&lit, TRACK_FREE, w), c, rv_end), "bright half: whole");
+    assert!(has(&lines_of(&lit, TRACK_FREE, w * UNUSED_W), c + (n - c) * GAP, n_end));
+    let dark = lines_of(&r.draw(None, &[], None, 0.3), TRACK_FREE, w);
+    assert!(has(&dark, c + (rv - c) * GAP, rv_end) && !has(&dark, c, rv_end), "dark half: gapped");
     r.view.points.get_mut("P").unwrap().moving = false;
-    assert!(!has(&lines_of(&r.draw(None, &[], None, 0.3), TRACK_FREE, w), c, c + (n - c) * GAP));
+    assert!(has(&lines_of(&r.draw(None, &[], None, 0.3), TRACK_FREE, w), c, rv_end), "swung: steady");
 }
 
 /// W1 faces right (+x): its post goes up (the left of travel, y grows
