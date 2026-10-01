@@ -14,6 +14,21 @@ pub struct TrackLine {
     pub a: Pos2,
     pub b: Pos2,
     pub fringe: bool,
+    /// Sections of the other visible segments meeting this line at `a`
+    /// (its segment's `from` node) and at `b`, sorted, without repeats.
+    pub a_meets: Vec<String>,
+    pub b_meets: Vec<String>,
+}
+
+impl TrackLine {
+    /// A track-circuit joint at `a`: another section meets the line there.
+    pub fn joint_a(&self) -> bool {
+        self.a_meets.iter().any(|s| *s != self.section)
+    }
+
+    pub fn joint_b(&self) -> bool {
+        self.b_meets.iter().any(|s| *s != self.section)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -32,6 +47,11 @@ pub struct PointsMark {
 pub struct SignalMark {
     pub name: String,
     pub at: Pos2,
+    /// Where its post leaves the track: `at` moved onto its own segment's
+    /// drawn line (TS2 signals are on it already), else `at`.
+    pub base: Pos2,
+    /// Every route from it you can see (its post is white while one is set).
+    pub routes: Vec<String>,
     /// Unit direction of travel past the signal, or zero when unknown.
     pub facing: Vec2,
     pub fringe: bool,
@@ -100,6 +120,16 @@ fn pt(x: f64, y: f64) -> Option<Pos2> {
     (x.abs() <= MAX_COORD && y.abs() <= MAX_COORD).then(|| pos2(x as f32, y as f32))
 }
 
+/// The point of segment a–b nearest to `p`.
+pub fn project(p: Pos2, a: Pos2, b: Pos2) -> Pos2 {
+    let ab = b - a;
+    let len2 = ab.length_sq();
+    if len2 == 0.0 {
+        return a;
+    }
+    a + ab * ((p - a).dot(ab) / len2).clamp(0.0, 1.0)
+}
+
 fn grow(r: &mut Option<Rect>, p: Pos2) {
     *r = Some(match r {
         Some(r) => r.union(Rect::from_min_max(p, p)),
@@ -116,9 +146,21 @@ impl Scene {
             l.segments.iter().map(|s| (s.name.as_str(), (s.section.as_str(), s.from.as_str(), s.to.as_str()))).collect();
         let other_area = |area: &str| l.area.as_deref().is_some_and(|mine| mine != area);
         let exit_of_yours = |exit: &ExitName| l.routes.iter().any(|r| r.operable && &r.exit == exit);
+        // Node → (segment, section) of every visible segment meeting there.
+        let mut at_node: BTreeMap<&str, Vec<(&str, &str)>> = BTreeMap::new();
+        for s in &l.segments {
+            for n in [s.from.as_str(), s.to.as_str()] {
+                at_node.entry(n).or_default().push((s.name.as_str(), s.section.as_str()));
+            }
+        }
+        let meets = |node: &str, segment: &str| -> Vec<String> {
+            let set: BTreeSet<&str> =
+                at_node.get(node).into_iter().flatten().filter(|(g, _)| *g != segment).map(|(_, s)| *s).collect();
+            set.into_iter().map(str::to_string).collect()
+        };
         let mut sc = Scene::default();
         for line in &g.lines {
-            let (Some(a), Some(b), Some(&(section, _, _))) = (pt(line.x1, line.y1), pt(line.x2, line.y2), seg_of.get(line.segment.as_str()))
+            let (Some(a), Some(b), Some(&(section, from, to))) = (pt(line.x1, line.y1), pt(line.x2, line.y2), seg_of.get(line.segment.as_str()))
             else {
                 continue;
             };
@@ -128,8 +170,11 @@ impl Scene {
                 a,
                 b,
                 fringe: fringe_of.get(section).copied().unwrap_or(true),
+                a_meets: meets(from, &line.segment),
+                b_meets: meets(to, &line.segment),
             });
         }
+        let line_of: BTreeMap<&str, (Pos2, Pos2)> = sc.tracks.iter().map(|t| (t.segment.as_str(), (t.a, t.b))).collect();
         for p in &g.points {
             let (Some(at), Some(info)) = (pt(p.x, p.y), l.points.iter().find(|i| i.name == p.node)) else { continue };
             let leg = |v: Option<[f64; 2]>| v.and_then(|[x, y]| pt(x, y));
@@ -147,9 +192,12 @@ impl Scene {
         for s in &g.signals {
             let (Some(at), Some(info)) = (pt(s.x, s.y), l.signals.iter().find(|i| i.name == s.signal)) else { continue };
             let facing = s.facing.map(|[x, y]| vec2(x as f32, y as f32)).filter(|v| v.length() > 0.0 && v.is_finite());
+            let base = line_of.get(info.segment.as_str()).map_or(at, |&(a, b)| project(at, a, b));
             sc.signals.push(SignalMark {
                 name: s.signal.clone(),
                 at,
+                base,
+                routes: l.routes.iter().filter(|r| r.entrance == s.signal).map(|r| r.name.clone()).collect(),
                 facing: facing.map_or(Vec2::ZERO, Vec2::normalized),
                 fringe: other_area(&info.area),
                 operable: info.operable,

@@ -116,3 +116,16 @@ fn absurd_coordinates_are_left_out() {
     assert!(all.min.is_finite() && all.max.is_finite() && all.center().is_finite());
     assert!(sc.fit_bounds().unwrap().width() <= 1.0e7);
 }
+
+#[test]
+fn signals_stand_on_their_line_and_know_their_routes() {
+    let sc = Scene::build(&layout_for(Some("West"))).unwrap();
+    let a = sc.signals.iter().find(|s| s.name == "A").unwrap();
+    assert_eq!((a.at, a.base), (pos2(200.0, -5.0), pos2(200.0, 0.0)), "drawn 5 above w2, its post starts on it");
+    assert_eq!(a.routes, [s("A-E"), s("A-N")]);
+    let mut l = layout_for(Some("West"));
+    l.geometry.as_mut().unwrap().lines.retain(|g| g.segment != "w2");
+    let sc = Scene::build(&l).unwrap();
+    let a = sc.signals.iter().find(|s| s.name == "A").unwrap();
+    assert_eq!(a.base, a.at, "no line of its own drawn: the post starts at the signal");
+}

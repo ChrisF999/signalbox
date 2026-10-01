@@ -494,7 +494,7 @@ impl App {
     }
 }
 
-/// The signal a command was about, to flash when it is refused.
+/// The signal a command was about, outlined when it is refused.
 pub fn entrance_of(cmd: &PlayerCommand) -> Option<&str> {
     match cmd {
         PlayerCommand::SetRoute { entrance, .. }

@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use client_core::text::{fmt_hms, proposal_text, vote_text};
 use client_core::trains::train_list;
-use client_core::{App, Link, Target};
+use client_core::{App, Link, Settings, Target};
 use egui::{Align2, Color32, CornerRadius, FontId, Frame, Key, PointerButton, Rect, RichText, Sense, Ui};
 use protocol::{GameState, Proposal, TrainState};
 
@@ -42,6 +42,8 @@ pub struct UiApp {
     new_game: NewGame,
     /// The game whose Delete was pressed and awaits "Yes, delete".
     confirm_delete: Option<String>,
+    /// How the diagram is drawn (defaults until the settings menu exists).
+    settings: Settings,
 }
 
 impl UiApp {
@@ -57,6 +59,7 @@ impl UiApp {
             headcode: String::new(),
             new_game: NewGame::default(),
             confirm_delete: None,
+            settings: Settings::default(),
         }
     }
 
@@ -340,7 +343,16 @@ impl UiApp {
         }
         let exits = self.core.valid_exits();
         let Some(g) = self.core.game() else { return };
-        let st = PaintState { view: g.view(), selected: g.selected(), exits: &exits, flashing: g.refused(), time: now };
+        let st = PaintState {
+            view: g.view(),
+            selected: g.selected(),
+            exits: &exits,
+            refused: g.refused(),
+            time: now,
+            aspects: self.settings.aspects,
+            numbers: self.settings.numbers,
+            names: g.names(),
+        };
         paint::paint(&painter, paint::draw(scene, &cam, rect, &st));
         match click {
             Some(Some(t)) => self.core.click(&t),
