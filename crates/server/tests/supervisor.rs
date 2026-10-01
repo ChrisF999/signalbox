@@ -824,11 +824,15 @@ fn lessons_dir(root: &Path) -> PathBuf {
 }
 
 fn lesson_rig(name: &str) -> Rig {
+    lesson_rig_with(name, PathBuf::from(GAME_BIN))
+}
+
+fn lesson_rig_with(name: &str, game_bin: PathBuf) -> Rig {
     let root = temp_dir(name);
     let layouts = Layouts::load(&layouts_dir(&root)).unwrap();
     let lessons = Lessons::load(&lessons_dir(&root));
     let cfg = SupervisorConfig {
-        game_bin: PathBuf::from(GAME_BIN),
+        game_bin,
         saves_dir: root.join("data/saves"),
         sockets_dir: root.join("data/sockets"),
         empty_exit_s: 600,
@@ -974,4 +978,75 @@ async fn a_crashed_tutorial_is_simply_gone() {
     until_gone(&rig, &id).await;
     assert!(rig.sup.list_games().is_empty(), "not listed as crashed");
     assert_eq!(rig.sup.game_of("ann"), None);
+}
+
+async fn until_no_pid(rig: &Rig, id: &str, within: Duration) {
+    let deadline = tokio::time::Instant::now() + within;
+    while rig.sup.pid(id).is_some() {
+        assert!(tokio::time::Instant::now() < deadline, "tutorial {id} still running after {within:?}");
+        sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[tokio::test]
+async fn a_reload_then_a_new_lesson_ends_the_abandoned_tutorial() {
+    let rig = lesson_rig("lesson-reload");
+    let ann = rig.attach("ann");
+    let first = start_lesson(&rig, &ann).await;
+    rig.sup.detach("ann", ann.me.conn);
+    let ann = rig.attach("ann");
+    let second = start_lesson(&rig, &ann).await;
+    assert_ne!(first, second);
+    until_no_pid(&rig, &first, Duration::from_secs(10)).await;
+    assert_eq!(rig.sup.game_of("ann").as_deref(), Some(second.as_str()), "the new one runs");
+    // Creating a real game after another reload ends that one too.
+    rig.sup.detach("ann", ann.me.conn);
+    let ann = rig.attach("ann");
+    create(&rig, &ann).await;
+    until_no_pid(&rig, &second, Duration::from_secs(10)).await;
+}
+
+#[tokio::test]
+async fn your_own_tutorial_does_not_count_against_the_cap_when_you_start_another() {
+    let rig = lesson_rig("lesson-own-cap");
+    let mut socks = Vec::new();
+    for i in 0..MAX_TUTORIALS {
+        let sock = rig.attach(&format!("p{i}"));
+        start_lesson(&rig, &sock).await;
+        socks.push(sock);
+    }
+    let old = rig.sup.game_of("p0").unwrap();
+    rig.lobby(&socks[0], LobbyMsg::StartLesson { lesson: s("01-reading-the-panel") });
+    // Deltas from the old tutorial may come first.
+    let got = until(&socks[0], |f| matches!(f, ServerFrame::Lobby(LobbyReply::Joined { .. }) | ServerFrame::Lobby(LobbyReply::Error { .. }))).await;
+    let Some(ServerFrame::Lobby(LobbyReply::Joined { game: new, .. })) = got.last() else { panic!("{:?}", got.last()) };
+    assert_ne!(&old, new);
+    until_no_pid(&rig, &old, Duration::from_secs(10)).await;
+}
+
+#[tokio::test]
+async fn a_tutorial_you_left_cannot_be_joined_while_it_ends() {
+    let rig = lesson_rig("lesson-ending");
+    let ann = rig.attach("ann");
+    let id = start_lesson(&rig, &ann).await;
+    rig.lobby(&ann, LobbyMsg::Leave);
+    until(&ann, |f| matches!(f, ServerFrame::Lobby(LobbyReply::Games { .. }))).await;
+    rig.lobby(&ann, LobbyMsg::Join { game: id.clone() });
+    expect_error(&ann, codes::UNKNOWN_GAME).await;
+    assert_eq!(rig.sup.game_of("ann"), None);
+    until_gone(&rig, &id).await;
+}
+
+#[tokio::test]
+async fn a_tutorial_that_fails_to_start_frees_its_slot() {
+    let rig = lesson_rig_with("lesson-nobin", PathBuf::from("/nonexistent/signalbox-game"));
+    for i in 0..=MAX_TUTORIALS {
+        let sock = rig.attach(&format!("p{i}"));
+        rig.lobby(&sock, LobbyMsg::StartLesson { lesson: s("01-reading-the-panel") });
+        let got = until(&sock, |f| matches!(f, ServerFrame::Game(ServerMsg::Notice(Notice::GameCrashed)))).await;
+        assert!(matches!(got.first(), Some(ServerFrame::Lobby(LobbyReply::Joined { .. }))), "{got:?}");
+        assert_eq!(rig.sup.game_of(&sock.user), None);
+    }
+    assert_eq!(rig.sup.live_count(), 0);
+    assert!(rig.sup.list_games().is_empty(), "not listed as crashed");
 }

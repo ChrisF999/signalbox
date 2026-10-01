@@ -83,6 +83,8 @@ struct Entry {
     /// A tutorial's player: nobody else may join it, it is never listed,
     /// and it ends when they leave (tutorial spec §3).
     owner: Option<String>,
+    /// A tutorial that has been sent `Shutdown`: nobody may join it.
+    ending: bool,
     phase: Phase,
     tx: Option<mpsc::UnboundedSender<ToGame>>,
     status: Option<StatusMsg>,
@@ -298,7 +300,7 @@ impl Supervisor {
                 {
                     let mut st = self.lock();
                     if Self::current(&st, user, conn).is_some() {
-                        Self::leave(&mut st, user);
+                        Self::leave(&mut st, user, None);
                     }
                 }
                 self.reply(user, conn, frame(LobbyReply::Games { games: self.list_games_for(user) }));
@@ -322,20 +324,33 @@ impl Supervisor {
         }
     }
 
-    /// `user` leaves their game; a tutorial of theirs ends.
-    fn leave(st: &mut State, user: &str) {
+    /// `user` leaves their game, and every tutorial of theirs but `keep`
+    /// ends: the one they were in, and any a closed socket left waiting
+    /// (a reload, then a new lesson or game, is leaving it too).
+    fn leave(st: &mut State, user: &str, keep: Option<&str>) {
         if let Some(g) = st.clients.get_mut(user).and_then(|c| c.game.take()) {
             send_to(st, &g, ToGame::Disconnect { player: user.to_string() });
-            if st.games.get(&g).is_some_and(|e| e.owner.as_deref() == Some(user)) {
-                send_to(st, &g, ToGame::Shutdown);
+        }
+        let mine: Vec<String> = st
+            .games
+            .iter()
+            .filter(|(id, e)| e.owner.as_deref() == Some(user) && !e.ending && Some(id.as_str()) != keep)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for g in &mine {
+            // A repeated `Disconnect` is a no-op in the game.
+            send_to(st, g, ToGame::Disconnect { player: user.to_string() });
+            send_to(st, g, ToGame::Shutdown);
+            if let Some(e) = st.games.get_mut(g) {
+                e.ending = true;
             }
         }
     }
 
-    /// `game` is a tutorial of someone other than `user`: as far as they
-    /// know, it does not exist.
-    fn someone_elses_tutorial(st: &State, user: &str, game: &str) -> bool {
-        st.games.get(game).is_some_and(|e| e.owner.as_deref().is_some_and(|o| o != user))
+    /// `game` is a tutorial `user` may not join: someone else's, or one
+    /// of theirs that is ending. As far as they know, it does not exist.
+    fn hidden_tutorial(st: &State, user: &str, game: &str) -> bool {
+        st.games.get(game).is_some_and(|e| e.owner.as_deref().is_some_and(|o| o != user || e.ending))
     }
 
     fn enter(st: &mut State, user: &str, game: &str) {
@@ -357,11 +372,12 @@ impl Supervisor {
         Ok(())
     }
 
-    fn room_for_a_tutorial(st: &State) -> Result<(), ServerFrame> {
+    /// `user`'s own tutorials do not count: starting another ends them.
+    fn room_for_a_tutorial(st: &State, user: &str) -> Result<(), ServerFrame> {
         if st.closing {
             return Err(ServerFrame::error(codes::TOO_MANY_GAMES, "the server is stopping"));
         }
-        if st.games.values().filter(|e| e.owner.is_some()).count() >= MAX_TUTORIALS {
+        if st.games.values().filter(|e| e.owner.as_deref().is_some_and(|o| o != user)).count() >= MAX_TUTORIALS {
             return Err(ServerFrame::error(codes::TOO_MANY_GAMES, format!("at most {MAX_TUTORIALS} tutorials run at once")));
         }
         Ok(())
@@ -370,7 +386,7 @@ impl Supervisor {
     fn insert_starting(st: &mut State, id: &str, layout: String, owner: Option<String>) -> mpsc::UnboundedReceiver<ToGame> {
         let (tx, rx) = mpsc::unbounded_channel();
         let kill = Arc::new(Notify::new());
-        let entry = Entry { layout, owner, phase: Phase::Starting, tx: Some(tx), status: None, pid: None, kill };
+        let entry = Entry { layout, owner, ending: false, phase: Phase::Starting, tx: Some(tx), status: None, pid: None, kill };
         st.games.insert(id.to_string(), entry);
         rx
     }
@@ -395,12 +411,12 @@ impl Supervisor {
         };
         let mut st = self.lock();
         let Some(c) = Self::current(&st, user, conn) else { return };
-        if let Err(f) = Self::room_for_a_tutorial(&st) {
+        if let Err(f) = Self::room_for_a_tutorial(&st, user) {
             push(&st, user, c, f);
             return;
         }
         let id = self.fresh_id(&st);
-        Self::leave(&mut st, user);
+        Self::leave(&mut st, user, None);
         let rx = Self::insert_starting(&mut st, &id, lesson, Some(user.to_string()));
         Self::enter(&mut st, user, &id);
         drop(st);
@@ -428,7 +444,7 @@ impl Supervisor {
             return;
         }
         let id = self.fresh_id(&st);
-        Self::leave(&mut st, user);
+        Self::leave(&mut st, user, None);
         let rx = Self::insert_starting(&mut st, &id, layout.clone(), None);
         Self::enter(&mut st, user, &id);
         drop(st);
@@ -446,8 +462,8 @@ impl Supervisor {
         {
             let mut st = self.lock();
             let Some(c) = Self::current(&st, user, conn) else { return };
-            // Someone else's tutorial does not exist, as far as you know.
-            if Self::someone_elses_tutorial(&st, user, &game) {
+            // Someone else's tutorial, or your ending one, does not exist.
+            if Self::hidden_tutorial(&st, user, &game) {
                 push(&st, user, c, ServerFrame::error(codes::UNKNOWN_GAME, format!("no game `{game}`")));
                 return;
             }
@@ -460,7 +476,7 @@ impl Supervisor {
                 return;
             }
             if matches!(st.games.get(&game).map(|e| &e.phase), Some(Phase::Starting | Phase::Running)) {
-                Self::leave(&mut st, user);
+                Self::leave(&mut st, user, Some(&game));
                 Self::enter(&mut st, user, &game);
                 return;
             }
@@ -472,13 +488,13 @@ impl Supervisor {
         let layout = read_summary(&path).map(|s| s.layout).unwrap_or_else(|_| "?".into());
         let mut st = self.lock();
         let Some(c) = Self::current(&st, user, conn) else { return };
-        if Self::someone_elses_tutorial(&st, user, &game) {
+        if Self::hidden_tutorial(&st, user, &game) {
             push(&st, user, c, ServerFrame::error(codes::UNKNOWN_GAME, format!("no game `{game}`")));
             return;
         }
         if matches!(st.games.get(&game).map(|e| &e.phase), Some(Phase::Starting | Phase::Running)) {
             // Someone resumed it meanwhile.
-            Self::leave(&mut st, user);
+            Self::leave(&mut st, user, Some(&game));
             Self::enter(&mut st, user, &game);
             return;
         }
@@ -491,7 +507,7 @@ impl Supervisor {
             push(&st, user, c, f);
             return;
         }
-        Self::leave(&mut st, user);
+        Self::leave(&mut st, user, Some(&game));
         let rx = Self::insert_starting(&mut st, &game, layout, None);
         Self::enter(&mut st, user, &game);
         drop(st);
@@ -815,11 +831,16 @@ impl Supervisor {
         }
     }
 
-    /// The game exited cleanly: it is saved and leaves the live table.
+    /// The game exited cleanly: it is saved (a tutorial is simply over) and
+    /// leaves the live table.
     fn finished(&self, id: &str) {
         let mut st = self.lock();
-        st.games.remove(id);
-        let f = ServerFrame::error(codes::GAME_STOPPED, "the game stopped; join it again to resume it");
+        let f = match st.games.remove(id) {
+            Some(e) if e.owner.is_some() => {
+                ServerFrame::error(codes::GAME_STOPPED, "the tutorial ended; start it again from the lobby")
+            }
+            _ => ServerFrame::error(codes::GAME_STOPPED, "the game stopped; join it again to resume it"),
+        };
         Self::evict(&mut st, id, &f);
     }
 
@@ -833,7 +854,7 @@ impl Supervisor {
             e => {
                 let layout = e.map_or_else(|| "?".to_string(), |e| e.layout);
                 let kill = Arc::new(Notify::new());
-                let entry = Entry { layout, owner: None, phase: Phase::Crashed(why), tx: None, status: None, pid: None, kill };
+                let entry = Entry { layout, owner: None, ending: false, phase: Phase::Crashed(why), tx: None, status: None, pid: None, kill };
                 st.games.insert(id.to_string(), entry);
             }
         }
