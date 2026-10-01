@@ -5,16 +5,25 @@ use std::collections::BTreeMap;
 use protocol::*;
 use serde_json::{Value, json};
 
+/// Pinned JSON, and back: as the message itself and as a frame, both by
+/// `from_json` (the tag first, then the message) and through a `Value`.
 fn check_client(msg: ClientMsg, want: Value) {
     assert_eq!(serde_json::to_value(&msg).unwrap(), want, "{msg:?}");
     let back: ClientMsg = serde_json::from_str(&want.to_string()).unwrap();
     assert_eq!(back, msg);
+    let frame = ClientFrame::Game(msg);
+    assert_eq!(ClientFrame::from_json(&want.to_string()).unwrap(), frame);
+    assert_eq!(ClientFrame::from_value(want).unwrap(), frame);
 }
 
 fn check_server(msg: ServerMsg, want: Value) {
     assert_eq!(serde_json::to_value(&msg).unwrap(), want, "{msg:?}");
     let back: ServerMsg = serde_json::from_str(&want.to_string()).unwrap();
     assert_eq!(back, msg);
+    let frame = ServerFrame::Game(msg);
+    assert_eq!(ServerFrame::from_json(&want.to_string()).unwrap(), frame);
+    assert_eq!(ServerFrame::from_json(&frame.to_json()).unwrap(), frame);
+    assert_eq!(ServerFrame::from_value(want).unwrap(), frame);
 }
 
 fn s(x: &str) -> String {

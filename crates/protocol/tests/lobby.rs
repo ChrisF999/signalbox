@@ -168,3 +168,62 @@ fn bad_frames_are_classified() {
     assert_eq!(err(r#"{"type": "games", "games": []}"#), FrameError::BadMessage(s("unknown type `games`")), "server-only type");
     assert!(ServerFrame::from_json(r#"{"type": "join", "game": "g"}"#).is_err(), "client-only type");
 }
+
+/// `from_json` reads the tag and then the message alone: every tag of
+/// every kind reaches its own message (a missing field, not an unknown
+/// type), and a frame reads the same as through a `Value`, extra keys,
+/// key order and all.
+#[test]
+fn every_frame_type_is_read_by_its_tag() {
+    let missing = |r: Result<(), FrameError>, t: &str| match r {
+        Err(FrameError::BadMessage(m)) => assert!(!m.contains("unknown type"), "{t}: {m}"),
+        other => panic!("{t}: {other:?}"),
+    };
+    for t in LOBBY_MSG_TYPES.iter().chain(CLIENT_MSG_TYPES.iter()) {
+        let text = format!(r#"{{"type": "{t}", "game": 5}}"#);
+        let r = ClientFrame::from_json(&text);
+        let via_value = ClientFrame::from_value(serde_json::from_str(&text).unwrap());
+        assert_eq!(r.is_ok(), via_value.is_ok(), "{t}");
+        match r {
+            Ok(f) => assert_eq!(Ok(f), via_value, "{t}"),
+            Err(e) => missing(Err(e), t),
+        }
+    }
+    for t in LOBBY_REPLY_TYPES.iter().chain(SERVER_MSG_TYPES.iter()) {
+        let text = format!(r#"{{"type": "{t}"}}"#);
+        missing(ServerFrame::from_json(&text).map(|_| ()), t);
+    }
+    // Fields before the tag, unknown fields, escapes in the tag.
+    for (text, want) in [
+        (r#"{"game": "g-1", "type": "join"}"#, ClientFrame::Lobby(LobbyMsg::Join { game: s("g-1") })),
+        (r#"{"type": "join", "game": "g-1", "extra": [1, {"a": null}]}"#, ClientFrame::Lobby(LobbyMsg::Join { game: s("g-1") })),
+        (r#"{"type": "\u0072esync"}"#, ClientFrame::Game(ClientMsg::Resync)),
+        (r#" {"area": "W", "type": "claim"} "#, ClientFrame::Game(ClientMsg::Claim { area: s("W") })),
+    ] {
+        assert_eq!(ClientFrame::from_json(text), Ok(want.clone()), "{text}");
+        assert_eq!(ClientFrame::from_value(serde_json::from_str(text).unwrap()), Ok(want), "{text}");
+    }
+    let joined = r#"{"you": "ann", "type": "joined", "game": "g-1"}"#;
+    assert_eq!(ServerFrame::from_json(joined), Ok(ServerFrame::Lobby(LobbyReply::Joined { game: s("g-1"), you: s("ann") })));
+    let delta = r#"{"seq": 3, "type": "delta", "sim_time": 1.5}"#;
+    let Ok(ServerFrame::Game(ServerMsg::Delta(d))) = ServerFrame::from_json(delta) else { panic!() };
+    assert_eq!((d.seq, d.sim_time), (3, Some(1.5)));
+    assert_eq!(ServerFrame::from_json(delta), ServerFrame::from_value(serde_json::from_str(delta).unwrap()));
+}
+
+/// Only an object is a frame, whatever else would parse.
+#[test]
+fn frames_are_objects() {
+    for text in [r#"["join", "g-1"]"#, r#"["resync"]"#, r#""resync""#, "3", "null"] {
+        assert_eq!(ClientFrame::from_json(text).unwrap_err().code(), codes::BAD_MESSAGE, "{text}");
+        assert_eq!(ServerFrame::from_json(text).unwrap_err().code(), codes::BAD_MESSAGE, "{text}");
+    }
+    for text in ["", "{", r#"{"type": "join", "game": "g"#, r#"{"type": "resync"} x"#, "[1, 2"] {
+        assert_eq!(ClientFrame::from_json(text).unwrap_err().code(), codes::BAD_JSON, "{text}");
+    }
+    assert_eq!(
+        ClientFrame::from_json(r#"{"type": "resync", "type": "leave"}"#).unwrap_err().code(),
+        codes::BAD_MESSAGE,
+        "a repeated tag"
+    );
+}

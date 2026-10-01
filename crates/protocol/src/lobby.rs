@@ -3,12 +3,15 @@
 //! tagged by `"type"`; lobby and game tags never collide, so a frame's type
 //! alone says which enum it belongs to.
 
-use serde::de::Error as _;
+use std::borrow::Cow;
+
+use serde::de::{Error as _, IgnoredAny};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-use crate::lesson::LessonInfo;
-use crate::msg::{ClientMsg, ServerMsg};
+use crate::lesson::{LessonInfo, LessonView};
+use crate::msg::{ClientMsg, Notice, ServerMsg};
+use crate::view::{Delta, Layout, View};
 
 /// Client → front.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -149,18 +152,60 @@ pub enum ServerFrame {
     Game(ServerMsg),
 }
 
+const NEEDS_TYPE: &str = "a frame needs a string `type`";
+
 fn type_of(v: &Value) -> Result<&str, FrameError> {
-    v.get("type").and_then(Value::as_str).ok_or_else(|| FrameError::BadMessage("a frame needs a string `type`".into()))
+    v.get("type").and_then(Value::as_str).ok_or_else(|| FrameError::BadMessage(NEEDS_TYPE.into()))
 }
 
 fn field_error(e: serde_json::Error) -> FrameError {
     FrameError::BadMessage(e.to_string())
 }
 
+/// A syntax error (or the end of the text) is bad JSON; anything else is
+/// JSON that is not the message.
+fn json_error(e: serde_json::Error) -> FrameError {
+    if e.is_data() { FrameError::BadMessage(e.to_string()) } else { FrameError::BadJson(e.to_string()) }
+}
+
+/// A frame's `type`, read without building the rest of it (the rest is
+/// skipped, but still checked to be JSON). Only an object is a frame.
+fn peek_type(text: &str) -> Result<Cow<'_, str>, FrameError> {
+    #[derive(Deserialize)]
+    struct Tag<'a> {
+        #[serde(rename = "type", borrow)]
+        t: Cow<'a, str>,
+    }
+    if !text.trim_start().starts_with('{') {
+        return Err(match serde_json::from_str::<IgnoredAny>(text) {
+            Ok(_) => FrameError::BadMessage(NEEDS_TYPE.into()),
+            Err(e) => FrameError::BadJson(e.to_string()),
+        });
+    }
+    serde_json::from_str::<Tag>(text).map(|t| t.t).map_err(|e| match json_error(e) {
+        FrameError::BadMessage(_) => FrameError::BadMessage(NEEDS_TYPE.into()),
+        bad_json => bad_json,
+    })
+}
+
+/// The message in `text`, read straight into its own type: the `type` key
+/// is one more field it ignores.
+fn read<'a, T: Deserialize<'a>>(text: &'a str) -> Result<T, FrameError> {
+    serde_json::from_str(text).map_err(json_error)
+}
+
 impl ClientFrame {
+    /// Read a frame: its `type` first, then the message it names (no
+    /// `Value` in between).
     pub fn from_json(text: &str) -> Result<ClientFrame, FrameError> {
-        let v: Value = serde_json::from_str(text).map_err(|e| FrameError::BadJson(e.to_string()))?;
-        ClientFrame::from_value(v)
+        let t = peek_type(text)?;
+        if LOBBY_MSG_TYPES.contains(&t.as_ref()) {
+            read(text).map(ClientFrame::Lobby)
+        } else if CLIENT_MSG_TYPES.contains(&t.as_ref()) {
+            read(text).map(ClientFrame::Game)
+        } else {
+            Err(FrameError::BadMessage(format!("unknown type `{t}`")))
+        }
     }
 
     pub fn from_value(v: Value) -> Result<ClientFrame, FrameError> {
@@ -180,9 +225,22 @@ impl ClientFrame {
 }
 
 impl ServerFrame {
+    /// Read a frame: its `type` first, then the message it names. A game
+    /// message is read as its content type (`Layout`, `View`, ...), not
+    /// through `ServerMsg`, whose tag would make serde buffer it all first:
+    /// a large layout reads several times faster.
     pub fn from_json(text: &str) -> Result<ServerFrame, FrameError> {
-        let v: Value = serde_json::from_str(text).map_err(|e| FrameError::BadJson(e.to_string()))?;
-        ServerFrame::from_value(v)
+        let t = peek_type(text)?;
+        let game = |m| Ok(ServerFrame::Game(m));
+        match t.as_ref() {
+            t if LOBBY_REPLY_TYPES.contains(&t) => read(text).map(ServerFrame::Lobby),
+            "layout" => game(ServerMsg::Layout(read::<Layout>(text)?)),
+            "view" => game(ServerMsg::View(read::<View>(text)?)),
+            "delta" => game(ServerMsg::Delta(read::<Delta>(text)?)),
+            "notice" => game(ServerMsg::Notice(read::<Notice>(text)?)),
+            "lesson" => game(ServerMsg::Lesson(read::<LessonView>(text)?)),
+            t => Err(FrameError::BadMessage(format!("unknown type `{t}`"))),
+        }
     }
 
     pub fn from_value(v: Value) -> Result<ServerFrame, FrameError> {
