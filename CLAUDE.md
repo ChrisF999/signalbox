@@ -239,7 +239,9 @@ output is byte-identical for the same input.
   flush every 0.2 s, `Status` every 1 s). It accepts exactly one front
   connection on its socket, and exits 0 after `Shutdown`, SIGTERM, the front
   going away or 10 minutes empty (always saving first), 1 if the save will not
-  open (its last stderr line is the crash reason the lobby shows). On a resume the front passes `--current-layout <world.json>` when it still lists the save's layout; the process logs whether it took that file's display data (Task 5's rule).
+  open (its last stderr line is the crash reason the lobby shows). On a resume the front passes
+  `--current-layout <world.json>` when it still lists the save's layout; the process logs whether it took
+  that file's display data (only when the saved network matches it exactly; never written back).
 - `ipc` frames are a u32 BE length plus JSON, at most 4 MiB; `read_frame` is not
   cancel-safe, so every socket is read by a task of its own.
 - The front's `Supervisor` holds the lobby, the children and the routing behind
