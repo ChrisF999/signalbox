@@ -1,7 +1,9 @@
 //! A robot signaller: sets routes for each train towards its next calls (or
 //! an exit), and a soak runner built on it.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
+use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
 
@@ -28,17 +30,6 @@ enum Goal<'a> {
     Exit,
 }
 
-fn goal<'a>(w: &'a World, t: &Train) -> Option<Goal<'a>> {
-    let svc = &w.services[t.service.idx()];
-    // While dwelling, `next_call` is still the call the train stands at.
-    let next = t.next_call + usize::from(t.dwell.is_some());
-    match svc.calls.get(next) {
-        Some(c) => Some(Goal::Platform { place: &c.place, platform: c.platform.as_deref() }),
-        None if svc.end == EndAction::Exit => Some(Goal::Exit),
-        None => None,
-    }
-}
-
 fn reaches(w: &World, def: &RouteDef, goal: &Goal, strict: bool) -> bool {
     match goal {
         Goal::Exit => matches!(def.exit, Exit::Node(n) if w.net.nodes[n.idx()].kind == NodeKind::Boundary),
@@ -53,93 +44,214 @@ fn reaches(w: &World, def: &RouteDef, goal: &Goal, strict: bool) -> bool {
     }
 }
 
-/// The shortest chain of routes from `entrance` to the first route that
-/// reaches `goal`.
-fn chain_to(w: &World, entrance: SignalId, goal: &Goal, strict: bool) -> Option<Vec<RouteId>> {
-    // route → the route before it on the chain (None for the first).
-    let mut parent: BTreeMap<RouteId, Option<RouteId>> = BTreeMap::new();
-    let mut queue: VecDeque<(RouteId, usize)> = VecDeque::new();
-    for &r in &w.routes_from[entrance.idx()] {
-        parent.insert(r, None);
-        queue.push_back((r, 0));
-    }
-    while let Some((r, depth)) = queue.pop_front() {
-        let def = &w.routes[r.idx()];
-        if reaches(w, def, goal, strict) {
-            let mut chain = vec![r];
-            while let Some(&Some(p)) = parent.get(chain.last().expect("chain is never empty")) {
-                chain.push(p);
-            }
-            chain.reverse();
-            return Some(chain);
-        }
-        if depth < MAX_ROUTE_DEPTH {
-            if let Exit::Signal(next) = def.exit {
-                for &r2 in &w.routes_from[next.idx()] {
-                    if !parent.contains_key(&r2) {
-                        parent.insert(r2, Some(r));
-                        queue.push_back((r2, depth + 1));
-                    }
-                }
-            }
-        }
-    }
-    None
+/// What a journey plan costs, compared in field order: calls missed (skipped
+/// as unreachable, or left for later after a stop), then calls reached at
+/// the wrong platform, then routes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+struct Cost {
+    missed: u32,
+    off: u32,
+    routes: u32,
 }
 
-/// The first route from `entrance` on the shortest chain of routes to the
-/// train's next goal. Prefers the booked platform, then any at that place.
-pub fn choose_route(w: &World, t: &Train, entrance: SignalId) -> Option<RouteId> {
-    let goal = goal(w, t)?;
-    [true, false].into_iter().find_map(|strict| chain_to(w, entrance, &goal, strict)).map(|c| c[0])
+/// A search state: route `.0` is the last on the chain, calls before `.1`
+/// (an index into the journey's goals) are dealt with, and `.2` says route
+/// `.0` ends a leg (reaches a stopping call or the exit).
+type Key = (RouteId, usize, bool);
+
+/// How a route meets one goal: not at all, at another platform of its
+/// place, or as booked. Memoised per search (`Reach::Unknown` until asked).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reach {
+    Unknown,
+    No,
+    Off,
+    Booked,
 }
 
-/// The chain of routes from `from` through calls `k..` of the service (and
-/// out, for an exit service), each route marked when it ends the leg to a
-/// stopping call or the exit. Each call's booked platform is preferred when
-/// the rest of the journey can still be made from it. The flag returned says
-/// the route before `from` (`last`) already ends a leg.
-fn itinerary(w: &World, t: &Train, from: SignalId, k: usize, last: Option<RouteId>) -> Option<(Vec<(RouteId, bool)>, bool)> {
+/// One journey search: the goals and what each route makes of each goal.
+struct Search<'a> {
+    w: &'a World,
+    goals: Vec<(Goal<'a>, bool)>,
+    reach: Vec<Reach>,
+}
+
+impl Search<'_> {
+    fn reach(&mut self, r: RouteId, k: usize) -> Reach {
+        let i = r.idx() * self.goals.len() + k;
+        if self.reach[i] == Reach::Unknown {
+            let def = &self.w.routes[r.idx()];
+            let goal = &self.goals[k].0;
+            self.reach[i] = if reaches(self.w, def, goal, true) {
+                Reach::Booked
+            } else if reaches(self.w, def, goal, false) {
+                Reach::Off
+            } else {
+                Reach::No
+            };
+        }
+        self.reach[i]
+    }
+
+    /// Every way route `r`, entered with goals `k..` still to reach at cost
+    /// `c`, can deal with them: reach the next goal (at its booked platform,
+    /// or at another for one more `off`), skip it as unreachable (one more
+    /// `missed`; never the first goal, which the train may be standing at
+    /// before its dwell starts, nor the last, so a plan always ends somewhere
+    /// the train was going), or leave it for later routes. Reaching a
+    /// stopping goal ends the leg: the train stops there, so nothing more is
+    /// reached on this route.
+    fn absorb(&mut self, r: RouteId, k: usize, c: Cost, out: &mut Vec<(usize, Cost, bool)>) {
+        out.push((k, c, false));
+        let n = self.goals.len();
+        if k >= n {
+            return;
+        }
+        let reached = match self.reach(r, k) {
+            Reach::Booked => Some(c),
+            Reach::Off => Some(Cost { off: c.off + 1, ..c }),
+            _ => None,
+        };
+        if let Some(c2) = reached {
+            if self.goals[k].1 {
+                out.push((k + 1, c2, true));
+            } else {
+                self.absorb(r, k + 1, c2, out);
+            }
+        }
+        if k > 0 && k + 1 < n {
+            self.absorb(r, k + 1, Cost { missed: c.missed + 1, ..c }, out);
+        }
+    }
+}
+
+/// The cheapest chain of routes (see `Cost`) from `from` through the
+/// service's calls `k0..` and out, for an exit service, planned as one
+/// search so that a leg's route choice never strands a later leg off its
+/// booked line or platform when the track allows them all. Each route is
+/// marked when it ends a leg. After a stopping call the plan may stop short
+/// (the rest counted as missed) if nothing further can be reached; the
+/// rest is planned again when the train gets there.
+///
+/// Dijkstra over (route, goals dealt with, ends a leg). The queue orders
+/// entries completely (cost, then route id, goal index, flags), so ties
+/// always break the same way and the result is deterministic. Each leg may
+/// take at most `MAX_ROUTE_DEPTH` routes on average.
+fn journey(w: &World, t: &Train, from: SignalId, k0: usize) -> Option<Journey> {
     let svc = &w.services[t.service.idx()];
-    let (goal, stop) = match svc.calls.get(k) {
-        Some(c) => (Goal::Platform { place: &c.place, platform: c.platform.as_deref() }, c.stop),
-        None if svc.end == EndAction::Exit => (Goal::Exit, true),
-        None => return Some((vec![], false)),
-    };
-    for strict in [true, false] {
-        let part: Vec<RouteId> = match last {
-            Some(r) if reaches(w, &w.routes[r.idx()], &goal, strict) => vec![],
-            _ => match chain_to(w, from, &goal, strict) {
-                Some(c) => c,
-                None => continue,
-            },
-        };
-        let mut out: Vec<(RouteId, bool)> = part.iter().map(|&r| (r, false)).collect();
-        if stop {
-            return Some(match out.last_mut() {
-                Some(l) => {
-                    l.1 = true;
-                    (out, false)
-                }
-                None => (out, true),
-            });
-        }
-        let end = part.last().copied().or(last);
-        let rest = match end.map(|r| w.routes[r.idx()].exit) {
-            Some(Exit::Signal(s)) => itinerary(w, t, s, k + 1, end),
-            _ => Some((vec![], false)),
-        };
-        if let Some((rest, ends_prev)) = rest {
-            match out.last_mut() {
-                Some(l) => l.1 |= ends_prev,
-                None if ends_prev => return Some((rest, true)),
-                None => {}
+    let mut goals: Vec<(Goal, bool)> = svc
+        .calls
+        .iter()
+        .skip(k0)
+        .map(|c| (Goal::Platform { place: &c.place, platform: c.platform.as_deref() }, c.stop))
+        .collect();
+    if svc.end == EndAction::Exit {
+        goals.push((Goal::Exit, true));
+    }
+    let n = goals.len();
+    if n == 0 {
+        return Some(vec![]);
+    }
+    let mut search = Search { w, goals, reach: vec![Reach::Unknown; w.routes.len() * n] };
+    let index = |(r, k, ends): Key| (r.idx() * (n + 1) + k) * 2 + usize::from(ends);
+    // state → (cost, the state before it)
+    let mut best: Vec<Option<(Cost, Option<Key>)>> = vec![None; w.routes.len() * (n + 1) * 2];
+    // (cost, state, is a finished plan); a finished plan costs its state's
+    // cost plus the goals it leaves. Stale entries are skipped when popped.
+    let mut queue: BinaryHeap<Reverse<(Cost, Key, bool)>> = BinaryHeap::new();
+    let finish = |c: Cost, k: usize| Cost { missed: c.missed + (n - k) as u32, ..c };
+    let mut outcomes = Vec::new();
+    let relax = |best: &mut Vec<Option<(Cost, Option<Key>)>>,
+                     queue: &mut BinaryHeap<Reverse<(Cost, Key, bool)>>,
+                     r: RouteId,
+                     parent: Option<Key>,
+                     outcomes: &mut Vec<(usize, Cost, bool)>| {
+        for (k, c, ends) in outcomes.drain(..) {
+            let key = (r, k, ends);
+            let slot = &mut best[index(key)];
+            if slot.is_some_and(|(b, _)| b <= c) {
+                continue;
             }
-            out.extend(rest);
-            return Some((out, false));
+            *slot = Some((c, parent));
+            if k < n {
+                queue.push(Reverse((c, key, false)));
+            }
+            if k == n || ends {
+                queue.push(Reverse((finish(c, k), key, true)));
+            }
+        }
+    };
+    for &r in &w.routes_from[from.idx()] {
+        search.absorb(r, 0, Cost { routes: 1, ..Cost::default() }, &mut outcomes);
+        relax(&mut best, &mut queue, r, None, &mut outcomes);
+    }
+    while let Some(Reverse((c, key, finished))) = queue.pop() {
+        let (r, k, _) = key;
+        let Some((b, _)) = best[index(key)] else { continue };
+        if c != if finished { finish(b, k) } else { b } {
+            continue;
+        }
+        if finished {
+            let mut out = Vec::new();
+            let mut at = Some(key);
+            while let Some(kk) = at {
+                out.push((kk.0, kk.2));
+                at = best[index(kk)].and_then(|(_, p)| p);
+            }
+            out.reverse();
+            return Some(out);
+        }
+        if c.routes as usize >= MAX_ROUTE_DEPTH * (k + 1) {
+            continue;
+        }
+        if let Exit::Signal(next) = w.routes[r.idx()].exit {
+            for &r2 in &w.routes_from[next.idx()] {
+                search.absorb(r2, k, Cost { routes: c.routes + 1, ..c }, &mut outcomes);
+                relax(&mut best, &mut queue, r2, Some(key), &mut outcomes);
+            }
         }
     }
     None
+}
+
+/// A planned journey: routes, each marked when it ends a leg.
+type Journey = Vec<(RouteId, bool)>;
+
+/// The robot's memo of `journey` results by (entrance, service, first call)
+/// and of `shared_sections`. Both depend on the static world only, so the
+/// cache never changes what the robot does, only how fast it decides; it is
+/// not sim state and starts empty in every `Sim`.
+#[derive(Default)]
+pub struct PlanCache {
+    journeys: Mutex<BTreeMap<(SignalId, ServiceId, usize), Option<Journey>>>,
+    shared: OnceLock<Vec<bool>>,
+}
+
+impl std::fmt::Debug for PlanCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PlanCache")
+    }
+}
+
+impl PlanCache {
+    fn journey(&self, w: &World, t: &Train, from: SignalId, k0: usize) -> Option<Journey> {
+        let key = (from, t.service, k0);
+        // A poisoned lock only means a panic elsewhere; the map is still valid.
+        let mut map = self.journeys.lock().unwrap_or_else(|e| e.into_inner());
+        map.entry(key).or_insert_with(|| journey(w, t, from, k0)).clone()
+    }
+
+    fn shared(&self, w: &World) -> &[bool] {
+        self.shared.get_or_init(|| shared_sections(w))
+    }
+}
+
+/// The first route from `entrance` towards the train's next goal: the
+/// first route of its planned journey (see `journey`), which prefers each
+/// call's booked platform, then any at that place.
+pub fn choose_route(w: &World, t: &Train, entrance: SignalId) -> Option<RouteId> {
+    let next = t.next_call + usize::from(t.dwell.is_some());
+    journey(w, t, entrance, next)?.first().map(|&(r, _)| r)
 }
 
 /// Sections a train of `length_m` covers standing at the exit of the last
@@ -162,9 +274,12 @@ fn footprint(w: &World, chain: &[RouteId], length_m: f64) -> Vec<SectionId> {
 /// The routes from `entrance` the train should have set together: up to its
 /// next stopping call or its exit, or to the first signal before that where
 /// it could stand without fouling track that routes from other signals use.
-fn plan(w: &World, t: &Train, entrance: SignalId, shared: &[bool]) -> Option<Vec<RouteId>> {
+fn plan(sim: &Sim, t: &Train, entrance: SignalId) -> Option<Vec<RouteId>> {
+    let w = sim.world();
+    let cache = sim.plan_cache();
+    let shared = cache.shared(w);
     let next = t.next_call + usize::from(t.dwell.is_some());
-    let (full, _) = itinerary(w, t, entrance, next, None)?;
+    let full = cache.journey(w, t, entrance, next)?;
     let mut chain = Vec::new();
     for (r, ends_leg) in full {
         chain.push(r);
@@ -206,7 +321,6 @@ pub fn commands(sim: &Sim) -> Vec<Command> {
     let il = sim.interlocking();
     let mut out = Vec::new();
     let mut claimed: BTreeSet<SectionId> = BTreeSet::new();
-    let shared = shared_sections(w);
     for t in sim.trains() {
         if t.stabled {
             continue;
@@ -222,15 +336,19 @@ pub fn commands(sim: &Sim) -> Vec<Command> {
         if il.active_route_from(w, entrance).is_some() {
             continue;
         }
-        let Some(chain) = plan(w, t, entrance, &shared) else { continue };
+        let Some(chain) = plan(sim, t, entrance) else { continue };
         // No other train anywhere on the chain (automatic routes included: a
         // train ahead would take the routes set for this one), nothing another
         // train was given this round, and the interlocking accepts each route.
+        // A route on the chain that is already set (e.g. left behind when an
+        // earlier route of a chain was refused as it was applied) is used
+        // as it is, not requested again.
         let free = |s: &SectionId| !claimed.contains(s) && sim.occupancy().trains_in(*s).iter().all(|&o| o == t.id);
+        let is_set = |r: RouteId| il.active_route_from(w, w.routes[r.idx()].entrance) == Some(r);
         let settable = chain.iter().all(|&r| {
             let def = &w.routes[r.idx()];
             def.path.iter().chain(&def.overlap).all(free)
-                && (def.automatic || il.check_set_route(w, sim.points(), sim.occupancy(), r).is_ok())
+                && (def.automatic || is_set(r) || il.check_set_route(w, sim.points(), sim.occupancy(), r).is_ok())
         });
         if !settable {
             continue;
@@ -239,7 +357,9 @@ pub fn commands(sim: &Sim) -> Vec<Command> {
             let def = &w.routes[r.idx()];
             if !def.automatic {
                 claimed.extend(def.path.iter().chain(&def.overlap).copied());
-                out.push(Command::SetRoute { entrance: def.entrance, exit: def.exit });
+                if !is_set(r) {
+                    out.push(Command::SetRoute { entrance: def.entrance, exit: def.exit });
+                }
             }
         }
     }
@@ -352,4 +472,3 @@ pub fn soak_with(sim: &mut Sim, secs: f64, mut robot: impl FnMut(&Sim) -> Vec<Co
     r.penalties = sim.scores().total();
     r
 }
-

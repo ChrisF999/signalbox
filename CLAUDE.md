@@ -116,7 +116,9 @@ listed too (at the leg the route runs over). The converter reuses the same trace
 `head_m`; `advance` returns every swept stretch so signals and platforms passed in
 one tick are all seen (half-open `(from, to]`). `driver.rs` reads signals within
 sighting distance and expects the rest from the last aspect passed (a new train
-expects red). `robot.rs` is a deterministic auto-signaller; `robot::soak` runs a
+expects red). `robot.rs` is a deterministic auto-signaller (it plans each
+train's whole remaining journey in one Dijkstra search, booked platforms/lines
+first, memoised per `Sim` by (entrance, service, call)); `robot::soak` runs a
 world under it and is the integration oracle (no SPADs, collisions, invariant
 violations or stuck trains).
 

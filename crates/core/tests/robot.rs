@@ -210,3 +210,103 @@ fn robot_sets_a_departure_road_only_shortly_before_departure() {
     let w = sim.world().clone();
     assert_eq!(commands(&sim), vec![set(&w, "S3", Exit::Node(node(&w, "W")))]);
 }
+
+/// The 5O02 case in miniature. 1S01 passes MID (platform 1) and stops in
+/// END platform S. Both routes from S1 run through MID 1, then points Q
+/// split them: to SF (only END F beyond) or to SS (END S beyond). Taking
+/// the first route that reaches MID strands the train on the fast line
+/// and in the wrong platform; the robot must plan the whole journey.
+fn split_after_platform() -> Sim {
+    let seg = |name: &str, from: &str, to: &str, len: u32, sec: &str| {
+        serde_json::json!({"name": name, "from": from, "to": to, "length_m": len, "line_speed_kmh": 60, "section": sec})
+    };
+    let signal = |name: &str, segment: &str, at: u32| {
+        serde_json::json!({"name": name, "area": "A", "segment": segment, "offset_m": at, "direction": "up", "aspects": 3})
+    };
+    let nodes: Vec<_> = [("W", "boundary"), ("J1", "joint"), ("J2", "joint"), ("F1", "joint"), ("S1n", "joint"), ("EF", "buffer_stop"), ("ES", "buffer_stop")]
+        .iter()
+        .map(|(n, k)| serde_json::json!({"name": n, "kind": k}))
+        .chain([serde_json::json!({"name": "Q", "kind": "points", "toe": "q", "normal": "f1", "reverse": "s1"})])
+        .collect();
+    let sections: Vec<_> = ["TA", "TM", "TQ", "TF", "TS"].iter().map(|s| serde_json::json!({"name": s, "area": "A"})).collect();
+    let w = serde_json::json!({
+        "schema": 1, "areas": [{"name": "A"}], "sections": sections, "nodes": nodes,
+        "segments": [
+            seg("a", "W", "J1", 1000, "TA"), seg("m", "J1", "J2", 200, "TM"), seg("q", "J2", "Q", 50, "TQ"),
+            seg("f1", "Q", "F1", 30, "TQ"), seg("s1", "Q", "S1n", 30, "TQ"),
+            seg("fp", "F1", "EF", 250, "TF"), seg("sp", "S1n", "ES", 250, "TS"),
+        ],
+        "signals": [signal("S1", "a", 1000), signal("SF", "f1", 30), signal("SS", "s1", 30)],
+        "berths": [{"name": "BW", "boundary": "W"}],
+        "platforms": [
+            {"place": "MID", "platform": "1", "segment": "m", "from_m": 0, "to_m": 200},
+            {"place": "END", "platform": "F", "segment": "fp", "from_m": 0, "to_m": 250},
+            {"place": "END", "platform": "S", "segment": "sp", "from_m": 0, "to_m": 250},
+        ],
+        "routes": [
+            {"entrance": "S1", "exit": {"kind": "signal", "name": "SF"}, "path": ["TM", "TQ"], "points": [{"points": "Q", "position": "normal"}]},
+            {"entrance": "S1", "exit": {"kind": "signal", "name": "SS"}, "path": ["TM", "TQ"], "points": [{"points": "Q", "position": "reverse"}]},
+            {"entrance": "SF", "exit": {"kind": "node", "name": "EF"}, "path": ["TF"]},
+            {"entrance": "SS", "exit": {"kind": "node", "name": "ES"}, "path": ["TS"]},
+        ],
+        "train_types": [{"code": "EMU", "max_speed_kmh": 120, "accel": 0.8, "service_brake": 0.7, "emergency_brake": 1.2, "length_m": 100}],
+        "services": [{"headcode": "1S01", "train_type": "EMU", "calls": [
+            {"place": "MID", "platform": "1", "dep": "06:02", "stop": false},
+            {"place": "END", "platform": "S", "arr": "06:05"},
+        ], "end": {"kind": "stable"}}],
+        "entries": [{"service": "1S01", "boundary": "W", "time": "06:00"}],
+        "options": {"start_time": "06:00", "entry_delay_s": [0, 0]},
+    });
+    let mut sim = Sim::new(signalbox_core::world::World::from_json(&w.to_string()).unwrap(), 1);
+    sim.step();
+    assert_eq!(sim.trains().len(), 1);
+    sim
+}
+
+#[test]
+fn robot_keeps_the_booked_platform_when_an_earlier_leg_could_strand_it() {
+    let sim = split_after_platform();
+    let w = sim.world().clone();
+    let t = &sim.trains()[0];
+    assert_eq!(choose_route(&w, t, sig(&w, "S1")), Some(route(&w, "S1-SS")));
+    // SS is clear of other routes' track, so the robot stops planning there.
+    assert_eq!(commands(&sim), vec![set(&w, "S1", Exit::Signal(sig(&w, "SS")))]);
+    let mut sim = sim;
+    let r = soak(&mut sim, 900.0);
+    assert_eq!(r.wrong_platforms, 0, "{r:?}");
+    assert_eq!(r.stabled, 1, "{r:?}");
+}
+
+/// A route further along the chain that is already set (e.g. left behind
+/// when the route before it was refused as the chain was applied) is used
+/// as it is: the robot asks only for the rest, instead of never asking.
+#[test]
+fn robot_uses_a_route_already_set_on_the_chain() {
+    let mut sim = crossing(false);
+    let w = sim.world().clone();
+    sim.submit(set(&w, "SB", Exit::Node(node(&w, "EP"))));
+    sim.step();
+    let cmds = commands(&sim);
+    assert!(cmds.contains(&set(&w, "SA", Exit::Signal(sig(&w, "SB")))), "{cmds:?}");
+    assert!(!cmds.contains(&set(&w, "SB", Exit::Node(node(&w, "EP")))), "{cmds:?}");
+}
+
+/// A train standing at its first call's platform before its dwell starts
+/// (e.g. just formed) is not given its departure road: the call it stands
+/// at cannot be skipped as unreachable.
+#[test]
+fn robot_does_not_skip_the_call_a_train_stands_at() {
+    let w = load_with("terminus", |v| {
+        v["entries"][0] = serde_json::json!({"service": "1A01", "at": {"segment": "p1", "offset_m": 2, "direction": "down"}, "time": "06:00"});
+        v["services"][0]["calls"] = serde_json::json!([{"place": "TRM", "platform": "1", "dep": "06:08"}]);
+        v["services"][0]["end"] = serde_json::json!({"kind": "exit"});
+    })
+    .unwrap();
+    let mut sim = Sim::new(w, 1);
+    sim.step();
+    let w = sim.world().clone();
+    let mut t = sim.trains()[0].clone();
+    t.dwell = None;
+    assert_eq!(t.next_call, 0);
+    assert_eq!(choose_route(&w, &t, sig(&w, "S3")), None);
+}

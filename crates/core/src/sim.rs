@@ -13,6 +13,7 @@ use crate::interlocking::Interlocking;
 use crate::network::{Dir, Network, NodeKind};
 use crate::occupancy::Occupancy;
 use crate::points::PointsTable;
+use crate::robot::PlanCache;
 use crate::scoring::Scores;
 use crate::timetable::{EndAction, EntryStart, draw_delay, earliest_delay_s};
 use crate::trains::{Dwell, Train};
@@ -74,6 +75,8 @@ pub struct Sim {
     rng: ChaCha8Rng,
     /// Derived from trains at the end of every tick.
     occ: Occupancy,
+    /// The robot's journey plans, derived from the world alone.
+    plans: PlanCache,
 }
 
 impl Sim {
@@ -97,7 +100,7 @@ impl Sim {
             rng_word_pos: (0, 0),
         };
         let occ = Occupancy::new(world.net.sections.len());
-        let mut sim = Sim { world, st, rng, occ };
+        let mut sim = Sim { world, st, rng, occ, plans: PlanCache::default() };
         for i in 0..sim.world.routes.len() {
             if sim.world.routes[i].automatic {
                 // Automatic signals are set from the start. World load rejects automatic
@@ -111,6 +114,11 @@ impl Sim {
 
     pub fn world(&self) -> &World {
         &self.world
+    }
+
+    /// The robot's cache of journey plans for this sim's world.
+    pub(crate) fn plan_cache(&self) -> &PlanCache {
+        &self.plans
     }
 
     pub fn tick(&self) -> u64 {
@@ -230,7 +238,7 @@ impl Sim {
         let mut rng = ChaCha8Rng::from_seed(st.rng_seed);
         rng.set_word_pos((u128::from(st.rng_word_pos.0) << 64) | u128::from(st.rng_word_pos.1));
         let occ = Occupancy::new(world.net.sections.len());
-        let mut sim = Sim { world, st, rng, occ };
+        let mut sim = Sim { world, st, rng, occ, plans: PlanCache::default() };
         sim.rebuild_occupancy();
         Ok(sim)
     }
