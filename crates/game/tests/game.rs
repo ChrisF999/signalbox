@@ -366,8 +366,13 @@ fn a_claim_stops_the_spectators_votes_counting() {
     let out = send(&mut g, "tom", ClientMsg::Vote { proposal: Proposal::Pause });
     assert_eq!(error_codes(&out, "tom"), [codes::NOT_A_HOLDER]);
     assert!(!g.clock().paused);
+    g.flush();
     send(&mut g, "alice", ClientMsg::Vote { proposal: Proposal::Pause });
     assert!(g.clock().paused);
+    // Review I1: the spectators saw it wait for alice, so they hear it pass.
+    let passed = Notice::VoteEnded { proposal: Proposal::Pause, outcome: VoteOutcome::Passed };
+    let out = g.flush();
+    assert_eq!((notices(&out, "sam"), notices(&out, "alice")), (vec![passed.clone()], vec![passed]));
     send(&mut g, "alice", ClientMsg::Release);
     assert_eq!(g.voters(), BTreeSet::from([s("alice"), s("sam"), s("tom")]), "nobody holds an area again");
 }
@@ -586,4 +591,59 @@ fn every_player_hears_how_a_vote_ended() {
     assert_eq!(notices(&g.flush(), "alice"), vec![lapsed]);
     let out = send(&mut g, "sam", ClientMsg::VoteDecline);
     assert!(out.is_empty(), "sam is not connected");
+    // Review M4: a connected spectator is not a voter while anyone holds.
+    join(&mut g, "sam", None);
+    send(&mut g, "alice", ClientMsg::Vote { proposal: Proposal::Resume });
+    let out = send(&mut g, "sam", ClientMsg::VoteDecline);
+    assert_eq!(error_codes(&out, "sam"), [codes::NOT_A_HOLDER]);
+    assert!(g.clock().vote.is_some());
+    // Review M1: the one who agreed takes it back.
+    send(&mut g, "alice", ClientMsg::VoteDecline);
+    let withdrawn = Notice::VoteEnded { proposal: Proposal::Resume, outcome: VoteOutcome::Withdrawn { by: s("alice") } };
+    assert_eq!(notices(&g.flush(), "sam"), vec![withdrawn]);
+}
+
+/// Review I1: a vote that opened with others to agree is announced even
+/// when only one voter is left to finish it; a lone voter's proposal that
+/// applies at once is not (U14).
+#[test]
+fn a_vote_finished_by_the_last_voter_left_is_announced() {
+    let mut g = game();
+    join(&mut g, "alice", Some("West"));
+    join(&mut g, "bob", Some("East"));
+    send(&mut g, "bob", ClientMsg::Vote { proposal: Proposal::Speed { x: 4 } });
+    send(&mut g, "bob", ClientMsg::Release);
+    g.flush();
+    send(&mut g, "alice", ClientMsg::Vote { proposal: Proposal::Speed { x: 4 } });
+    assert_eq!(g.clock().speed, 4);
+    let passed = Notice::VoteEnded { proposal: Proposal::Speed { x: 4 }, outcome: VoteOutcome::Passed };
+    let out = g.flush();
+    assert_eq!((notices(&out, "alice"), notices(&out, "bob")), (vec![passed.clone()], vec![passed]));
+    send(&mut g, "alice", ClientMsg::Vote { proposal: Proposal::Pause });
+    assert!(g.clock().paused, "a lone voter's proposal applies at once");
+    let out = g.flush();
+    assert_eq!((notices(&out, "alice"), notices(&out, "bob")), (vec![], vec![]), "U14: not announced");
+}
+
+/// Review M2: Agree only agrees to the proposal that is open; it never
+/// opens or replaces one (a Decline or lapse may have got there first).
+#[test]
+fn agree_only_agrees_to_the_open_proposal() {
+    let mut g = game();
+    join(&mut g, "alice", Some("West"));
+    join(&mut g, "bob", Some("East"));
+    join(&mut g, "sam", None);
+    g.flush();
+    let out = send(&mut g, "bob", ClientMsg::VoteAgree { proposal: Proposal::Pause });
+    assert!(out.is_empty() && g.clock().vote.is_none(), "nothing open: quietly nothing");
+    send(&mut g, "alice", ClientMsg::Vote { proposal: Proposal::Speed { x: 2 } });
+    let out = send(&mut g, "bob", ClientMsg::VoteAgree { proposal: Proposal::Pause });
+    assert!(out.is_empty());
+    assert_eq!(g.clock().vote.as_ref().map(|v| v.proposal), Some(Proposal::Speed { x: 2 }), "not replaced");
+    let out = send(&mut g, "sam", ClientMsg::VoteAgree { proposal: Proposal::Speed { x: 2 } });
+    assert_eq!(error_codes(&out, "sam"), [codes::NOT_A_HOLDER]);
+    send(&mut g, "bob", ClientMsg::VoteAgree { proposal: Proposal::Speed { x: 2 } });
+    assert_eq!(g.clock().speed, 2);
+    let passed = Notice::VoteEnded { proposal: Proposal::Speed { x: 2 }, outcome: VoteOutcome::Passed };
+    assert_eq!(notices(&g.flush(), "sam"), vec![passed]);
 }

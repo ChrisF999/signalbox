@@ -183,9 +183,11 @@ output is byte-identical for the same input.
   an area every connected player does (`Game::voters`), re-settled on every
   claim, release, grace expiry, connect and spectator disconnect.
 - A vote lists who has still to agree (`VoteView.waiting`); any voter may
-  Decline it (`vote_decline`), ending it at once; `flush` tells every player
-  how each vote ended (`Notice::VoteEnded`), except a lone voter's (polish
-  spec M8).
+  Decline it (`vote_decline`; Withdrawn if they had agreed), ending it at
+  once; Agree (`vote_agree`) only agrees to the proposal still open, never
+  opening one. `flush` tells every player how each vote ended
+  (`Notice::VoteEnded`), except a lone voter's proposal that applied at once
+  (polish spec M8, U14).
 - Deleting games (owner decision 13): lobby `delete_game`, saved or crashed
   games only, by the creator (meta row `creator`, written by the game
   process; save schema still 2) or a `SIGNALBOX_ADMINS` user (comma-separated

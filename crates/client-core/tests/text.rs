@@ -49,5 +49,6 @@ fn votes() {
     assert_eq!(ended(VoteOutcome::Passed), "Vote passed: pause");
     assert_eq!(ended(VoteOutcome::Declined { by: s("bob") }), "Vote declined by bob: pause");
     assert_eq!(ended(VoteOutcome::Lapsed), "Vote lapsed: pause");
+    assert_eq!(ended(VoteOutcome::Withdrawn { by: s("ann") }), "Vote withdrawn by ann: pause", "review M1");
     assert_eq!(proposal_text(Proposal::Pause), "pause");
 }

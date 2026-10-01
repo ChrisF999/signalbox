@@ -43,6 +43,10 @@ fn client_messages() {
     );
     // Polish spec M8: the front reads it by its tag (`CLIENT_MSG_TYPES`).
     check_client(ClientMsg::VoteDecline, json!({"type": "vote_decline"}));
+    check_client(
+        ClientMsg::VoteAgree { proposal: Proposal::Speed { x: 2 } },
+        json!({"type": "vote_agree", "proposal": {"kind": "speed", "x": 2}}),
+    );
 }
 
 #[test]
@@ -117,6 +121,10 @@ fn notices() {
         (
             Notice::VoteEnded { proposal: Proposal::Pause, outcome: VoteOutcome::Passed },
             json!({"kind": "vote_ended", "proposal": {"kind": "pause"}, "outcome": {"how": "passed"}}),
+        ),
+        (
+            Notice::VoteEnded { proposal: Proposal::Pause, outcome: VoteOutcome::Withdrawn { by: s("ann") } },
+            json!({"kind": "vote_ended", "proposal": {"kind": "pause"}, "outcome": {"how": "withdrawn", "by": "ann"}}),
         ),
         (
             Notice::VoteEnded { proposal: Proposal::Resume, outcome: VoteOutcome::Lapsed },

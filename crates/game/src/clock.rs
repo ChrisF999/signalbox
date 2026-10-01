@@ -111,6 +111,22 @@ impl GameClock {
         if lapsed { self.vote.take().map(|v| v.proposal) } else { None }
     }
 
+    /// `voter` agrees to `proposal` only if it is the open one: an Agree
+    /// that arrives after a Decline, a lapse or a different proposal does
+    /// nothing (task 12 review M2). Returns it if it applied.
+    pub fn agree(&mut self, voter: &str, proposal: Proposal, voters: &BTreeSet<String>) -> Result<Option<Proposal>, VoteError> {
+        if !voters.contains(voter) {
+            return Err(VoteError::NotAVoter);
+        }
+        match self.vote.as_mut() {
+            Some(v) if v.proposal == proposal => {
+                v.agreed.insert(voter.to_string());
+                Ok(self.settle(voters))
+            }
+            _ => Ok(None),
+        }
+    }
+
     /// `voter` turns the open proposal down: it ends at once (polish spec
     /// M8). Returns it, or `None` when none is open.
     pub fn decline(&mut self, voter: &str, voters: &BTreeSet<String>) -> Result<Option<Proposal>, VoteError> {

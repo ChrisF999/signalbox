@@ -418,7 +418,11 @@ impl UiApp {
                     mark(ui, &clock, marked("clock"), now);
                     let state = ui.label(if v.paused { "paused".to_string() } else { format!("{}×", v.speed) });
                     if v.paused && v.vote.is_none() {
-                        state.on_hover_text("The clock is paused (a resumed game starts paused). Press resume to propose running it.");
+                        state.on_hover_text(if can_vote {
+                            "Paused. Any voter can propose resume."
+                        } else {
+                            "Paused. The holders can resume it."
+                        });
                     }
                     // Only voters get the buttons (owner decision 12).
                     if can_vote {
@@ -438,7 +442,7 @@ impl UiApp {
                         if can_vote {
                             let p = vote.proposal;
                             if !vote.agreed.contains(&me) && ui.button("Agree").clicked() {
-                                act.push(Box::new(move |a| a.vote(p)));
+                                act.push(Box::new(move |a| a.agree_vote(p)));
                             }
                             let no = if vote.agreed.contains(&me) { "Withdraw" } else { "Decline" };
                             if ui.button(no).clicked() {

@@ -608,7 +608,13 @@ impl App {
         self.send_game(ClientMsg::Vote { proposal });
     }
 
-    /// Turn the open proposal down (polish spec M8).
+    /// Agree to `proposal` if it is still the open one (task 12 review M2).
+    pub fn agree_vote(&mut self, proposal: Proposal) {
+        self.send_game(ClientMsg::VoteAgree { proposal });
+    }
+
+    /// Turn the open proposal down, or take back one's agreement (polish
+    /// spec M8).
     pub fn decline_vote(&mut self) {
         self.send_game(ClientMsg::VoteDecline);
     }

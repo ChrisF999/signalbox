@@ -94,6 +94,7 @@ pub fn notice_text(n: &Notice, names: &Names) -> (String, bool) {
             let text = match outcome {
                 VoteOutcome::Passed => format!("Vote passed: {p}"),
                 VoteOutcome::Declined { by } => format!("Vote declined by {by}: {p}"),
+                VoteOutcome::Withdrawn { by } => format!("Vote withdrawn by {by}: {p}"),
                 VoteOutcome::Lapsed => format!("Vote lapsed: {p}"),
             };
             (text, false)

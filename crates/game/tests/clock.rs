@@ -116,3 +116,18 @@ fn a_voter_can_decline() {
     assert_eq!(c.decline("bob", &h), Ok(Some(Proposal::Pause)));
     assert!(c.vote.is_none() && !c.paused);
 }
+
+/// Review M2: agreeing never opens or replaces a proposal.
+#[test]
+fn agree_needs_that_proposal_open() {
+    let h = holders(&["alice", "bob"]);
+    let mut c = GameClock::new(false);
+    assert_eq!(c.agree("bob", Proposal::Pause, &h), Ok(None));
+    assert!(c.vote.is_none(), "nothing opened");
+    c.vote("alice", Proposal::Speed { x: 2 }, &h).unwrap();
+    assert_eq!(c.agree("sam", Proposal::Speed { x: 2 }, &h), Err(VoteError::NotAVoter));
+    assert_eq!(c.agree("bob", Proposal::Pause, &h), Ok(None));
+    assert_eq!(c.vote.as_ref().map(|v| v.proposal), Some(Proposal::Speed { x: 2 }), "not replaced");
+    assert_eq!(c.agree("bob", Proposal::Speed { x: 2 }, &h), Ok(Some(Proposal::Speed { x: 2 })));
+    assert_eq!(c.speed, 2);
+}

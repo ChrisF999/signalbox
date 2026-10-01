@@ -908,4 +908,17 @@ fn a_vote_waits_for_named_players_who_agree_or_decline() {
     let out = r.frame();
     assert!(has_text(&out, "Vote declined by ann: 2×"), "{:?}", texts(&out));
     assert!(!has_text(&out, "Agree"));
+    // Agree agrees to the open proposal (review M2).
+    r.game.handle("bob", ClientMsg::Vote { proposal: Proposal::Speed { x: 4 } });
+    for _ in 0..3 {
+        r.frame();
+    }
+    let out = r.frame();
+    click_text(&mut r, &out, "Agree");
+    for _ in 0..3 {
+        r.frame();
+    }
+    let out = r.frame();
+    assert!(has_text(&out, "Vote passed: 4×"), "{:?}", texts(&out));
+    assert_eq!(r.game.clock().speed, 4);
 }

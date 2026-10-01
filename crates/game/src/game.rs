@@ -158,6 +158,14 @@ pub struct Game {
     vote_ended: Vec<(Proposal, VoteOutcome)>,
 }
 
+/// The error for a vote, Agree or Decline the clock refused.
+fn vote_refused(player: &str, e: VoteError) -> Vec<Out> {
+    match e {
+        VoteError::NotAVoter => vec![error(player, codes::NOT_A_HOLDER, "while anyone holds an area, only holders vote")],
+        VoteError::BadSpeed => vec![error(player, codes::BAD_SPEED, "speed must be 1, 2, 4 or 8")],
+    }
+}
+
 fn error(player: &str, code: &str, message: &str) -> Out {
     (player.to_string(), ServerMsg::Notice(Notice::Error { code: code.to_string(), message: message.to_string() }))
 }
@@ -514,6 +522,7 @@ impl Game {
             ClientMsg::Release => self.release(player),
             ClientMsg::Command { cmd } => self.command(player, cmd),
             ClientMsg::Vote { proposal } => self.vote(player, proposal),
+            ClientMsg::VoteAgree { proposal } => self.agree(player, proposal),
             ClientMsg::VoteDecline => self.decline(player),
             ClientMsg::Resync => self.resync(player),
             // Only a tutorial (`crate::lesson::Runner`) acts on these.
@@ -692,29 +701,42 @@ impl Game {
     }
 
     fn vote(&mut self, player: &str, proposal: Proposal) -> Vec<Out> {
-        let voters = self.voters();
-        match self.clock.vote(player, proposal, &voters) {
+        // A proposal that opens and applies in the same call is a lone
+        // voter's: nothing to tell (U14). One already open was seen by
+        // everyone, so its passing is told (task 12 review I1).
+        let was_open = self.clock.vote.as_ref().is_some_and(|v| v.proposal == proposal);
+        match self.clock.vote(player, proposal, &self.voters()) {
             Ok(passed) => {
-                // A lone voter's proposal applies at once: nothing to tell.
-                if voters.len() > 1 {
+                if was_open {
                     self.vote_ended.extend(passed.map(|p| (p, VoteOutcome::Passed)));
                 }
                 vec![]
             }
-            Err(VoteError::NotAVoter) => {
-                vec![error(player, codes::NOT_A_HOLDER, "while anyone holds an area, only holders vote")]
-            }
-            Err(VoteError::BadSpeed) => vec![error(player, codes::BAD_SPEED, "speed must be 1, 2, 4 or 8")],
+            Err(e) => vote_refused(player, e),
         }
     }
 
-    fn decline(&mut self, player: &str) -> Vec<Out> {
-        match self.clock.decline(player, &self.voters()) {
-            Ok(declined) => {
-                self.vote_ended.extend(declined.map(|p| (p, VoteOutcome::Declined { by: player.to_string() })));
+    fn agree(&mut self, player: &str, proposal: Proposal) -> Vec<Out> {
+        match self.clock.agree(player, proposal, &self.voters()) {
+            Ok(passed) => {
+                self.vote_ended.extend(passed.map(|p| (p, VoteOutcome::Passed)));
                 vec![]
             }
-            Err(_) => vec![error(player, codes::NOT_A_HOLDER, "while anyone holds an area, only holders vote")],
+            Err(e) => vote_refused(player, e),
+        }
+    }
+
+    /// Decline, or Withdraw when `player` had agreed (task 12 review M1).
+    fn decline(&mut self, player: &str) -> Vec<Out> {
+        let withdrew = self.clock.vote.as_ref().is_some_and(|v| v.agreed.contains(player));
+        match self.clock.decline(player, &self.voters()) {
+            Ok(ended) => {
+                let by = player.to_string();
+                let outcome = if withdrew { VoteOutcome::Withdrawn { by } } else { VoteOutcome::Declined { by } };
+                self.vote_ended.extend(ended.map(|p| (p, outcome)));
+                vec![]
+            }
+            Err(e) => vote_refused(player, e),
         }
     }
 

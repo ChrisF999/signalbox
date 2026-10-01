@@ -17,7 +17,11 @@ pub enum ClientMsg {
     Command { cmd: PlayerCommand },
     /// Propose, or agree to, a clock change.
     Vote { proposal: Proposal },
-    /// Turn the open proposal down: it ends at once (polish spec M8).
+    /// Agree to `proposal` if it is the open one; otherwise nothing (it
+    /// never opens or replaces a proposal; task 12 review M2).
+    VoteAgree { proposal: Proposal },
+    /// Turn the open proposal down, or take back one's own agreement: it
+    /// ends at once (polish spec M8).
     VoteDecline,
     /// Ask for the layout and a full view.
     Resync,
@@ -65,6 +69,8 @@ pub enum ExitName {
 pub enum VoteOutcome {
     Passed,
     Declined { by: String },
+    /// `by` had agreed, and took it back (Withdraw).
+    Withdrawn { by: String },
     Lapsed,
 }
 
