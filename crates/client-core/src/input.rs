@@ -142,6 +142,11 @@ impl App {
             Target::Signal(s) if select::can_enter(l, s) => Some("click: choose as entrance"),
             Target::Exit(n) if exit(ExitName::Node(n.clone())) => Some("click: set the route to here"),
             Target::Points(p) if !select::points_menu(l, v, p).is_empty() => Some("click: open the menu to swing them"),
+            Target::Points(p) if l.points.iter().any(|x| x.name == *p && x.operable) => match v.points.get(p) {
+                Some(pv) if pv.moving => Some("points moving: wait"),
+                Some(pv) if pv.locked => Some("points locked by a route or train: they cannot be swung"),
+                _ => None,
+            },
             Target::Berth(b) if select::operable_berth(l, b) => Some("right-click: interpose or cancel a headcode"),
             Target::Auto(s) if select::auto_toggle(l, v, s).is_some() => Some("click: auto-working on or off"),
             _ => None,

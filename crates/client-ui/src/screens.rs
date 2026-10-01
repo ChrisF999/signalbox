@@ -720,7 +720,9 @@ impl UiApp {
         let hover = hit_at(resp.hover_pos());
         // Every click goes on, even one on nothing or on what is not yours:
         // a dead click clears the entrance (`App::click` decides what the
-        // rest mean, from the same operability `Hit::clickable` shows).
+        // rest mean, from the same operability `Hit::clickable` shows). The
+        // exception is a left click on points you work: it opens their menu
+        // and leaves the chosen entrance alone, as a right click does.
         let click = resp.clicked().then(|| hit_at(resp.interact_pointer_pos()));
         // Points you can work open their menu on a left click too, and never
         // swing on it (polish spec M3, decision U9).

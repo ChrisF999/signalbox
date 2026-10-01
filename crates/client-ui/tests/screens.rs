@@ -19,6 +19,8 @@ struct Rig {
     events: Vec<Event>,
     /// Lobby frames the app sent (game frames go to the game).
     lobby_sent: Vec<LobbyMsg>,
+    /// Every command the app sent to the game.
+    commands: Vec<PlayerCommand>,
 }
 
 impl Rig {
@@ -37,7 +39,7 @@ impl Rig {
             Some(st) => UiApp::with_store(core, Box::new(st)),
             None => UiApp::new(core),
         };
-        let mut r = Rig { ctx: egui::Context::default(), ui, h, game, t: 0.0, events: vec![], lobby_sent: vec![] };
+        let mut r = Rig { ctx: egui::Context::default(), ui, h, game, t: 0.0, events: vec![], lobby_sent: vec![], commands: vec![] };
         r.frame();
         r.lobby_sent.clear();
         r.h.push(ServerFrame::Lobby(LobbyReply::Layouts { layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")] }] }));
@@ -80,6 +82,9 @@ impl Rig {
         for f in self.h.take_sent() {
             match f {
                 ClientFrame::Game(m) => {
+                    if let ClientMsg::Command { cmd } = &m {
+                        self.commands.push(cmd.clone());
+                    }
                     for (p, reply) in self.game.handle("ann", m) {
                         if p == "ann" {
                             self.h.push(ServerFrame::Game(reply));
@@ -856,6 +861,26 @@ fn clickable_things_say_so_and_points_open_on_a_left_click() {
     r.click(p, PointerButton::Primary);
     let out = r.frame();
     assert!(has_text(&out, "Swing TBP reverse"), "{:?}", texts(&out));
+    // The click only opened the menu: no command was sent. Esc closes it.
+    assert!(r.commands.is_empty(), "a left click never swings: {:?}", r.commands);
+    r.events.push(Event::Key { key: Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::default() });
+    r.frame();
+    assert!(!has_text(&r.frame(), "Swing TBP reverse"), "Esc closes the menu");
+    assert!(r.commands.is_empty());
+    // A click elsewhere closes it too.
+    let mut r = Rig::in_game(drawn_twobox(), Some("East"));
+    r.click(p, PointerButton::Primary);
+    assert!(has_text(&r.frame(), "Swing TBP reverse"));
+    r.click(r.at(150.0, 0.0), PointerButton::Primary);
+    assert!(!has_text(&r.frame(), "Swing TBP reverse"), "an outside click closes the menu");
+    assert!(r.commands.is_empty());
+    // The menu item swings, once.
+    let mut r = Rig::in_game(drawn_twobox(), Some("East"));
+    r.click(p, PointerButton::Primary);
+    let out = r.frame();
+    click_text(&mut r, &out, "Swing TBP reverse");
+    r.frame();
+    assert_eq!(r.commands, [PlayerCommand::SwingPoints { points: s("P"), to: PointsPos::Reverse }]);
     // Track is hover only: no hand.
     let mut r = Rig::in_game(drawn_twobox(), Some("East"));
     r.events.push(Event::PointerMoved(r.at(150.0, 0.0)));

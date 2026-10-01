@@ -470,3 +470,22 @@ fn hints_say_what_a_click_does() {
     let spec = Table::new("sam", None);
     assert_eq!(spec.app.hint(&sig("W1")), None);
 }
+
+/// Review fix: points you work that cannot be swung now say why.
+#[test]
+fn busy_points_say_why_they_cannot_be_swung() {
+    let mut e = Table::new("eve", Some("East"));
+    let p = Target::Points(s("P"));
+    e.app.command(PlayerCommand::SwingPoints { points: s("P"), to: PointsPos::Reverse });
+    e.pump();
+    e.run(0.2);
+    assert!(e.view().points["P"].moving, "{:?}", e.view().points);
+    assert_eq!(e.app.hint(&p), Some("points moving: wait"));
+    e.run(10.0);
+    e.app.click(&sig("C"));
+    e.app.click(&sig("W2"));
+    e.pump();
+    e.run(1.0);
+    assert!(e.view().points["P"].locked, "{:?}", e.view().points);
+    assert_eq!(e.app.hint(&p), Some("points locked by a route or train: they cannot be swung"));
+}
