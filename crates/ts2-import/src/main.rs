@@ -2,13 +2,14 @@
 
 use std::process::ExitCode;
 
-use ts2_import::{areas, convert, lines, report};
+use ts2_import::{areas, convert, lines, report, wtt};
 
-const USAGE: &str = "usage: ts2-import <input.json> -o <world.json> [--strict] [--areas <areas.json>] [--lines <lines.json>]";
+const USAGE: &str = "usage: ts2-import <input.json> -o <world.json> [--strict] [--areas <areas.json>] [--lines <lines.json>] [--wtt <wtt.bbox.html>]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (mut input, mut output, mut strict, mut areas_path, mut lines_path) = (None, None, false, None, None);
+    let mut wtt_path = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -33,6 +34,13 @@ fn main() -> ExitCode {
                     None => return usage(),
                 }
             }
+            "--wtt" => {
+                i += 1;
+                match args.get(i) {
+                    Some(t) => wtt_path = Some(t.clone()),
+                    None => return usage(),
+                }
+            }
             "--strict" => strict = true,
             a if input.is_none() && !a.starts_with('-') => input = Some(a.to_string()),
             _ => return usage(),
@@ -53,6 +61,16 @@ fn main() -> ExitCode {
     let line_specs = match &lines_path {
         Some(p) => match std::fs::read_to_string(p).map_err(|e| e.to_string()).and_then(|t| lines::parse(&t).map_err(|e| e.to_string())) {
             Ok(l) => Some((p.clone(), l)),
+            Err(e) => {
+                eprintln!("{p}: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => None,
+    };
+    let day = match &wtt_path {
+        Some(p) => match read_wtt(p) {
+            Ok(d) => Some((p.clone(), d)),
             Err(e) => {
                 eprintln!("{p}: {e}");
                 return ExitCode::FAILURE;
@@ -85,6 +103,36 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             }
+            if let Some((p, (trips, checked))) = &day {
+                match wtt::apply(&mut c.world, trips) {
+                    Ok(r) => {
+                        eprintln!(
+                            "{p}: Wednesday, {} trips of {} trains; {} trips at the published running time, {} longer; snapshots {}",
+                            checked.trips,
+                            checked.trains,
+                            checked.running_exact,
+                            checked.running_longer,
+                            checked.snapshots.iter().map(|(t, n)| format!("{}={n}", &signalbox_core::time::fmt_hms((*t).into())[..5])).collect::<Vec<_>>().join(" ")
+                        );
+                        eprintln!(
+                            "{p}: {} services, {} entries from {}; left out {} empty moves and trains {:?}; roads {:?}",
+                            r.services,
+                            r.entries,
+                            r.start_time,
+                            r.dropped_empty.len(),
+                            r.dropped_trains,
+                            r.road_use
+                        );
+                        for s in &r.shortened {
+                            eprintln!("{p}: {s}");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("{p}: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
             let json = serde_json::to_string_pretty(&c.world).expect("world serialises");
             if let Err(e) = std::fs::write(&output, json) {
                 eprintln!("{output}: {e}");
@@ -109,6 +157,15 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// The WTT's Wednesday trips, checked against its own figures.
+fn read_wtt(path: &str) -> Result<(Vec<wtt::Trip>, wtt::CheckReport), String> {
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let all = wtt::parse(&text).map_err(|e| e.to_string())?;
+    let day = wtt::on_day(&all, wtt::DAY).map_err(|e| e.to_string())?;
+    let checked = wtt::check(&day, &wtt::Checks::waterloo_city()).map_err(|e| e.to_string())?;
+    Ok((day, checked))
 }
 
 fn usage() -> ExitCode {

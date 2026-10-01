@@ -1,4 +1,4 @@
-//! The converter CLI's `--areas` and `--lines` flags.
+//! The converter CLI's `--areas`, `--lines` and `--wtt` flags.
 
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -8,6 +8,7 @@ use signalbox_core::world::file::WorldFile;
 const DRAIN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/drain.json");
 const DRAIN_AREAS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../layouts/drain.areas.json");
 const DRAIN_LINES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../layouts/drain.lines.json");
+const SYNTHETIC_WTT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/wtt-synthetic.bbox.html");
 
 fn cli(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_ts2-import")).args(args).output().expect("ts2-import runs")
@@ -80,5 +81,24 @@ fn a_bad_lines_file_fails_with_the_names_and_writes_nothing() {
     assert!(!out.exists());
     let o = cli(&[DRAIN, "-o", out.to_str().unwrap(), "--lines"]);
     assert_eq!(o.status.code(), Some(2), "--lines needs a value");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `--wtt` checks the WTT against the Waterloo & City figures before it
+/// writes anything: the synthetic test WTT is read but fails them, and the
+/// image build stops rather than shipping a timetable that is not the real one.
+#[test]
+fn wtt_flag_checks_the_timetable_and_writes_nothing_when_it_fails() {
+    let dir = temp_dir("wtt");
+    let out = dir.join("drain.json");
+    let o = cli(&[DRAIN, "-o", out.to_str().unwrap(), "--wtt", SYNTHETIC_WTT]);
+    assert_eq!(o.status.code(), Some(1), "{}", stderr(&o));
+    assert!(stderr(&o).contains("check failed: 0 trains in service at 09:00:00, the WTT says 5"), "{}", stderr(&o));
+    assert!(!out.exists());
+    let o = cli(&[DRAIN, "-o", out.to_str().unwrap(), "--wtt", dir.join("missing.html").to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(1), "{}", stderr(&o));
+    assert!(!out.exists());
+    let o = cli(&[DRAIN, "-o", out.to_str().unwrap(), "--wtt"]);
+    assert_eq!(o.status.code(), Some(2), "--wtt needs a value");
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -34,6 +34,7 @@ scripts/cargo run -p sim-cli -- run crates/core/tests/fixtures/junction.json --r
 scripts/cargo run -p sim-cli -- replay crates/core/tests/fixtures/junction.json /w/target/log.json
 scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/drain.json -o /w/target/drain.json
 scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/liverpool-st.json -o /w/target/lst.json --areas /w/layouts/liverpool-st.areas.json --lines /w/layouts/liverpool-st.lines.json
+scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/drain.json -o /w/target/drain.json --areas /w/layouts/drain.areas.json --lines /w/layouts/drain.lines.json --wtt /w/external/wtt/wtt.bbox.html   # the real WTT: external/wtt/README.md
 ```
 
 Paths passed through `scripts/cargo` resolve inside the container (`/w` = repo root).
@@ -143,6 +144,17 @@ output is byte-identical for the same input.
   `workstations`), never into the sim. Optional line names come from
   `layouts/<name>.lines.json` (`ts2-import --lines`): `direction` there is the
   world's `up`/`down` (the direction of the line's signals), not the railway's.
+- Drain's timetable can be the real Waterloo & City WTT
+  (`ts2-import --wtt`, `ts2_import::wtt`, polish spec §4): it reads
+  `pdftotext -bbox` output of the owner's PDF, checks it against the WTT's
+  own figures (running times, workings, trains in service, intervals; a
+  failure stops the conversion) and replaces Drain's services, entries,
+  start time (05:40) and dwell (20–30 s): Wednesday, headcodes
+  `<train>/<trip>` shown as the train number (display headcodes, below),
+  the depot and siding both roads 5–7. The PDF and anything made from it
+  are never committed (`external/wtt/`, git-ignored); CI tests only the
+  synthetic `tests/data/wtt-synthetic.bbox.html` (written by
+  `wtt-synthetic.py`, fictional trains 301–303).
 - `game::display` reads those display keys once per game (defaults: the
   title's first letter, A, B, C... in area order) and builds each area's
   simplifier from the timetable; every `Layout` carries them.

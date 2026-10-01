@@ -8,6 +8,7 @@ pub mod report;
 pub mod routes;
 pub mod timetable;
 pub mod ts2;
+pub mod wtt;
 
 use signalbox_core::world::file::{AreaFile, SCHEMA_VERSION, WorldFile};
 use signalbox_core::world::{LoadError, World};
