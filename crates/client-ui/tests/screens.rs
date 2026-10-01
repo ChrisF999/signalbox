@@ -714,3 +714,30 @@ fn a_game_being_prepared_says_so_in_the_lobby_and_while_waiting() {
     });
     assert!(missing.is_empty(), "no glyph for {missing:?}");
 }
+
+/// Polish spec §3: the frame the player sees has no text drawn over
+/// another, here Liverpool Street box A at Fit (4 overlaps before).
+#[test]
+fn the_diagram_never_draws_text_over_text() {
+    let dir = env!("CARGO_MANIFEST_DIR");
+    let read = |p: String| std::fs::read_to_string(p).unwrap();
+    let mut w = ts2_import::convert(&read(format!("{dir}/../ts2-import/tests/data/liverpool-st.json"))).unwrap().world;
+    ts2_import::areas::apply(&mut w, &ts2_import::areas::parse(&read(format!("{dir}/../../layouts/liverpool-st.areas.json"))).unwrap()).unwrap();
+    ts2_import::lines::apply(&mut w, &ts2_import::lines::parse(&read(format!("{dir}/../../layouts/liverpool-st.lines.json"))).unwrap()).unwrap();
+    let mut r = Rig::in_game(signalbox_core::world::World::from_file(w).unwrap(), Some("Liverpool Street"));
+    r.frame();
+    let out = r.frame();
+    let diagram = r.ui.diagram_rect().unwrap();
+    let drawn: Vec<(String, Rect)> = texts(&out).into_iter().filter(|(_, at)| diagram.contains(at.center())).collect();
+    assert!(drawn.len() > 50, "the box is drawn: {}", drawn.len());
+    let mut overlaps = Vec::new();
+    for (i, a) in drawn.iter().enumerate() {
+        for b in &drawn[i + 1..] {
+            let x = a.1.intersect(b.1);
+            if x.width() > 0.5 && x.height() > 0.5 {
+                overlaps.push((a.0.clone(), b.0.clone()));
+            }
+        }
+    }
+    assert!(overlaps.is_empty(), "{overlaps:?}");
+}

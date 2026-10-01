@@ -19,6 +19,7 @@ use protocol::{GameState, Highlight, Proposal};
 
 use crate::camera::Camera;
 use crate::hit::hit_test;
+use crate::labels::{self, Plan};
 use crate::paint::{self, BG, PaintState};
 use crate::scene::Scene;
 
@@ -95,11 +96,16 @@ pub struct UiApp {
     /// The simplifier's lines (each marked if it is its row's first) for
     /// (layout generation, search).
     simplifier_lines: Option<((u64, String), Vec<(Line, bool)>)>,
+    /// Where the diagram's texts go, for (game, layout generation, scale
+    /// bits, numbers on): made again only on a zoom or a settings change.
+    placement: Option<(PlacementKey, Plan)>,
     /// The lessons completed in this browser.
     ticks: LessonTicks,
     /// Where the ticks are kept between visits (none in most tests).
     ticks_store: Option<Box<dyn SettingsStore>>,
 }
+
+type PlacementKey = (String, u64, u32, bool);
 
 impl UiApp {
     pub fn new(core: App) -> UiApp {
@@ -121,6 +127,7 @@ impl UiApp {
             enquiry: None,
             shown_game: None,
             simplifier_lines: None,
+            placement: None,
             ticks: LessonTicks::default(),
             ticks_store: None,
         }
@@ -690,7 +697,19 @@ impl UiApp {
             names: g.names(),
             highlight: &highlight,
         };
-        paint::paint(&painter, paint::draw(scene, &cam, rect, &st));
+        let d = paint::draw(scene, &cam, rect, &st);
+        let key = (g.id.clone(), g.layout_gen(), cam.scale.to_bits(), self.settings.numbers);
+        if self.placement.as_ref().is_none_or(|(k, p)| *k != key || p.spots.len() != d.movable.len()) {
+            let plan = ui.ctx().fonts_mut(|f| {
+                labels::plan(&d, &mut |t| f.layout_no_wrap(t.text.clone(), paint::font(t), t.colour).size())
+            });
+            self.placement = Some((key, plan));
+        }
+        let d = match &self.placement {
+            Some((_, plan)) => labels::apply(d, plan),
+            None => d,
+        };
+        paint::paint(&painter, d);
         match click {
             // With the enquiry on, a headcode opens its window and nothing else.
             Some(Some(t)) => match self.core.headcode_at(&t).filter(|_| self.settings.enquiry) {

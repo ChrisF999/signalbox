@@ -297,6 +297,15 @@ output is byte-identical for the same input.
   works and makes a set route stay set for following trains (real
   auto-working), not beside permanently automatic signals; there is none on
   fringe signals, and spectators see it grey and read-only.
+- Legibility (polish spec §3): `paint::draw` emits every text at its own
+  spot and records which may move (`labels::Movable`: role, other spots) and
+  what must stay clear (`labels::KeepClear`: track bars, lamps, ○A circles,
+  every berth box, exits); `labels::plan` places them greedily in priority
+  order (own numbers, ○A letters, line names, platform numbers, labels,
+  fringe numbers) and hides what has no room; headcodes never move. Plans
+  depend only on scene, zoom and settings, and `UiApp` caches one per zoom.
+  ○A buttons exist (drawn and hit) only where numbers are drawn.
+  `tests/legibility.rs` is the acceptance measurement (`--nocapture` prints it).
 - `hit_test` takes the view as well as the scene; points and exits win over
   an empty berth under the pointer. The side panel's minimum width is 398 pt
   (it fits the simplifier).
