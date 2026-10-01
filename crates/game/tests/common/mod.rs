@@ -128,7 +128,7 @@ impl Client {
                 ServerMsg::Layout(l) => self.layout = Some(l.clone()),
                 ServerMsg::View(v) => self.view = Some(v.clone()),
                 ServerMsg::Delta(d) => self.view.as_mut().expect("a view before any delta").apply(d).expect("deltas in order"),
-                ServerMsg::Notice(_) => {}
+                ServerMsg::Notice(_) | ServerMsg::Lesson(_) => {}
             }
         }
     }

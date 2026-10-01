@@ -285,6 +285,11 @@ impl Supervisor {
             ClientFrame::Lobby(LobbyMsg::CreateGame { layout, seed, start }) => self.create(user, conn, layout, seed, start),
             ClientFrame::Lobby(LobbyMsg::Join { game }) => self.join(user, conn, game),
             ClientFrame::Lobby(LobbyMsg::DeleteGame { game }) => self.delete_game(user, conn, game),
+            // Tutorials come with the lessons registry (Task 7).
+            ClientFrame::Lobby(LobbyMsg::ListLessons) => self.reply(user, conn, frame(LobbyReply::Lessons { lessons: vec![] })),
+            ClientFrame::Lobby(LobbyMsg::StartLesson { lesson }) => {
+                self.reply(user, conn, ServerFrame::error(codes::UNKNOWN_LESSON, format!("no lesson `{lesson}`")))
+            }
         }
     }
 

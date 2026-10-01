@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use signalbox_core::events::Rejection;
 use signalbox_core::network::PointsPos;
 
+use crate::lesson::LessonView;
 use crate::view::{Delta, Layout, View};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -18,6 +19,22 @@ pub enum ClientMsg {
     Vote { proposal: Proposal },
     /// Ask for the layout and a full view.
     Resync,
+    /// In a tutorial: the step said "press Next".
+    LessonNext,
+    /// In a tutorial: back to the start of this step.
+    LessonRestartStep,
+    /// In a tutorial: back to the first step.
+    LessonRestart,
+    /// In a tutorial: what the screen shows now, for steps that wait on it.
+    /// Both fields are always sent; absent means none.
+    LessonUi {
+        /// The side panel's tab: `trains` or `simplifier`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tab: Option<String>,
+        /// The signal chosen as an entrance.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selected: Option<String>,
+    },
 }
 
 /// Core `Command` with names in place of ids.
@@ -56,6 +73,8 @@ pub enum ServerMsg {
     View(View),
     Delta(Delta),
     Notice(Notice),
+    /// Tutorial games only.
+    Lesson(LessonView),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

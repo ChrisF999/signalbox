@@ -58,6 +58,8 @@ impl Bot {
                 self.notices.push(n);
                 None
             }
+            // Tutorials are for people; a bot plays on without them.
+            ServerMsg::Lesson(_) => None,
         }
     }
 

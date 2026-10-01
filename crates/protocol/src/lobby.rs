@@ -7,6 +7,7 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
+use crate::lesson::LessonInfo;
 use crate::msg::{ClientMsg, ServerMsg};
 
 /// Client → front.
@@ -31,6 +32,10 @@ pub enum LobbyMsg {
     /// Delete a saved or crashed game for good (owner decision 13): its
     /// creator or an admin only. Answered with the new `games` list.
     DeleteGame { game: String },
+    ListLessons,
+    /// Start a private tutorial game of `lesson` (a `LessonInfo::id`);
+    /// answered like `create_game`.
+    StartLesson { lesson: String },
 }
 
 /// Front → client.
@@ -42,6 +47,7 @@ pub enum LobbyReply {
     /// You are in `game` as `you`; its layout and view follow.
     Joined { game: String, you: String },
     Error { code: String, message: String },
+    Lessons { lessons: Vec<LessonInfo> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,13 +95,24 @@ pub struct LayoutInfo {
 }
 
 /// `"type"` tags of `LobbyMsg`.
-pub const LOBBY_MSG_TYPES: [&str; 6] = ["list_games", "list_layouts", "create_game", "join", "leave", "delete_game"];
+pub const LOBBY_MSG_TYPES: [&str; 8] =
+    ["list_games", "list_layouts", "create_game", "join", "leave", "delete_game", "list_lessons", "start_lesson"];
 /// `"type"` tags of `ClientMsg`.
-pub const CLIENT_MSG_TYPES: [&str; 5] = ["claim", "release", "command", "vote", "resync"];
+pub const CLIENT_MSG_TYPES: [&str; 9] = [
+    "claim",
+    "release",
+    "command",
+    "vote",
+    "resync",
+    "lesson_next",
+    "lesson_restart_step",
+    "lesson_restart",
+    "lesson_ui",
+];
 /// `"type"` tags of `LobbyReply`.
-pub const LOBBY_REPLY_TYPES: [&str; 4] = ["games", "layouts", "joined", "error"];
+pub const LOBBY_REPLY_TYPES: [&str; 5] = ["games", "layouts", "joined", "error", "lessons"];
 /// `"type"` tags of `ServerMsg`.
-pub const SERVER_MSG_TYPES: [&str; 4] = ["layout", "view", "delta", "notice"];
+pub const SERVER_MSG_TYPES: [&str; 5] = ["layout", "view", "delta", "notice", "lesson"];
 
 /// Why a text frame could not be read. `code()` is the `error` code the
 /// front answers with.

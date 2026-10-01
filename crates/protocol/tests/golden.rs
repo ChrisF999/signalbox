@@ -357,3 +357,65 @@ fn bad_input_is_an_error_not_a_panic() {
         assert!(serde_json::from_str::<ClientMsg>(text).is_err(), "{text}");
     }
 }
+
+/// Tutorial spec §3: the lesson messages.
+#[test]
+fn lesson_client_messages() {
+    check_client(ClientMsg::LessonNext, json!({"type": "lesson_next"}));
+    check_client(ClientMsg::LessonRestartStep, json!({"type": "lesson_restart_step"}));
+    check_client(ClientMsg::LessonRestart, json!({"type": "lesson_restart"}));
+    check_client(
+        ClientMsg::LessonUi { tab: Some(s("simplifier")), selected: Some(s("39,1V1")) },
+        json!({"type": "lesson_ui", "tab": "simplifier", "selected": "39,1V1"}),
+    );
+    check_client(ClientMsg::LessonUi { tab: None, selected: None }, json!({"type": "lesson_ui"}));
+}
+
+#[test]
+fn lesson_view() {
+    let v = LessonView {
+        lesson: s("02-routes"),
+        title: s("Setting & cancelling routes"),
+        index: 1,
+        count: 10,
+        say: s("Now click H3."),
+        highlight: vec![
+            Highlight::Signal(s("3")),
+            Highlight::Exit(ExitName::Node(s("E"))),
+            Highlight::Points(s("P1")),
+            Highlight::Berth(s("B3")),
+            Highlight::Section(s("T2")),
+            Highlight::Platform { place: s("HXC"), platform: s("2") },
+            Highlight::Ui(s("auto:5")),
+        ],
+        needs_next: false,
+        done: false,
+        alert: Some(s("Restart the step.")),
+    };
+    check_server(
+        ServerMsg::Lesson(v.clone()),
+        json!({"type": "lesson", "lesson": "02-routes", "title": "Setting & cancelling routes", "index": 1, "count": 10,
+               "say": "Now click H3.",
+               "highlight": [{"signal": "3"}, {"exit": {"kind": "node", "name": "E"}}, {"points": "P1"}, {"berth": "B3"},
+                             {"section": "T2"}, {"platform": {"place": "HXC", "platform": "2"}}, {"ui": "auto:5"}],
+               "needs_next": false, "done": false, "alert": "Restart the step."}),
+    );
+    let done = LessonView { index: 10, say: s(""), highlight: vec![], done: true, alert: None, ..v };
+    check_server(
+        ServerMsg::Lesson(done),
+        json!({"type": "lesson", "lesson": "02-routes", "title": "Setting & cancelling routes", "index": 10, "count": 10,
+               "say": "", "highlight": [], "needs_next": false, "done": true}),
+    );
+}
+
+#[test]
+fn a_lesson_without_highlights_still_reads_and_junk_is_an_error() {
+    let ok: ServerMsg = serde_json::from_value(json!({"type": "lesson", "lesson": "x", "title": "X", "index": 0, "count": 1,
+                                                       "say": "Hi", "needs_next": true, "done": false}))
+    .unwrap();
+    let ServerMsg::Lesson(v) = ok else { panic!() };
+    assert!(v.highlight.is_empty() && v.alert.is_none());
+    let bad = json!({"type": "lesson", "lesson": "x", "title": "X", "index": 0, "count": 1, "say": "Hi",
+                     "highlight": [{"teleport": "3"}], "needs_next": true, "done": false});
+    assert!(serde_json::from_value::<ServerMsg>(bad).is_err());
+}

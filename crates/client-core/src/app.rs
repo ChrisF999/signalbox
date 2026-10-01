@@ -333,6 +333,7 @@ impl App {
         match r {
             LobbyReply::Games { games } => self.games = games,
             LobbyReply::Layouts { layouts } => self.layouts = layouts,
+            LobbyReply::Lessons { .. } => {}
             LobbyReply::Joined { game, you } => {
                 self.joining = None;
                 self.me = Some(you.clone());
@@ -386,7 +387,7 @@ impl App {
                 }
             }
             ServerMsg::Layout(_) => g.layout_gen += 1,
-            ServerMsg::View(_) | ServerMsg::Delta(_) => {}
+            ServerMsg::View(_) | ServerMsg::Delta(_) | ServerMsg::Lesson(_) => {}
         }
         let is_layout = matches!(m, ServerMsg::Layout(_));
         let reply = g.bot.receive(m);

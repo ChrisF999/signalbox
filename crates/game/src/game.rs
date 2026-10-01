@@ -380,6 +380,10 @@ impl Game {
             ClientMsg::Command { cmd } => self.command(player, cmd),
             ClientMsg::Vote { proposal } => self.vote(player, proposal),
             ClientMsg::Resync => self.resync(player),
+            // Only a tutorial (`crate::lesson::Runner`) acts on these.
+            ClientMsg::LessonNext | ClientMsg::LessonRestartStep | ClientMsg::LessonRestart | ClientMsg::LessonUi { .. } => {
+                vec![]
+            }
         }
     }
 

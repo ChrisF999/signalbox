@@ -40,6 +40,27 @@ fn lobby_messages() {
         ClientFrame::Lobby(LobbyMsg::DeleteGame { game: s("g-abcdefgh2345") }),
         json!({"type": "delete_game", "game": "g-abcdefgh2345"}),
     );
+    check_client(ClientFrame::Lobby(LobbyMsg::ListLessons), json!({"type": "list_lessons"}));
+    check_client(
+        ClientFrame::Lobby(LobbyMsg::StartLesson { lesson: s("01-reading-the-panel") }),
+        json!({"type": "start_lesson", "lesson": "01-reading-the-panel"}),
+    );
+}
+
+#[test]
+fn the_lessons_list() {
+    check_server(
+        ServerFrame::Lobby(LobbyReply::Lessons {
+            lessons: vec![LessonInfo { id: s("01-reading-the-panel"), title: s("Reading the panel"), steps: 8 }],
+        }),
+        json!({"type": "lessons", "lessons": [{"id": "01-reading-the-panel", "title": "Reading the panel", "steps": 8}]}),
+    );
+    check_server(
+        ServerFrame::error(codes::UNKNOWN_LESSON, "no lesson `x`"),
+        json!({"type": "error", "code": "unknown_lesson", "message": "no lesson `x`"}),
+    );
+    assert_eq!(codes::IN_LESSON, "in_lesson");
+    check_client(ClientFrame::Game(ClientMsg::LessonNext), json!({"type": "lesson_next"}));
 }
 
 #[test]

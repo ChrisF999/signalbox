@@ -3,11 +3,13 @@
 //! small enums are reused as they are; their serde forms are the wire forms.
 
 pub mod diff;
+pub mod lesson;
 pub mod lobby;
 pub mod msg;
 pub mod view;
 
 pub use diff::{SeqGap, diff};
+pub use lesson::{Highlight, LessonInfo, LessonView};
 pub use lobby::{AreaHolder, ClientFrame, FrameError, GameInfo, GameState, LayoutInfo, LobbyMsg, LobbyReply, ServerFrame};
 pub use msg::{ClientMsg, ExitName, Notice, PlayerCommand, Proposal, ServerMsg};
 pub use signalbox_core::aspect::Aspect;
@@ -37,4 +39,8 @@ pub mod codes {
     pub const NOT_ALLOWED: &str = "not_allowed";
     /// `delete_game` for a game that is starting or running.
     pub const GAME_RUNNING: &str = "game_running";
+    /// `start_lesson` naming no lesson the front offers.
+    pub const UNKNOWN_LESSON: &str = "unknown_lesson";
+    /// `claim` or `release` in a tutorial: its player keeps the lesson's area.
+    pub const IN_LESSON: &str = "in_lesson";
 }
