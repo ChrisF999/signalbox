@@ -10,7 +10,7 @@ use protocol::{ClientMsg, Layout, Notice, PlayerCommand, Proposal, Rejection, Se
 use signalbox_core::events::{Command, Event};
 use signalbox_core::ids::AreaId;
 use signalbox_core::robot;
-use signalbox_core::sim::Sim;
+use signalbox_core::sim::{Sim, SimState};
 use signalbox_core::world::{LoadError, World};
 
 use crate::areas::{AreaMap, Visibility};
@@ -83,6 +83,18 @@ pub struct GameStatus {
     pub stats: GameStats,
     /// Wall time spent writing the save so far.
     pub save_busy: Duration,
+}
+
+/// Everything a tutorial's Restart step puts back (tutorial spec §3): the
+/// sim, the clock, the commands queued for the next tick, and whether the
+/// robot already ran at this tick. Players, holders and stats stay as they are.
+#[derive(Clone, Debug)]
+pub struct GameSnapshot {
+    sim: SimState,
+    paused: bool,
+    speed: u8,
+    queued: Vec<(String, Command)>,
+    robot_ran_at: Option<u64>,
 }
 
 struct Player {
@@ -192,6 +204,65 @@ impl Game {
         if let Some(db) = &self.save {
             db.set_creator(user)?;
         }
+        Ok(())
+    }
+
+    /// Whether `player` is connected now.
+    pub fn connected(&self, player: &str) -> bool {
+        self.players.get(player).is_some_and(|p| p.connected)
+    }
+
+    /// Pause or run the clock without a vote (a tutorial's `pause` and
+    /// `run`); any open proposal is dropped.
+    pub fn set_paused(&mut self, paused: bool) {
+        self.clock.paused = paused;
+        self.clock.vote = None;
+    }
+
+    /// Set the speed without a vote (a tutorial's `speed`); `false` for a
+    /// speed that is not 1, 2, 4 or 8.
+    pub fn set_speed(&mut self, x: u8) -> bool {
+        if !crate::clock::SPEEDS.contains(&x) {
+            return false;
+        }
+        self.clock.speed = x;
+        self.clock.vote = None;
+        true
+    }
+
+    /// Offer the world's on-demand entry `entry` now (a tutorial's `spawn`).
+    pub fn offer_entry(&mut self, entry: usize) -> Result<(), String> {
+        self.sim.offer_entry(entry).map(|_| ())
+    }
+
+    /// Queue `cmd` for the next tick whoever holds its subject (a tutorial
+    /// demonstrating). A sim refusal is counted but told to nobody.
+    pub fn demonstrate(&mut self, cmd: &PlayerCommand) -> Result<(), Rejection> {
+        let core = resolve(self.sim.world(), cmd).ok_or(Rejection::UnknownId)?;
+        self.submit(ROBOT, core);
+        Ok(())
+    }
+
+    /// What `restore` puts back.
+    pub fn snapshot(&self) -> GameSnapshot {
+        GameSnapshot {
+            sim: self.sim.snapshot(),
+            paused: self.clock.paused,
+            speed: self.clock.speed,
+            queued: self.queued.clone(),
+            robot_ran_at: self.robot_ran_at,
+        }
+    }
+
+    /// Back to `snap` (taken from this game): the next flush sends every
+    /// player what changed.
+    pub fn restore(&mut self, snap: &GameSnapshot) -> Result<(), GameError> {
+        self.sim = Sim::restore(self.sim.world().clone(), snap.sim.clone()).map_err(GameError::Resume)?;
+        self.clock.paused = snap.paused;
+        self.clock.speed = snap.speed;
+        self.clock.vote = None;
+        self.queued = snap.queued.clone();
+        self.robot_ran_at = snap.robot_ran_at;
         Ok(())
     }
 
@@ -404,13 +475,30 @@ impl Game {
 
     /// Run the clock for `real_dt` seconds of real time.
     pub fn advance(&mut self, real_dt: f64) -> Vec<Out> {
+        self.advance_with(real_dt, |_, _, _| Vec::new())
+    }
+
+    /// `advance`, calling `after_tick` after every tick with that tick's
+    /// events and messages (a tutorial checks its step there). It may change
+    /// the game; once it pauses the clock, no more ticks run.
+    pub fn advance_with(
+        &mut self,
+        real_dt: f64,
+        mut after_tick: impl FnMut(&mut Game, &[Event], &[Out]) -> Vec<Out>,
+    ) -> Vec<Out> {
         let dt = if real_dt.is_finite() && real_dt > 0.0 { real_dt } else { 0.0 };
         let mut out = Vec::new();
         self.clock.lapse(dt);
         self.expire_grace(dt);
         let n = self.clock.ticks_for(dt).min(MAX_TICKS_PER_ADVANCE);
         for _ in 0..n {
-            out.extend(self.tick());
+            if self.clock.paused {
+                break;
+            }
+            let (outs, events) = self.tick();
+            let more = after_tick(self, &events, &outs);
+            out.extend(outs);
+            out.extend(more);
         }
         if self.save.is_some() && !self.clock.paused {
             self.since_snapshot_s += dt;
@@ -588,7 +676,7 @@ impl Game {
         out
     }
 
-    fn tick(&mut self) -> Vec<Out> {
+    fn tick(&mut self) -> (Vec<Out>, Vec<Event>) {
         let mut out = Vec::new();
         let t = self.sim.tick();
         if t % robot::ROBOT_EVERY_TICKS == 0 && self.robot_ran_at != Some(t) {
@@ -624,6 +712,6 @@ impl Game {
                 }
             }
         }
-        out
+        (out, events)
     }
 }

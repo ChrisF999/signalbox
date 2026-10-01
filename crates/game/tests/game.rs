@@ -483,3 +483,58 @@ fn every_client_rebuilds_the_servers_view_from_deltas() {
     assert!(st.player_commands > 0, "{st:?}");
     assert_eq!((st.spads, st.collisions, st.invariant_violations), (0, 0, 0), "{st:?}");
 }
+
+// ---- what tutorials use (tutorial spec §3) ----
+
+#[test]
+fn advance_with_sees_every_tick_and_stops_once_paused() {
+    let mut g = game();
+    join(&mut g, "alice", Some("West"));
+    g.set_speed(8);
+    let mut ticks = Vec::new();
+    g.advance_with(1.0, |g, _, _| {
+        ticks.push(g.sim().tick());
+        if ticks.len() == 3 {
+            g.set_paused(true);
+        }
+        vec![]
+    });
+    assert_eq!(ticks, [1, 2, 3], "80 ticks were due; the pause stopped them after 3");
+    assert!(g.clock().paused);
+    assert!(!g.set_speed(3), "only 1, 2, 4 or 8");
+    assert_eq!(g.clock().speed, 8);
+}
+
+#[test]
+fn a_snapshot_puts_the_sim_and_the_clock_back() {
+    let mut g = game();
+    join(&mut g, "alice", Some("West"));
+    let snap = g.snapshot();
+    let t0 = g.sim().now_s();
+    command(&mut g, "alice", set_route("W1", ExitName::Signal(s("A"))));
+    g.advance(30.0);
+    g.flush();
+    g.set_speed(4);
+    assert!(g.sim().interlocking().active_route_from(g.sim().world(), g.sim().world().net.signal("W1").unwrap()).is_some());
+    g.restore(&snap).unwrap();
+    assert_eq!(g.sim().now_s(), t0);
+    assert_eq!(g.clock().speed, 1);
+    assert!(g.sim().interlocking().active_route_from(g.sim().world(), g.sim().world().net.signal("W1").unwrap()).is_none());
+    assert_eq!(g.area_of("alice"), Some("West"), "players and holders stay");
+    let out = g.flush();
+    assert!(out.iter().any(|(p, m)| p == "alice" && matches!(m, ServerMsg::Delta(_))), "the change goes out as a delta");
+}
+
+#[test]
+fn a_demonstration_acts_in_any_area_and_tells_nobody() {
+    let mut g = game();
+    join(&mut g, "alice", Some("West"));
+    g.demonstrate(&set_route("C", ExitName::Signal(s("W2")))).unwrap();
+    g.demonstrate(&PlayerCommand::CancelRoute { entrance: s("W1") }).unwrap();
+    assert_eq!(g.demonstrate(&set_route("Nope", ExitName::Signal(s("W2")))), Err(Rejection::UnknownId));
+    let out = g.advance(0.1);
+    assert!(notices(&out, "alice").is_empty(), "the refused cancel is told to nobody");
+    let w = g.sim().world();
+    assert!(g.sim().interlocking().active_route_from(w, w.net.signal("C").unwrap()).is_some(), "East's route, while alice holds West");
+    assert_eq!(g.stats().sim_rejections, 1);
+}
