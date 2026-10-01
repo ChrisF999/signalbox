@@ -51,6 +51,14 @@ const SIDE_W: f32 = SIMPLIFIER_WIDTH + 24.0;
 /// `8×`) and the pause/resume button.
 const CLOCK_STATE_W: f32 = 52.0;
 const PAUSE_W: f32 = 64.0;
+/// "Release area" and its Cancel share this width, so a double-click on the
+/// one never lands on "Yes, release" (polish spec M10); the confirm's own
+/// slot keeps Settings and Fit from shifting while it shows.
+const RELEASE_W: f32 = 88.0;
+const CONFIRM_W: f32 = 96.0;
+/// Below this width the buttons wrap onto a row of their own rather than
+/// draw over the clock.
+const BAR_WRAP_W: f32 = 1000.0;
 /// The lobby's layout list, wide enough for every name, so Create never moves.
 const LAYOUT_COMBO_W: f32 = 180.0;
 /// Repaint at least this often (ms): clocks, flashing, reconnect timers.
@@ -227,6 +235,7 @@ impl UiApp {
             self.search.clear();
             self.simplifier_lines = None;
             self.shown_game = game;
+            self.confirm_release = false;
         }
         if let Some(b) = self.core.banner() {
             egui::Panel::top("banner").show(ui, |ui| {
@@ -421,6 +430,43 @@ impl UiApp {
         let mut settings = self.settings;
         let mut confirm_release = self.confirm_release && holding;
         let mut refit = false;
+        let buttons = |ui: &mut Ui, act: &mut Vec<Box<dyn FnOnce(&mut App)>>, settings: &mut Settings, confirm_release: &mut bool, refit: &mut bool| {
+                if ui.button("Leave").clicked() {
+                    act.push(Box::new(|a| a.leave()));
+                }
+                // A tutorial's player keeps the lesson's area. Releasing
+                // asks first (polish spec M10).
+                if holding && !lesson {
+                    if *confirm_release {
+                        if ui.add_sized([RELEASE_W, 18.0], egui::Button::new("Cancel")).clicked() {
+                            *confirm_release = false;
+                        }
+                        let yes = egui::Button::new(RichText::new("Yes, release").color(ALARM));
+                        if ui.add_sized([CONFIRM_W, 18.0], yes).clicked() {
+                            *confirm_release = false;
+                            act.push(Box::new(|a| a.release()));
+                        }
+                    } else {
+                        if ui.add_sized([RELEASE_W, 18.0], egui::Button::new("Release area")).clicked() {
+                            *confirm_release = true;
+                        }
+                        ui.add_space(CONFIRM_W + ui.spacing().item_spacing.x);
+                    }
+                }
+                let menu = ui.menu_button("Settings", |ui| {
+                    ui.label(RichText::new("Signal aspects").strong());
+                    ui.radio_value(&mut settings.aspects, AspectMode::RedGreen, "Red/green (panel)");
+                    ui.radio_value(&mut settings.aspects, AspectMode::Real, "Real aspects");
+                    ui.separator();
+                    ui.checkbox(&mut settings.enquiry, "Headcode enquiry");
+                    ui.checkbox(&mut settings.numbers, "Signal numbers");
+                });
+                mark(ui, &menu.response, marked("settings"), now);
+                if ui.button("Fit").clicked() {
+                    *refit = true;
+                }
+        };
+        let narrow = ui.available_width() < BAR_WRAP_W;
         egui::Panel::top("bar").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(title).strong());
@@ -453,39 +499,17 @@ impl UiApp {
                         ui.label(format!("Penalty {score}"));
                     }
                 }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button("Leave").clicked() {
-                        act.push(Box::new(|a| a.leave()));
-                    }
-                    // A tutorial's player keeps the lesson's area. Releasing
-                    // asks first (polish spec M10).
-                    if holding && !lesson {
-                        if confirm_release {
-                            if ui.button("Cancel").clicked() {
-                                confirm_release = false;
-                            }
-                            if ui.button(RichText::new("Yes, release").color(ALARM)).clicked() {
-                                confirm_release = false;
-                                act.push(Box::new(|a| a.release()));
-                            }
-                        } else if ui.button("Release area").clicked() {
-                            confirm_release = true;
-                        }
-                    }
-                    let menu = ui.menu_button("Settings", |ui| {
-                        ui.label(RichText::new("Signal aspects").strong());
-                        ui.radio_value(&mut settings.aspects, AspectMode::RedGreen, "Red/green (panel)");
-                        ui.radio_value(&mut settings.aspects, AspectMode::Real, "Real aspects");
-                        ui.separator();
-                        ui.checkbox(&mut settings.enquiry, "Headcode enquiry");
-                        ui.checkbox(&mut settings.numbers, "Signal numbers");
-                    });
-                    mark(ui, &menu.response, marked("settings"), now);
-                    if ui.button("Fit").clicked() {
-                        refit = true;
-                    }
-                });
+                if !narrow {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| buttons(ui, &mut act, &mut settings, &mut confirm_release, &mut refit));
+                }
             });
+            if narrow {
+                ui.horizontal(|ui| {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        buttons(ui, &mut act, &mut settings, &mut confirm_release, &mut refit)
+                    });
+                });
+            }
             ui.horizontal_wrapped(|ui| {
                 match view.as_ref().and_then(|v| v.vote.as_ref()) {
                     Some(vote) => {

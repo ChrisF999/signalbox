@@ -70,9 +70,14 @@ impl Rig {
 
     /// One frame of 0.1 s; the game runs alongside and answers.
     fn frame(&mut self) -> FullOutput {
+        self.frame_at(1280.0)
+    }
+
+    /// A frame in a window `width` points wide.
+    fn frame_at(&mut self, width: f32) -> FullOutput {
         self.t += 0.1;
         let input = RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 800.0))),
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(width, 800.0))),
             time: Some(self.t),
             events: std::mem::take(&mut self.events),
             ..RawInput::default()
@@ -927,8 +932,7 @@ fn text_at(out: &FullOutput, want: &str) -> Rect {
     texts(out).into_iter().find(|(t, _)| t == want).unwrap_or_else(|| panic!("no {want:?} in {:?}", texts(out))).1
 }
 
-/// Polish spec M5: the bar's buttons stay put while a vote opens, the
-/// clock pauses and the title changes; the pause button keeps its place.
+/// Polish spec M5: the bar's buttons stay put while a vote opens and the clock pauses; the pause button keeps its place.
 #[test]
 fn the_top_bar_does_not_move_under_the_pointer() {
     let mut r = Rig::in_game(drawn_twobox(), Some("West"));
@@ -973,4 +977,64 @@ fn releasing_an_area_asks_first() {
         r.frame();
     }
     assert_eq!(r.ui.core.game().unwrap().area(), None);
+}
+
+/// Review of task 13: a double-click on "Release area" must not reach
+/// "Yes, release", and the buttons beside it stay put while it asks.
+#[test]
+fn the_confirm_never_lies_under_the_release_button() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    let out = r.frame();
+    let (release, fit, settings) = (text_at(&out, "Release area"), text_at(&out, "Fit"), text_at(&out, "Settings"));
+    click_text(&mut r, &out, "Release area");
+    let out = r.frame();
+    let (yes, cancel) = (text_at(&out, "Yes, release"), text_at(&out, "Cancel"));
+    assert!(!yes.expand(8.0).intersects(release.expand(8.0)), "{yes:?} over {release:?}");
+    assert!((cancel.center().x - release.center().x).abs() < 1.0, "Cancel takes the slot");
+    assert_eq!((text_at(&out, "Fit"), text_at(&out, "Settings")), (fit, settings), "nothing shifts");
+}
+
+/// Leaving with the confirm showing does not leave it for the next game.
+#[test]
+fn a_pending_release_confirm_does_not_follow_to_the_next_game() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    let out = r.frame();
+    click_text(&mut r, &out, "Release area");
+    let out = r.frame();
+    click_text(&mut r, &out, "Leave");
+    for _ in 0..3 {
+        r.frame();
+    }
+    r.h.push(ServerFrame::Lobby(LobbyReply::Joined { game: s("g-two"), you: s("ann") }));
+    for (_, m) in r.game.connect("ann") {
+        r.h.push(ServerFrame::Game(m));
+    }
+    for _ in 0..3 {
+        r.frame();
+    }
+    r.game.handle("ann", ClientMsg::Claim { area: s("West") });
+    for _ in 0..3 {
+        r.frame();
+    }
+    let out = r.frame();
+    assert!(has_text(&out, "Release area"), "{:?}", texts(&out));
+    assert!(!has_text(&out, "Yes, release"));
+}
+
+/// Narrow windows (1024 and 800 pt): the buttons wrap below instead of drawing over the clock.
+#[test]
+fn a_narrow_top_bar_wraps_its_buttons_clear_of_the_clock() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    for width in [1024.0, 800.0] {
+        r.frame_at(width);
+        let out = r.frame_at(width);
+        let clock = texts(&out).into_iter().find(|(t, _)| t.contains(':') && t.len() == 8).expect("clock").1;
+        for b in ["Fit", "Settings", "Release area", "Leave"] {
+            let at = text_at(&out, b);
+            for left in ["Penalty 0", "pause", "8×"] {
+                assert!(!at.intersects(text_at(&out, left)), "{width}: {b} {at:?} over {left}");
+            }
+            assert!(!at.intersects(clock) && at.min.x >= 0.0 && at.max.x <= width, "{width}: {b} {at:?} vs clock {clock:?}");
+        }
+    }
 }
