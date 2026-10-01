@@ -200,7 +200,10 @@ output is byte-identical for the same input.
   moments; the owner accepted that). Every command is logged before
   `sim.submit`; a robot run's commands are one transaction
   (`SaveDb::begin_batch`/`commit_batch`) committed before the sim steps
-  with them, so a resume replays exactly what was committed.
+  with them, so a resume replays exactly what was committed. A run is
+  saved whole or not at all (SQLite may roll a transaction back by itself
+  on a full disk): with no robot rows at a tick, a resume runs the robot
+  there again. Any command the log lost makes the tick end with a snapshot.
 
 ### Server (`ipc`, `server`)
 - `signalbox-game` (`server::process`) wraps one `Game`: `Shell` is the sync

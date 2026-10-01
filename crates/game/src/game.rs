@@ -135,6 +135,9 @@ pub struct Game {
     last_snapshot: Option<u64>,
     /// Save failures not yet taken by the caller.
     save_errors: Vec<String>,
+    /// A command was submitted that the log does not hold: snapshot after
+    /// the next step.
+    log_lost: bool,
 }
 
 fn error(player: &str, code: &str, message: &str) -> Out {
@@ -355,6 +358,7 @@ impl Game {
             since_snapshot_s: 0.0,
             last_snapshot: None,
             save_errors: Vec::new(),
+            log_lost: false,
         }
     }
 
@@ -636,15 +640,24 @@ impl Game {
     /// `player` is `ROBOT` for the robot.
     fn submit(&mut self, player: &str, cmd: Command) -> Vec<Out> {
         let mut out = Vec::new();
-        if let Some(db) = &self.save {
-            let area = self.map.subject(&cmd).map(|a| self.area_name(a)).unwrap_or_default();
-            if let Err(e) = db.append_command(self.sim.tick(), player, &area, &cmd) {
-                out = self.save_failed(&e.to_string());
-            }
+        if let Err(e) = self.log_command(player, &cmd) {
+            self.log_lost = true;
+            out = self.save_failed(&e.to_string());
         }
+        self.enqueue(player, cmd);
+        out
+    }
+
+    /// Append `cmd` to the save's command log (nothing without a save).
+    fn log_command(&self, player: &str, cmd: &Command) -> Result<(), SaveError> {
+        let Some(db) = &self.save else { return Ok(()) };
+        let area = self.map.subject(cmd).map(|a| self.area_name(a)).unwrap_or_default();
+        db.append_command(self.sim.tick(), player, &area, cmd)
+    }
+
+    fn enqueue(&mut self, player: &str, cmd: Command) {
         self.queued.push((player.to_string(), cmd.clone()));
         self.sim.submit(cmd);
-        out
     }
 
     fn expire_grace(&mut self, dt: f64) {
@@ -670,6 +683,14 @@ impl Game {
 
     /// The robot's commands for areas nobody holds, logged in one
     /// transaction that is committed before the sim steps with them.
+    ///
+    /// A run is saved whole or not at all. If any part of its log fails
+    /// (SQLite may have rolled the whole transaction back by itself), the
+    /// rest of the run is not logged and the batch is dropped: with no
+    /// robot rows at this tick a resume runs the robot here again and gets
+    /// the same commands. One `save_failed` names the run, and the tick
+    /// ends with a snapshot (`log_lost`) so later logged commands do not
+    /// replay over the gap.
     fn run_robot(&mut self) -> Vec<Out> {
         let mut out = Vec::new();
         let cmds: Vec<Command> = robot::commands(&self.sim)
@@ -679,22 +700,23 @@ impl Game {
         if cmds.is_empty() {
             return out;
         }
-        // Without a batch each append is its own transaction, as before.
-        let batch = match self.save.as_ref().map(SaveDb::begin_batch) {
-            Some(Err(e)) => {
-                out.extend(self.save_failed(&e.to_string()));
-                false
-            }
-            Some(Ok(())) => true,
-            None => false,
-        };
+        let tick = self.sim.tick();
+        let mut failed: Option<SaveError> = self.save.as_ref().and_then(|db| db.begin_batch().err());
         for cmd in cmds {
             self.stats.robot_commands += 1;
-            out.extend(self.submit(ROBOT, cmd));
+            if failed.is_none() {
+                failed = self.log_command(ROBOT, &cmd).err();
+            }
+            self.enqueue(ROBOT, cmd);
         }
-        if batch {
-            if let Err(e) = self.save.as_ref().expect("a batch was begun").commit_batch() {
-                out.extend(self.save_failed(&e.to_string()));
+        if let Some(db) = &self.save {
+            let result = match failed {
+                Some(e) => db.rollback_batch().and(Err(e)),
+                None => db.commit_batch(),
+            };
+            if let Err(e) = result {
+                self.log_lost = true;
+                out.extend(self.save_failed(&format!("robot run at tick {tick} not saved: {e}")));
             }
         }
         out
@@ -709,6 +731,11 @@ impl Game {
         let before = self.sim.describer().berths.clone();
         let queued = std::mem::take(&mut self.queued);
         let events = self.sim.step();
+        // A command the log lost ran anyway: a snapshot now holds it, so a
+        // resume does not replay later commands over the gap.
+        if std::mem::take(&mut self.log_lost) {
+            out.extend(self.save_now());
+        }
         let mut cursor = 0;
         for e in &events {
             match e {

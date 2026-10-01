@@ -217,16 +217,42 @@ impl SaveDb {
     /// written in one transaction (all of one robot run). Until then no
     /// other connection sees them, and a crash loses them all, which is
     /// safe as long as the sim has not stepped with them: commit before it
-    /// does.
+    /// does. A transaction an earlier failure left open is rolled back
+    /// first (it was reported then), so it cannot swallow later appends.
     pub fn begin_batch(&self) -> Result<(), SaveError> {
-        self.timed(|| Ok(self.conn.execute_batch("BEGIN")?))
+        self.timed(|| {
+            if !self.conn.is_autocommit() {
+                self.conn.execute_batch("ROLLBACK")?;
+            }
+            Ok(self.conn.execute_batch("BEGIN")?)
+        })
     }
 
-    /// Write the batch. On failure it is rolled back (its commands are not
-    /// logged, as if each append had failed) and the connection is back to
-    /// one transaction per statement.
+    /// Whether a batch is open. SQLite ends a transaction by itself on
+    /// some errors (a full disk, an I/O error): after a failed append this
+    /// says whether the batch's earlier appends are still there.
+    pub fn in_batch(&self) -> bool {
+        !self.conn.is_autocommit()
+    }
+
+    /// Throw the open batch away, if there is one.
+    pub fn rollback_batch(&self) -> Result<(), SaveError> {
+        self.timed(|| {
+            if !self.conn.is_autocommit() {
+                self.conn.execute_batch("ROLLBACK")?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Write the batch. On failure it is rolled back (none of its commands
+    /// are logged) and the connection is back to one transaction per
+    /// statement. An error too if no batch is open (SQLite rolled it back).
     pub fn commit_batch(&self) -> Result<(), SaveError> {
         self.timed(|| {
+            if self.conn.is_autocommit() {
+                return Err(SaveError::Bad("no batch is open (SQLite rolled it back)".into()));
+            }
             let r = self.conn.execute_batch("COMMIT");
             if r.is_err() && !self.conn.is_autocommit() {
                 let _ = self.conn.execute_batch("ROLLBACK");

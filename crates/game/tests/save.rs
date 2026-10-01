@@ -436,37 +436,109 @@ fn a_crash_in_the_middle_of_a_batch_resumes_at_the_last_commit() {
     assert_eq!(resumed.sim().state_hash(), reference.sim().state_hash());
 }
 
-/// Appends that fail in the middle of a robot run are save failures for
-/// those commands only: what was appended before them is committed, and a
-/// resume replays exactly the committed rows.
+/// Make the second robot insert at tick 10 fail: `ABORT` fails the
+/// statement and keeps the transaction, `ROLLBACK` throws the whole
+/// transaction away, as SQLite does itself on a full disk or an I/O error.
+fn fail_second_robot_insert(path: &Path, how: &str) {
+    let sql = format!(
+        "CREATE TRIGGER fail BEFORE INSERT ON commands \
+         WHEN NEW.tick = 10 AND EXISTS (SELECT 1 FROM commands WHERE tick = 10) \
+         BEGIN SELECT RAISE({how}, 'injected'); END"
+    );
+    open(path).execute(&sql, []).unwrap();
+}
+
+/// A robot run whose log fails part way, however SQLite fails it, is not
+/// saved at all (no partial rows at its tick), is one error, and is covered
+/// by a snapshot straight after the tick. Resumed, the game is exactly what
+/// the clients saw.
 #[test]
-fn a_failed_append_in_a_batch_keeps_the_rest_of_it() {
-    let path = temp_save("batch-fail");
+fn a_robot_run_that_fails_part_way_is_not_saved_and_a_snapshot_covers_it() {
+    for how in ["ABORT", "ROLLBACK"] {
+        let path = temp_save(&format!("batch-fail-{how}"));
+        let mut reference = game();
+        run_to_tick(&mut reference, 3000);
+        let mut saved = Game::create(&path, &twobox_json(), meta()).unwrap();
+        run_to_tick(&mut saved, 9);
+        fail_second_robot_insert(&path, how);
+        run_to_tick(&mut saved, 11);
+        let robot = saved.stats().robot_commands;
+        assert!(robot >= 2, "the robot sends several commands at tick 10: {robot}");
+        let errors = saved.take_save_errors();
+        assert_eq!(errors.len(), 1, "{how}: one error for the run: {errors:?}");
+        assert!(errors[0].contains("robot run at tick 10 not saved") && errors[0].contains("injected"), "{errors:?}");
+        assert_eq!(count_commands(&path, "tick = 10"), 0, "{how}: no partial run");
+        assert_eq!(saved.sim().log().len(), robot, "every command still ran");
+        assert_eq!(snapshot_ticks(&path), [0, 11], "{how}: the snapshot after the tick covers the run");
+        open(&path).execute("DROP TRIGGER fail", []).unwrap();
+        // Logged after the snapshot: replayed on resume.
+        run_to_tick(&mut saved, 25);
+        drop(saved);
+
+        let mut resumed = Game::resume(&path).unwrap();
+        assert!(resumed.sim().tick() >= 11, "{how}: {}", resumed.sim().tick());
+        unpause(&mut resumed);
+        run_to_tick(&mut resumed, 3000);
+        assert_eq!(resumed.sim().state_hash(), reference.sim().state_hash(), "{how}");
+    }
+}
+
+/// The run is lost and so is the snapshot that should cover it (the disk
+/// is still full), and then the process dies: with no robot rows at tick 10
+/// the resumed game runs the robot there again and plays exactly what the
+/// clients saw.
+#[test]
+fn a_lost_robot_run_with_no_snapshot_after_it_is_run_again_on_resume() {
+    let path = temp_save("batch-lost");
+    let mut reference = game();
+    run_to_tick(&mut reference, 3000);
     let mut saved = Game::create(&path, &twobox_json(), meta()).unwrap();
     run_to_tick(&mut saved, 9);
-    let fail = "CREATE TRIGGER fail BEFORE INSERT ON commands \
-                WHEN NEW.tick = 10 AND EXISTS (SELECT 1 FROM commands WHERE tick = 10) \
-                BEGIN SELECT RAISE(ABORT, 'injected'); END";
-    open(&path).execute(fail, []).unwrap();
+    fail_second_robot_insert(&path, "ROLLBACK");
+    let no_snapshots = "CREATE TRIGGER nosnap BEFORE INSERT ON snapshots BEGIN SELECT RAISE(ABORT, 'disk full'); END";
+    open(&path).execute(no_snapshots, []).unwrap();
     run_to_tick(&mut saved, 11);
-    let robot = saved.stats().robot_commands;
-    assert!(robot >= 2, "the robot sends several commands at tick 10: {robot}");
     let errors = saved.take_save_errors();
-    assert_eq!(errors.len(), robot - 1, "all but the first: {errors:?}");
-    assert!(errors.iter().all(|e| e.contains("injected")), "{errors:?}");
-    assert_eq!(count_commands(&path, "tick = 10"), 1);
-    assert_eq!(saved.sim().log().len(), robot, "every command still ran");
-    open(&path).execute("DROP TRIGGER fail", []).unwrap();
-    let committed: Vec<Command> = {
-        let c = open(&path);
-        let mut st = c.prepare("SELECT command FROM commands WHERE tick = 10 ORDER BY seq").unwrap();
-        st.query_map([], |r| r.get::<_, String>(0)).unwrap().map(|j| serde_json::from_str(&j.unwrap()).unwrap()).collect()
-    };
+    assert_eq!(errors.len(), 2, "the run, then the snapshot: {errors:?}");
+    assert!(errors[0].contains("robot run at tick 10 not saved"), "{errors:?}");
+    assert_eq!(count_commands(&path, "tick = 10"), 0);
+    assert_eq!(snapshot_ticks(&path), [0]);
+    let seen: Vec<(u64, Command)> = saved.sim().log().to_vec();
     drop(saved);
+    let c = open(&path);
+    c.execute("DROP TRIGGER fail", []).unwrap();
+    c.execute("DROP TRIGGER nosnap", []).unwrap();
+    drop(c);
 
-    let resumed = Game::resume(&path).unwrap();
-    assert_eq!(resumed.sim().tick(), 10);
-    assert_eq!(resumed.sim().snapshot().queue, committed);
+    let mut resumed = Game::resume(&path).unwrap();
+    unpause(&mut resumed);
+    run_to_tick(&mut resumed, 11);
+    assert_eq!(resumed.sim().log(), &seen[..], "the same robot run, at the same tick");
+    run_to_tick(&mut resumed, 3000);
+    assert_eq!(resumed.sim().state_hash(), reference.sim().state_hash());
+}
+
+/// A transaction an earlier failure left open is closed before the next
+/// batch begins, so later appends are not held back in it.
+#[test]
+fn a_new_batch_closes_a_transaction_left_open() {
+    let path = temp_save("batch-stray");
+    let db = SaveDb::create(&path, &meta(), &twobox_json()).unwrap();
+    let cmd = resolve(&twobox(), &set_route("W1", ExitName::Signal(s("A")))).unwrap();
+    db.begin_batch().unwrap();
+    db.append_command(10, ROBOT, "West", &cmd).unwrap();
+    assert!(db.in_batch());
+    // As if its COMMIT and ROLLBACK had both failed.
+    db.begin_batch().unwrap();
+    db.append_command(20, ROBOT, "West", &cmd).unwrap();
+    db.commit_batch().unwrap();
+    assert!(!db.in_batch());
+    assert_eq!(count_commands(&path, "tick = 10"), 0, "the stray transaction was never committed");
+    assert_eq!(count_commands(&path, "tick = 20"), 1);
+    db.append_command(21, "alice", "West", &cmd).unwrap();
+    assert_eq!(count_commands(&path, "tick = 21"), 1, "single appends commit at once again");
+    let err = db.commit_batch().unwrap_err();
+    assert!(err.to_string().contains("no batch"), "{err}");
 }
 
 #[test]
