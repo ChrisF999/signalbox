@@ -12,8 +12,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use game::ROBOT;
@@ -129,6 +129,8 @@ pub struct Supervisor {
     next_conn: AtomicU64,
     /// Added to every games-list scan for a push (tests: a slow disk).
     scan_delay_ms: AtomicU64,
+    /// The next games-list scan for a push panics (tests).
+    scan_panics: AtomicBool,
 }
 
 fn frame(msg: LobbyReply) -> ServerFrame {
@@ -240,7 +242,8 @@ impl Supervisor {
         sweep_half_built(&cfg.saves_dir);
         let state = Mutex::new(State::default());
         let (next_conn, scan_delay_ms) = (AtomicU64::new(0), AtomicU64::new(0));
-        Ok(Arc::new(Supervisor { cfg, layouts, lessons, state, next_conn, scan_delay_ms }))
+        let scan_panics = AtomicBool::new(false);
+        Ok(Arc::new(Supervisor { cfg, layouts, lessons, state, next_conn, scan_delay_ms, scan_panics }))
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -614,6 +617,11 @@ impl Supervisor {
         self.scan_delay_ms.store(d.as_millis() as u64, Ordering::Relaxed);
     }
 
+    /// Tests: the next games-list scan for a push panics.
+    pub fn panic_next_games_scan(&self) {
+        self.scan_panics.store(true, Ordering::Relaxed);
+    }
+
     /// No games-list push is being built or waiting to be.
     pub fn games_pushes_settled(&self) -> bool {
         let st = self.lock();
@@ -647,7 +655,29 @@ impl Supervisor {
         tokio::task::spawn_blocking(move || sup.push_games_while_due());
     }
 
-    fn push_games_while_due(&self) {
+    fn push_games_while_due(self: Arc<Self>) {
+        // A build that panics must not leave `scanning` set, or no list
+        // would be pushed again: the guard clears it on the way out, and
+        // starts the push asked for meanwhile, if any.
+        struct Unwinding(Arc<Supervisor>);
+        impl Drop for Unwinding {
+            fn drop(&mut self) {
+                if !std::thread::panicking() {
+                    return;
+                }
+                let mut st = self.0.state.lock().unwrap_or_else(PoisonError::into_inner);
+                st.scanning = false;
+                if let Some(to) = st.push_due.take() {
+                    drop(st);
+                    if tokio::runtime::Handle::try_current().is_ok() {
+                        self.0.push_games(to);
+                    } else {
+                        self.0.state.lock().unwrap_or_else(PoisonError::into_inner).push_due = Some(to);
+                    }
+                }
+            }
+        }
+        let _unwinding = Unwinding(self.clone());
         let to_whom = |to: Audience, c: &Client| to == Audience::Everyone || c.game.is_none();
         loop {
             let to = {
@@ -664,6 +694,9 @@ impl Supervisor {
                 to
             };
             std::thread::sleep(Duration::from_millis(self.scan_delay_ms.load(Ordering::Relaxed)));
+            if self.scan_panics.swap(false, Ordering::Relaxed) {
+                panic!("a games-list scan panicked (test)");
+            }
             let games = self.list_games();
             let st = self.lock();
             for (user, c) in st.clients.iter().filter(|(_, c)| to_whom(to, c)) {

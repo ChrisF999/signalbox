@@ -269,7 +269,8 @@ output is byte-identical for the same input.
   when nobody is in the lobby (no save is read then). A game starting or stopping being prepared still goes to
   everyone (`broadcast_games`). Every pushed list is built on a blocking thread (`push_games`; the front's runtime
   is single-threaded, so a save scan inline would stall every game): one build at a time, and whatever asks
-  meanwhile shares one more. Tests: `slow_games_scans`, `games_pushes_settled`. The client's Leave releases a held
+  meanwhile shares one more; a build that panics clears the flag and still starts the one asked for meanwhile.
+  Tests: `slow_games_scans`, `panic_next_games_scan`, `games_pushes_settled`. The client's Leave releases a held
   area first (not in a tutorial).
 - Login is `server::oidc` (openidconnect: code flow, PKCE, nonce, one-shot state
   plus a signed login cookie); `admit` requires `groups` ∋ `signalbox-users`.

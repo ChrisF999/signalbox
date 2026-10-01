@@ -753,7 +753,9 @@ async fn games_list(sock: &Sock) -> Vec<GameInfo> {
 /// The games list as `sock` asks for it now. Lists pushed as games changed
 /// (polish spec M9) may be waiting or still being built: once no push is
 /// pending, everything before a `layouts` marker is dropped, so the list read
-/// is this request's answer or a push built after it.
+/// is this request's answer or a push whose build started after the pushes
+/// had settled (one a status started meanwhile can land just before the
+/// answer, a moment older than it; the tests here do not depend on that).
 async fn listed(rig: &Rig, sock: &Sock) -> Vec<GameInfo> {
     for _ in 0..1000 {
         if rig.sup.games_pushes_settled() {
@@ -1528,4 +1530,39 @@ async fn a_burst_of_changes_shares_one_more_scan() {
     assert_eq!(lists.len(), 2, "the first scan and one more: {lists:?}");
     assert!(lists[1].0 - lists[0].0 >= Duration::from_millis(900), "one scan at a time");
     assert!(lists[1].1.is_empty(), "the last list is current: {:?}", lists[1].1);
+}
+
+/// Review I1: a list build that panics does not stop later pushes, and a
+/// change asked for while it ran is still pushed.
+#[tokio::test]
+async fn a_games_list_build_that_panics_does_not_stop_the_pushes() {
+    let rig = rig("lobbypanic", 600);
+    let bad: Vec<String> = ["a", "b", "d"].iter().map(|c| format!("g-cccccccccc{c}{c}")).collect();
+    for id in &bad {
+        std::fs::write(rig.saves().join(format!("{id}.sqlite")), "this is not a database").unwrap();
+    }
+    let cat = rig.attach("cat");
+    let root = rig.attach("root");
+    let ids = |f: &ServerFrame| match f {
+        ServerFrame::Lobby(LobbyReply::Games { games }) => Some(games.iter().map(|g| g.id.clone()).collect::<Vec<_>>()),
+        _ => None,
+    };
+    rig.sup.slow_games_scans(Duration::from_secs(1));
+    rig.sup.panic_next_games_scan();
+    // This build panics; the second delete comes while it runs.
+    rig.lobby(&root, LobbyMsg::DeleteGame { game: bad[0].clone() });
+    sleep(Duration::from_millis(300)).await;
+    rig.lobby(&root, LobbyMsg::DeleteGame { game: bad[1].clone() });
+    let got = until(&cat, |f| ids(f).is_some()).await;
+    assert_eq!(ids(got.last().unwrap()), Some(vec![bad[2].clone()]), "the change asked for meanwhile");
+    for _ in 0..500 {
+        if rig.sup.games_pushes_settled() {
+            break;
+        }
+        sleep(Duration::from_millis(10)).await;
+    }
+    assert!(rig.sup.games_pushes_settled());
+    rig.lobby(&root, LobbyMsg::DeleteGame { game: bad[2].clone() });
+    let got = until(&cat, |f| ids(f).is_some()).await;
+    assert_eq!(ids(got.last().unwrap()), Some(vec![]), "a later change");
 }
