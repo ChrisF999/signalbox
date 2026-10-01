@@ -6,7 +6,7 @@ mod common;
 use client_core::{App, AspectMode, MemHandle, MemStore, MemTransport};
 use client_ui::UiApp;
 use common::*;
-use egui::{Event, FullOutput, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, Shape, pos2, vec2};
+use egui::{Event, FullOutput, Key, Modifiers, MouseWheelUnit, PointerButton, Pos2, RawInput, Rect, Shape, TouchPhase, pos2, vec2};
 use game::{Game, GameMeta};
 use protocol::*;
 
@@ -511,4 +511,171 @@ fn a_headcode_in_the_train_list_opens_the_enquiry() {
     let out = r.frame();
     assert!(has_text(&out, "Train 1E01"), "{:?}", texts(&out));
     assert!(has_text(&out, "EST to EST") && has_text(&out, "EST 1 07:04 07:05"), "East's simplifier row");
+}
+
+// ---- fix round 1: per-game state, the simplifier's cache and scroll, the enquiry's ways out ----
+
+/// A store with the enquiry already on.
+fn enquiry_on() -> MemStore {
+    let store = MemStore::new();
+    let mut w = store.clone();
+    client_core::SettingsStore::save(&mut w, "enquiry=on");
+    store
+}
+
+/// Click 1E01 in the train list (the TRAINS tab showing).
+fn open_1e01_from_the_train_list(r: &mut Rig) {
+    let out = r.frame();
+    let right = r.ui.diagram_rect().unwrap().max.x;
+    let at = texts(&out).into_iter().find(|(t, at)| t == "1E01" && at.min.x >= right).expect("1E01 in the train list").1.center();
+    r.click(at, PointerButton::Primary);
+}
+
+/// Open the Settings menu and click `item` in it.
+fn settings_item(r: &mut Rig, item: &str) {
+    let out = r.frame();
+    click_text(r, &out, "Settings");
+    let out = r.frame();
+    click_text(r, &out, item);
+}
+
+/// Where the open enquiry window's close button (an X of two diagonal
+/// lines in its title bar) is drawn.
+fn enquiry_close_button(r: &Rig, out: &FullOutput) -> Pos2 {
+    let win = r.ctx.memory(|m| m.area_rect(egui::Id::new("enquiry"))).expect("the enquiry window is open");
+    let title = Rect::from_min_max(win.min, pos2(win.max.x, win.min.y + 30.0));
+    let ends: Vec<Pos2> = out
+        .shapes
+        .iter()
+        .filter_map(|c| match &c.shape {
+            Shape::LineSegment { points: [a, b], .. } if a.x != b.x && a.y != b.y && title.contains(*a) && title.contains(*b) => {
+                Some([*a, *b])
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert_eq!(ends.len(), 4, "an X: {ends:?}");
+    pos2(ends.iter().map(|p| p.x).sum::<f32>() / 4.0, ends.iter().map(|p| p.y).sum::<f32>() / 4.0)
+}
+
+#[test]
+fn leaving_a_game_forgets_its_enquiry_and_search() {
+    let mut r = Rig::in_game_with(drawn_twobox(), Some("East"), Some(enquiry_on()));
+    open_1e01_from_the_train_list(&mut r);
+    let out = r.frame();
+    click_text(&mut r, &out, "SIMPLIFIER");
+    let out = r.frame();
+    click_text(&mut r, &out, "headcode");
+    r.events.push(Event::Text(s("1e")));
+    r.frame();
+    let out = r.frame();
+    assert!(has_text(&out, "Train 1E01") && side_texts(&r, &out).iter().any(|t| t == "1e"), "{:?}", texts(&out));
+    click_text(&mut r, &out, "Leave");
+    let out = r.frame();
+    assert!(has_text(&out, "New game"), "back in the lobby: {:?}", texts(&out));
+    r.h.push(ServerFrame::Lobby(LobbyReply::Joined { game: s("g-test"), you: s("ann") }));
+    for (_, m) in r.game.connect("ann") {
+        r.h.push(ServerFrame::Game(m));
+    }
+    r.frame();
+    r.frame();
+    let out = r.frame();
+    assert!(r.ui.core.game().is_some(), "joined again");
+    assert!(!has_text(&out, "Train 1E01") && r.ui.enquiry().is_none(), "no window without a click: {:?}", texts(&out));
+    let side = side_texts(&r, &out);
+    assert!(side.iter().any(|t| t == "headcode") && !side.iter().any(|t| t == "1e"), "the search starts empty: {side:?}");
+    assert!(side.iter().any(|t| t == "Train"), "the simplifier tab is kept: {side:?}");
+}
+
+#[test]
+fn the_simplifier_follows_a_new_layout_and_a_changed_search() {
+    let mut r = Rig::in_game(drawn_twobox(), None);
+    let out = r.frame();
+    click_text(&mut r, &out, "SIMPLIFIER");
+    let out = r.frame();
+    assert!(side_texts(&r, &out).iter().any(|t| t == "1E01"), "a spectator sees every row");
+    let before = r.ui.core.game().unwrap().layout_gen();
+    for (_, m) in r.game.handle("ann", ClientMsg::Claim { area: s("West") }) {
+        r.h.push(ServerFrame::Game(m));
+    }
+    r.frame();
+    let out = r.frame();
+    assert!(r.ui.core.game().unwrap().layout_gen() > before, "a new layout came");
+    assert!(has_text(&out, "No booked trains here"), "West's simplifier is empty: {:?}", side_texts(&r, &out));
+    let mut r = Rig::in_game(drawn_twobox(), None);
+    let out = r.frame();
+    click_text(&mut r, &out, "SIMPLIFIER");
+    let out = r.frame();
+    click_text(&mut r, &out, "headcode");
+    for (typed, has_1e01, has_1n02) in [("1", true, true), ("n", false, true)] {
+        r.events.push(Event::Text(s(typed)));
+        r.frame();
+        let out = r.frame();
+        let side = side_texts(&r, &out);
+        assert_eq!((side.iter().any(|t| t == "1E01"), side.iter().any(|t| t == "1N02")), (has_1e01, has_1n02), "{side:?}");
+    }
+}
+
+/// The side panel is never narrower than the simplifier's columns, so the
+/// table never scrolls sideways (where a fixed header would slip off its
+/// columns) and switching tabs does not move the diagram.
+#[test]
+fn the_side_panel_fits_the_simplifier_columns() {
+    let mut r = Rig::in_game(drawn_twobox(), None);
+    let out = r.frame();
+    let diagram = r.ui.diagram_rect().unwrap();
+    // 360 points of columns and 7 gaps of 2 points.
+    assert!(1280.0 - diagram.max.x >= 374.0, "wide enough from the start: {diagram:?}");
+    click_text(&mut r, &out, "SIMPLIFIER");
+    let out = r.frame();
+    assert_eq!(r.ui.diagram_rect(), Some(diagram), "the diagram stays put");
+    let right = diagram.max.x;
+    let x_of = |out: &FullOutput, want: &str| {
+        texts(out).into_iter().find(|(t, at)| t == want && at.min.x >= right).unwrap_or_else(|| panic!("no {want}")).1
+    };
+    let (head, row) = (x_of(&out, "Train"), x_of(&out, "1E01"));
+    assert_eq!(head.min.x, row.min.x, "the rows sit under their headings");
+    assert!(x_of(&out, "Dep").max.x <= 1280.0, "the last column is in view");
+    r.events.push(Event::PointerMoved(row.center()));
+    r.frame();
+    r.events.push(Event::MouseWheel {
+        unit: MouseWheelUnit::Point,
+        delta: vec2(-60.0, 0.0),
+        phase: TouchPhase::Move,
+        modifiers: Modifiers::default(),
+    });
+    for _ in 0..20 {
+        r.frame();
+    }
+    let out = r.frame();
+    assert_eq!(x_of(&out, "1E01").min.x, row.min.x, "nothing to scroll sideways");
+}
+
+#[test]
+fn the_enquiry_toggles_from_the_menu_and_turning_it_off_closes_the_window() {
+    let store = MemStore::new();
+    let mut r = Rig::in_game_with(drawn_twobox(), Some("East"), Some(store.clone()));
+    settings_item(&mut r, "Headcode enquiry");
+    assert!(r.ui.settings().enquiry);
+    assert_eq!(store.text().as_deref(), Some("aspects=red_green\nenquiry=on\nnumbers=on\n"));
+    open_1e01_from_the_train_list(&mut r);
+    assert!(has_text(&r.frame(), "Train 1E01"));
+    settings_item(&mut r, "Headcode enquiry");
+    let out = r.frame();
+    assert!(!has_text(&out, "Train 1E01") && r.ui.enquiry().is_none(), "{:?}", texts(&out));
+    assert_eq!(store.text().as_deref(), Some("aspects=red_green\nenquiry=off\nnumbers=on\n"));
+}
+
+#[test]
+fn the_enquiry_window_closes_with_its_cross() {
+    let mut r = Rig::in_game_with(drawn_twobox(), Some("East"), Some(enquiry_on()));
+    open_1e01_from_the_train_list(&mut r);
+    let out = r.frame();
+    assert!(has_text(&out, "Train 1E01"));
+    let x = enquiry_close_button(&r, &out);
+    r.click(x, PointerButton::Primary);
+    let out = r.frame();
+    assert!(!has_text(&out, "Train 1E01") && r.ui.enquiry().is_none(), "{:?}", texts(&out));
+    assert!(r.ui.settings().enquiry, "closing the window leaves the setting on");
 }

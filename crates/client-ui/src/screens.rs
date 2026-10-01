@@ -24,8 +24,24 @@ pub const ALARM: Color32 = Color32::from_rgb(0xFF, 0x5A, 0x5A);
 const ZOOM_PER_POINT: f32 = 1.0 / 200.0;
 /// Simplifier columns, in points: headcode, lateness, from, to, at,
 /// platform, arrival, departure (wide enough for `BTHNLGR`, `ML_UP` and
-/// `05:03½`; the panel scrolls sideways when narrower).
+/// `05:03½`).
 const SIMPLIFIER_COLUMNS: [f32; 8] = [38.0, 26.0, 50.0, 50.0, 56.0, 48.0, 46.0, 46.0];
+/// Between two simplifier cells.
+const CELL_GAP: f32 = 2.0;
+/// The simplifier's columns and the gaps between them.
+const SIMPLIFIER_WIDTH: f32 = {
+    let mut w = CELL_GAP * (SIMPLIFIER_COLUMNS.len() - 1) as f32;
+    let mut i = 0;
+    while i < SIMPLIFIER_COLUMNS.len() {
+        w += SIMPLIFIER_COLUMNS[i];
+        i += 1;
+    }
+    w
+};
+/// The side panel's least width: the simplifier's columns plus the panel's
+/// margins and a scroll bar, so the table never scrolls sideways (its
+/// header would slip off its columns) and the tabs never resize the panel.
+const SIDE_W: f32 = SIMPLIFIER_WIDTH + 24.0;
 
 /// The upper half of the side panel.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -65,6 +81,12 @@ pub struct UiApp {
     search: String,
     /// The headcode whose enquiry window is open.
     enquiry: Option<String>,
+    /// The game drawn last frame; another (or the lobby) forgets the
+    /// enquiry, the search and the simplifier lines.
+    shown_game: Option<String>,
+    /// The simplifier's lines (each marked if it is its row's first) for
+    /// (layout generation, search).
+    simplifier_lines: Option<((u64, String), Vec<(Line, bool)>)>,
 }
 
 impl UiApp {
@@ -85,6 +107,8 @@ impl UiApp {
             side_tab: SideTab::default(),
             search: String::new(),
             enquiry: None,
+            shown_game: None,
+            simplifier_lines: None,
         }
     }
 
@@ -132,6 +156,13 @@ impl UiApp {
     pub fn ui(&mut self, ui: &mut Ui) {
         let now = ui.input(|i| i.time);
         self.core.tick(now);
+        let game = self.core.game().map(|g| g.id.clone());
+        if game != self.shown_game {
+            self.enquiry = None;
+            self.search.clear();
+            self.simplifier_lines = None;
+            self.shown_game = game;
+        }
         if let Some(b) = self.core.banner() {
             egui::Panel::top("banner").show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -248,7 +279,7 @@ impl UiApp {
 
     fn game(&mut self, ui: &mut Ui, now: f64) {
         self.top_bar(ui);
-        egui::Panel::right("side").default_size(330.0).show(ui, |ui| self.side(ui));
+        egui::Panel::right("side").default_size(SIDE_W).min_size(SIDE_W).show(ui, |ui| self.side(ui));
         egui::CentralPanel::default().frame(Frame::NONE.fill(BG)).show(ui, |ui| self.diagram_ui(ui, now));
         self.enquiry_window(ui);
     }
@@ -392,27 +423,32 @@ impl UiApp {
 
     /// The simplifier (realism spec §3): the layout's rows in running
     /// order, searched by headcode, drawn only where the scroll shows them.
+    /// The lines are built once per layout and search; lateness only for
+    /// the lines in view.
     fn simplifier_ui(&mut self, ui: &mut Ui, height: f32) {
         ui.add(egui::TextEdit::singleline(&mut self.search).id_salt("simplifier_search").desired_width(120.0).hint_text("headcode"));
         let Some(g) = self.core.game() else { return };
         let Some(l) = g.layout() else { return };
-        let v = g.view();
-        let lines: Vec<(Line, Option<String>)> = simplifier::rows(l, &self.search)
-            .into_iter()
-            .flat_map(|r| {
-                let late = simplifier::lateness(v, &r.headcode);
-                simplifier::lines(r).into_iter().enumerate().map(move |(i, line)| (line, late.clone().filter(|_| i == 0)))
-            })
-            .collect();
+        let key = (g.layout_gen(), self.search.clone());
+        if self.simplifier_lines.as_ref().map(|(k, _)| k) != Some(&key) {
+            let lines = simplifier::rows(l, &self.search)
+                .into_iter()
+                .flat_map(|r| simplifier::lines(r).into_iter().enumerate().map(|(i, line)| (line, i == 0)))
+                .collect();
+            self.simplifier_lines = Some((key, lines));
+        }
+        let Some((_, lines)) = &self.simplifier_lines else { return };
         if lines.is_empty() {
             ui.label(if l.simplifier.is_empty() { "No booked trains here" } else { "No headcode matches" });
             return;
         }
+        let v = g.view();
         let row_h = ui.text_style_height(&egui::TextStyle::Body) + 4.0;
         let header = ["Train", "Late", "From", "To", "At", "Plat", "Arr", "Dep"];
         simplifier_row(ui, row_h, header.map(|h| RichText::new(h).strong()));
-        egui::ScrollArea::both().id_salt("simplifier").max_height(height).show_rows(ui, row_h, lines.len(), |ui, range| {
-            for (line, late) in &lines[range] {
+        egui::ScrollArea::vertical().id_salt("simplifier").max_height(height).show_rows(ui, row_h, lines.len(), |ui, range| {
+            for (line, first) in &lines[range] {
+                let late = if *first { simplifier::lateness(v, &line.headcode) } else { None };
                 let late = late.as_deref().unwrap_or("");
                 let cells = [
                     RichText::new(&line.headcode).monospace().color(paint::HEADCODE),
@@ -568,7 +604,7 @@ impl UiApp {
 /// One simplifier line in fixed-width cells.
 fn simplifier_row(ui: &mut Ui, row_h: f32, cells: [RichText; 8]) {
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
+        ui.spacing_mut().item_spacing.x = CELL_GAP;
         for (text, w) in cells.into_iter().zip(SIMPLIFIER_COLUMNS) {
             ui.allocate_ui_with_layout(vec2(w, row_h), Layout::left_to_right(Align::Center), |ui| {
                 ui.set_min_width(w);
