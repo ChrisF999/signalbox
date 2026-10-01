@@ -41,6 +41,8 @@ fn client_messages() {
         ClientMsg::Vote { proposal: Proposal::Speed { x: 8 } },
         json!({"type": "vote", "proposal": {"kind": "speed", "x": 8}}),
     );
+    // Polish spec M8: the front reads it by its tag (`CLIENT_MSG_TYPES`).
+    check_client(ClientMsg::VoteDecline, json!({"type": "vote_decline"}));
 }
 
 #[test]
@@ -107,6 +109,18 @@ fn notices() {
         (
             Notice::AreaTaken { area: s("West"), holder: s("alice") },
             json!({"kind": "area_taken", "area": "West", "holder": "alice"}),
+        ),
+        (
+            Notice::VoteEnded { proposal: Proposal::Speed { x: 4 }, outcome: VoteOutcome::Declined { by: s("bob") } },
+            json!({"kind": "vote_ended", "proposal": {"kind": "speed", "x": 4}, "outcome": {"how": "declined", "by": "bob"}}),
+        ),
+        (
+            Notice::VoteEnded { proposal: Proposal::Pause, outcome: VoteOutcome::Passed },
+            json!({"kind": "vote_ended", "proposal": {"kind": "pause"}, "outcome": {"how": "passed"}}),
+        ),
+        (
+            Notice::VoteEnded { proposal: Proposal::Resume, outcome: VoteOutcome::Lapsed },
+            json!({"kind": "vote_ended", "proposal": {"kind": "resume"}, "outcome": {"how": "lapsed"}}),
         ),
         (Notice::Replaced, json!({"kind": "replaced"})),
         (Notice::GameCrashed, json!({"kind": "game_crashed"})),
@@ -282,7 +296,7 @@ fn view() {
         sim_time: 25215.5,
         speed: 8,
         paused: false,
-        vote: Some(VoteView { proposal: Proposal::Pause, agreed: vec![s("alice")], expires_in_s: 30 }),
+        vote: Some(VoteView { proposal: Proposal::Pause, agreed: vec![s("alice")], waiting: vec![], expires_in_s: 30 }),
         holders: BTreeMap::from([(s("East"), s("robot")), (s("West"), s("alice"))]),
         score: Some(5),
         signals: BTreeMap::from([(s("A"), Aspect::DoubleYellow)]),
@@ -324,6 +338,18 @@ fn view() {
             }
         }),
     );
+}
+
+/// Polish spec M8: who has still to agree is sent when there is anyone,
+/// and a vote from an older server (no `waiting`) still reads.
+#[test]
+fn a_vote_names_who_it_waits_for() {
+    let v = VoteView { proposal: Proposal::Pause, agreed: vec![s("alice")], waiting: vec![s("bob")], expires_in_s: 30 };
+    let want = json!({"proposal": {"kind": "pause"}, "agreed": ["alice"], "waiting": ["bob"], "expires_in_s": 30});
+    assert_eq!(serde_json::to_value(&v).unwrap(), want);
+    assert_eq!(serde_json::from_value::<VoteView>(want).unwrap(), v);
+    let old = json!({"proposal": {"kind": "pause"}, "agreed": ["alice"], "expires_in_s": 30});
+    assert!(serde_json::from_value::<VoteView>(old).unwrap().waiting.is_empty());
 }
 
 #[test]

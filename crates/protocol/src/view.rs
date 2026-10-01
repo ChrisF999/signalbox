@@ -265,6 +265,9 @@ pub struct TrainRow {
 pub struct VoteView {
     pub proposal: Proposal,
     pub agreed: Vec<String>,
+    /// Voters who have not agreed yet (polish spec M8).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waiting: Vec<String>,
     /// Whole seconds of real time before it lapses (rounded up).
     pub expires_in_s: u32,
 }

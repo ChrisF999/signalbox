@@ -182,6 +182,10 @@ output is byte-identical for the same input.
 - Clock votes (realism owner decision 12): holders vote; while nobody holds
   an area every connected player does (`Game::voters`), re-settled on every
   claim, release, grace expiry, connect and spectator disconnect.
+- A vote lists who has still to agree (`VoteView.waiting`); any voter may
+  Decline it (`vote_decline`), ending it at once; `flush` tells every player
+  how each vote ended (`Notice::VoteEnded`), except a lone voter's (polish
+  spec M8).
 - Deleting games (owner decision 13): lobby `delete_game`, saved or crashed
   games only, by the creator (meta row `creator`, written by the game
   process; save schema still 2) or a `SIGNALBOX_ADMINS` user (comma-separated

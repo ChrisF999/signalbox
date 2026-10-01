@@ -114,11 +114,12 @@ pub struct LayoutInfo {
 pub const LOBBY_MSG_TYPES: [&str; 8] =
     ["list_games", "list_layouts", "create_game", "join", "leave", "delete_game", "list_lessons", "start_lesson"];
 /// `"type"` tags of `ClientMsg`.
-pub const CLIENT_MSG_TYPES: [&str; 9] = [
+pub const CLIENT_MSG_TYPES: [&str; 10] = [
     "claim",
     "release",
     "command",
     "vote",
+    "vote_decline",
     "resync",
     "lesson_next",
     "lesson_restart_step",

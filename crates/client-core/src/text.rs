@@ -1,7 +1,7 @@
 //! Words for the screen: times, commands, refusals, notices, votes.
 //! Signals are named as the screen shows them (`Names`).
 
-use protocol::{ExitName, Notice, PlayerCommand, PointsPos, Preparing, Proposal, Rejection, TrainState, VoteView};
+use protocol::{ExitName, Notice, PlayerCommand, PointsPos, Preparing, Proposal, Rejection, TrainState, VoteOutcome, VoteView};
 
 use crate::names::Names;
 
@@ -89,6 +89,15 @@ pub fn notice_text(n: &Notice, names: &Names) -> (String, bool) {
             (format!("{} offered from {from_area}", names.headcode(headcode)), false)
         }
         Notice::AreaTaken { area, holder } => (format!("{area} is now {holder}'s"), false),
+        Notice::VoteEnded { proposal, outcome } => {
+            let p = proposal_text(*proposal);
+            let text = match outcome {
+                VoteOutcome::Passed => format!("Vote passed: {p}"),
+                VoteOutcome::Declined { by } => format!("Vote declined by {by}: {p}"),
+                VoteOutcome::Lapsed => format!("Vote lapsed: {p}"),
+            };
+            (text, false)
+        }
         Notice::Replaced => ("This login was opened somewhere else".to_string(), true),
         Notice::GameCrashed => ("The game stopped unexpectedly".to_string(), true),
         Notice::Error { message, .. } => (format!("Error: {message}"), true),
@@ -113,7 +122,9 @@ pub fn proposal_text(p: Proposal) -> String {
     }
 }
 
-/// `Vote: 4× — ann, bob agreed, 25 s left`
+/// `Vote: 4× — waiting for bob, 25 s left` (polish spec M8); a server
+/// that sends no `waiting` gets the old `ann agreed`.
 pub fn vote_text(v: &VoteView) -> String {
-    format!("Vote: {} — {} agreed, {} s left", proposal_text(v.proposal), v.agreed.join(", "), v.expires_in_s)
+    let who = if v.waiting.is_empty() { format!("{} agreed", v.agreed.join(", ")) } else { format!("waiting for {}", v.waiting.join(", ")) };
+    format!("Vote: {} — {who}, {} s left", proposal_text(v.proposal), v.expires_in_s)
 }

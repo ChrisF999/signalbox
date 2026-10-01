@@ -17,6 +17,8 @@ pub enum ClientMsg {
     Command { cmd: PlayerCommand },
     /// Propose, or agree to, a clock change.
     Vote { proposal: Proposal },
+    /// Turn the open proposal down: it ends at once (polish spec M8).
+    VoteDecline,
     /// Ask for the layout and a full view.
     Resync,
     /// In a tutorial: the step said "press Next".
@@ -55,6 +57,15 @@ pub enum PlayerCommand {
 pub enum ExitName {
     Signal(String),
     Node(String),
+}
+
+/// How a clock proposal ended.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "how", rename_all = "snake_case")]
+pub enum VoteOutcome {
+    Passed,
+    Declined { by: String },
+    Lapsed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,6 +108,8 @@ pub enum Notice {
     /// A berth in your area was filled by a step from `from_area`'s berth.
     Handover { headcode: String, from_area: String },
     AreaTaken { area: String, holder: String },
+    /// A clock proposal ended (polish spec M8); sent to every player.
+    VoteEnded { proposal: Proposal, outcome: VoteOutcome },
     Replaced,
     GameCrashed,
     Error { code: String, message: String },

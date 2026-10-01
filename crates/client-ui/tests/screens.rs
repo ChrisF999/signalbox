@@ -887,3 +887,25 @@ fn clickable_things_say_so_and_points_open_on_a_left_click() {
     r.frame();
     assert_eq!(r.frame().platform_output.cursor_icon, egui::CursorIcon::Default);
 }
+
+/// Polish spec M8: a vote shows who it waits for, with Agree and Decline
+/// for those who have not agreed, and its end is logged.
+#[test]
+fn a_vote_waits_for_named_players_who_agree_or_decline() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    r.game.connect("bob");
+    r.game.handle("bob", ClientMsg::Claim { area: s("East") });
+    r.game.handle("bob", ClientMsg::Vote { proposal: Proposal::Speed { x: 2 } });
+    for _ in 0..3 {
+        r.frame();
+    }
+    let out = r.frame();
+    assert!(has_text(&out, "waiting for ann"), "{:?}", texts(&out));
+    click_text(&mut r, &out, "Decline");
+    for _ in 0..3 {
+        r.frame();
+    }
+    let out = r.frame();
+    assert!(has_text(&out, "Vote declined by ann: 2×"), "{:?}", texts(&out));
+    assert!(!has_text(&out, "Agree"));
+}

@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::time::Duration;
 
-use protocol::{ClientMsg, Layout, Notice, PlayerCommand, Proposal, Rejection, ServerMsg, View, codes};
+use protocol::{ClientMsg, Layout, Notice, PlayerCommand, Proposal, Rejection, ServerMsg, View, VoteOutcome, codes};
 use signalbox_core::events::{Command, Event};
 use signalbox_core::ids::AreaId;
 use signalbox_core::robot;
@@ -153,6 +153,9 @@ pub struct Game {
     /// A retried covering snapshot failed and was reported: later failures
     /// of it are not reported again.
     retry_reported: bool,
+    /// Clock proposals that ended since the last `flush`, told to every
+    /// player there (polish spec M8).
+    vote_ended: Vec<(Proposal, VoteOutcome)>,
 }
 
 fn error(player: &str, code: &str, message: &str) -> Out {
@@ -410,6 +413,7 @@ impl Game {
             save_errors: Vec::new(),
             log_lost: false,
             retry_reported: false,
+            vote_ended: Vec::new(),
         }
     }
 
@@ -510,6 +514,7 @@ impl Game {
             ClientMsg::Release => self.release(player),
             ClientMsg::Command { cmd } => self.command(player, cmd),
             ClientMsg::Vote { proposal } => self.vote(player, proposal),
+            ClientMsg::VoteDecline => self.decline(player),
             ClientMsg::Resync => self.resync(player),
             // Only a tutorial (`crate::lesson::Runner`) acts on these.
             ClientMsg::LessonNext | ClientMsg::LessonRestartStep | ClientMsg::LessonRestart | ClientMsg::LessonUi { .. } => {
@@ -548,7 +553,9 @@ impl Game {
     ) -> Vec<Out> {
         let dt = if real_dt.is_finite() && real_dt > 0.0 { real_dt } else { 0.0 };
         let mut out = Vec::new();
-        self.clock.lapse(dt);
+        if let Some(p) = self.clock.lapse(dt) {
+            self.vote_ended.push((p, VoteOutcome::Lapsed));
+        }
         self.expire_grace(dt);
         let n = self.clock.ticks_for(dt).min(MAX_TICKS_PER_ADVANCE);
         for _ in 0..n {
@@ -569,10 +576,16 @@ impl Game {
         out
     }
 
-    /// Deltas for every connected player whose view changed.
+    /// Deltas for every connected player whose view changed, after a notice
+    /// to each for every clock proposal that ended (polish spec M8).
     pub fn flush(&mut self) -> Vec<Out> {
         let shared = self.shared();
         let mut out = Vec::new();
+        for (proposal, outcome) in std::mem::take(&mut self.vote_ended) {
+            for (name, _) in self.players.iter().filter(|(_, p)| p.connected) {
+                out.push(notice(name, Notice::VoteEnded { proposal, outcome: outcome.clone() }));
+            }
+        }
         for (name, p) in self.players.iter_mut() {
             if !p.connected {
                 continue;
@@ -593,7 +606,7 @@ impl Game {
             sim_time: self.sim.now_s(),
             speed: self.clock.speed,
             paused: self.clock.paused,
-            vote: self.clock.vote_view(),
+            vote: self.clock.vote_view(&self.voters()),
             holders: net
                 .areas
                 .iter()
@@ -622,7 +635,9 @@ impl Game {
     /// nobody left to agree to it.
     fn settle_vote(&mut self) {
         let voters = self.voters();
-        self.clock.settle(&voters);
+        if let Some(p) = self.clock.settle(&voters) {
+            self.vote_ended.push((p, VoteOutcome::Passed));
+        }
     }
 
     fn claim(&mut self, player: &str, area: &str) -> Vec<Out> {
@@ -679,11 +694,27 @@ impl Game {
     fn vote(&mut self, player: &str, proposal: Proposal) -> Vec<Out> {
         let voters = self.voters();
         match self.clock.vote(player, proposal, &voters) {
-            Ok(_) => vec![],
+            Ok(passed) => {
+                // A lone voter's proposal applies at once: nothing to tell.
+                if voters.len() > 1 {
+                    self.vote_ended.extend(passed.map(|p| (p, VoteOutcome::Passed)));
+                }
+                vec![]
+            }
             Err(VoteError::NotAVoter) => {
                 vec![error(player, codes::NOT_A_HOLDER, "while anyone holds an area, only holders vote")]
             }
             Err(VoteError::BadSpeed) => vec![error(player, codes::BAD_SPEED, "speed must be 1, 2, 4 or 8")],
+        }
+    }
+
+    fn decline(&mut self, player: &str) -> Vec<Out> {
+        match self.clock.decline(player, &self.voters()) {
+            Ok(declined) => {
+                self.vote_ended.extend(declined.map(|p| (p, VoteOutcome::Declined { by: player.to_string() })));
+                vec![]
+            }
+            Err(_) => vec![error(player, codes::NOT_A_HOLDER, "while anyone holds an area, only holders vote")],
         }
     }
 

@@ -556,3 +556,34 @@ fn a_refusal_names_the_route_in_the_way() {
     let out = g.advance(0.1);
     assert_eq!(notices(&out, "bob"), vec![Notice::Rejected { cmd: swing, reason: Rejection::PointsLocked, by: Some(s("C-W2")) }]);
 }
+
+/// Polish spec M8: every player hears how a vote ended, and who has still
+/// to agree is in the view.
+#[test]
+fn every_player_hears_how_a_vote_ended() {
+    let mut g = game();
+    join(&mut g, "alice", Some("West"));
+    join(&mut g, "bob", Some("East"));
+    g.flush();
+    send(&mut g, "alice", ClientMsg::Vote { proposal: Proposal::Speed { x: 4 } });
+    let out = g.flush();
+    let waiting = out.iter().find_map(|(p, m)| match m {
+        ServerMsg::Delta(d) if p == "alice" => d.vote.clone().flatten().map(|v| v.waiting),
+        _ => None,
+    });
+    assert_eq!(waiting, Some(vec![s("bob")]));
+    send(&mut g, "bob", ClientMsg::VoteDecline);
+    let out = g.flush();
+    let ended = Notice::VoteEnded { proposal: Proposal::Speed { x: 4 }, outcome: VoteOutcome::Declined { by: s("bob") } };
+    assert_eq!((notices(&out, "alice"), notices(&out, "bob")), (vec![ended.clone()], vec![ended]));
+    send(&mut g, "alice", ClientMsg::Vote { proposal: Proposal::Pause });
+    send(&mut g, "bob", ClientMsg::Vote { proposal: Proposal::Pause });
+    let passed = Notice::VoteEnded { proposal: Proposal::Pause, outcome: VoteOutcome::Passed };
+    assert_eq!(notices(&g.flush(), "bob"), vec![passed]);
+    send(&mut g, "alice", ClientMsg::Vote { proposal: Proposal::Resume });
+    g.advance(31.0);
+    let lapsed = Notice::VoteEnded { proposal: Proposal::Resume, outcome: VoteOutcome::Lapsed };
+    assert_eq!(notices(&g.flush(), "alice"), vec![lapsed]);
+    let out = send(&mut g, "sam", ClientMsg::VoteDecline);
+    assert!(out.is_empty(), "sam is not connected");
+}

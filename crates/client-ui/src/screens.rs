@@ -407,6 +407,7 @@ impl UiApp {
         let areas: Vec<String> = g.layout().map(|l| l.areas.clone()).unwrap_or_default();
         let holding = g.area().is_some();
         let can_vote = g.can_vote();
+        let me = g.you.clone();
         let mut act: Vec<Box<dyn FnOnce(&mut App)>> = Vec::new();
         let mut settings = self.settings;
         egui::Panel::top("bar").show(ui, |ui| {
@@ -415,7 +416,10 @@ impl UiApp {
                 if let Some(v) = &view {
                     let clock = ui.label(RichText::new(fmt_hms(v.sim_time)).monospace().size(16.0));
                     mark(ui, &clock, marked("clock"), now);
-                    ui.label(if v.paused { "paused".to_string() } else { format!("{}×", v.speed) });
+                    let state = ui.label(if v.paused { "paused".to_string() } else { format!("{}×", v.speed) });
+                    if v.paused && v.vote.is_none() {
+                        state.on_hover_text("The clock is paused (a resumed game starts paused). Press resume to propose running it.");
+                    }
                     // Only voters get the buttons (owner decision 12).
                     if can_vote {
                         let pause = if v.paused { Proposal::Resume } else { Proposal::Pause };
@@ -430,6 +434,17 @@ impl UiApp {
                     }
                     if let Some(vote) = &v.vote {
                         ui.label(RichText::new(vote_text(vote)).color(paint::YELLOW));
+                        // Polish spec M8: say yes or no explicitly.
+                        if can_vote {
+                            let p = vote.proposal;
+                            if !vote.agreed.contains(&me) && ui.button("Agree").clicked() {
+                                act.push(Box::new(move |a| a.vote(p)));
+                            }
+                            let no = if vote.agreed.contains(&me) { "Withdraw" } else { "Decline" };
+                            if ui.button(no).clicked() {
+                                act.push(Box::new(|a| a.decline_vote()));
+                            }
+                        }
                     }
                     // A tutorial keeps no score (tutorial spec §3).
                     if let Some(score) = v.score.filter(|_| !lesson) {

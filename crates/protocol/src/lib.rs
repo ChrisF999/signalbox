@@ -12,7 +12,7 @@ pub use diff::{SeqGap, diff};
 pub use lesson::{Highlight, LessonInfo, LessonView};
 pub use lobby::{AreaHolder, ClientFrame, FrameError, GameInfo, GameState, LayoutInfo, LobbyMsg, LobbyReply, ServerFrame};
 pub use lobby::Preparing;
-pub use msg::{ClientMsg, ExitName, Notice, PlayerCommand, Proposal, ServerMsg};
+pub use msg::{ClientMsg, ExitName, Notice, PlayerCommand, Proposal, ServerMsg, VoteOutcome};
 pub use signalbox_core::aspect::Aspect;
 pub use signalbox_core::events::Rejection;
 pub use signalbox_core::network::{Dir, PointsPos};

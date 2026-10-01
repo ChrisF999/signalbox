@@ -608,6 +608,11 @@ impl App {
         self.send_game(ClientMsg::Vote { proposal });
     }
 
+    /// Turn the open proposal down (polish spec M8).
+    pub fn decline_vote(&mut self) {
+        self.send_game(ClientMsg::VoteDecline);
+    }
+
     pub fn command(&mut self, cmd: PlayerCommand) {
         self.send_game(ClientMsg::Command { cmd });
     }

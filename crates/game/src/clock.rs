@@ -99,8 +99,8 @@ impl GameClock {
         Some(p)
     }
 
-    /// Let `real_dt` seconds pass for the open proposal.
-    pub fn lapse(&mut self, real_dt: f64) {
+    /// Let `real_dt` seconds pass for the open proposal; returns it if it lapsed.
+    pub fn lapse(&mut self, real_dt: f64) -> Option<Proposal> {
         let lapsed = match self.vote.as_mut() {
             Some(v) => {
                 v.left_s -= real_dt;
@@ -108,15 +108,25 @@ impl GameClock {
             }
             None => false,
         };
-        if lapsed {
-            self.vote = None;
-        }
+        if lapsed { self.vote.take().map(|v| v.proposal) } else { None }
     }
 
-    pub fn vote_view(&self) -> Option<VoteView> {
+    /// `voter` turns the open proposal down: it ends at once (polish spec
+    /// M8). Returns it, or `None` when none is open.
+    pub fn decline(&mut self, voter: &str, voters: &BTreeSet<String>) -> Result<Option<Proposal>, VoteError> {
+        if !voters.contains(voter) {
+            return Err(VoteError::NotAVoter);
+        }
+        Ok(self.vote.take().map(|v| v.proposal))
+    }
+
+    /// The open proposal as players see it; `waiting` lists the `voters`
+    /// who have not agreed yet.
+    pub fn vote_view(&self, voters: &BTreeSet<String>) -> Option<VoteView> {
         self.vote.as_ref().map(|v| VoteView {
             proposal: v.proposal,
             agreed: v.agreed.iter().cloned().collect(),
+            waiting: voters.iter().filter(|n| !v.agreed.contains(*n)).cloned().collect(),
             expires_in_s: v.left_s.max(0.0).ceil() as u32,
         })
     }

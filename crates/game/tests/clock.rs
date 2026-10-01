@@ -42,8 +42,9 @@ fn every_holder_must_agree() {
     let mut c = GameClock::new(false);
     assert_eq!(c.vote("alice", Proposal::Speed { x: 4 }, &h), Ok(None));
     assert_eq!(c.speed, 1);
-    let v = c.vote_view().unwrap();
+    let v = c.vote_view(&h).unwrap();
     assert_eq!((v.proposal, v.agreed, v.expires_in_s), (Proposal::Speed { x: 4 }, vec!["alice".to_string()], 30));
+    assert_eq!(v.waiting, ["bob"], "polish spec M8: who has still to agree");
     assert_eq!(c.vote("alice", Proposal::Speed { x: 4 }, &h), Ok(None), "agreeing twice changes nothing");
     assert_eq!(c.vote("bob", Proposal::Speed { x: 4 }, &h), Ok(Some(Proposal::Speed { x: 4 })));
     assert_eq!((c.speed, c.vote.is_none()), (4, true));
@@ -69,7 +70,7 @@ fn a_different_proposal_replaces_the_open_one() {
     c.vote("alice", Proposal::Pause, &h).unwrap();
     c.lapse(10.0);
     assert_eq!(c.vote("bob", Proposal::Speed { x: 2 }, &h), Ok(None));
-    let v = c.vote_view().unwrap();
+    let v = c.vote_view(&h).unwrap();
     assert_eq!((v.proposal, v.agreed, v.expires_in_s), (Proposal::Speed { x: 2 }, vec!["bob".to_string()], 30));
     assert_eq!(c.vote("alice", Proposal::Speed { x: 2 }, &h), Ok(Some(Proposal::Speed { x: 2 })));
     assert!(!c.paused);
@@ -81,8 +82,8 @@ fn votes_lapse_after_thirty_seconds_of_real_time() {
     let mut c = GameClock::new(false);
     c.vote("alice", Proposal::Pause, &h).unwrap();
     c.lapse(20.0);
-    assert_eq!(c.vote_view().unwrap().expires_in_s, 10);
-    c.lapse(VOTE_LAPSE_S - 20.0);
+    assert_eq!(c.vote_view(&h).unwrap().expires_in_s, 10);
+    assert_eq!(c.lapse(VOTE_LAPSE_S - 20.0), Some(Proposal::Pause), "it says what lapsed");
     assert!(c.vote.is_none());
     assert_eq!(c.vote("bob", Proposal::Pause, &h), Ok(None), "a lapsed vote starts again");
 }
@@ -101,5 +102,17 @@ fn with_no_holders_the_open_vote_is_dropped_and_the_clock_stays() {
     let mut c = GameClock::new(false);
     c.vote("alice", Proposal::Pause, &holders(&["alice", "bob"])).unwrap();
     assert_eq!(c.settle(&BTreeSet::new()), None);
+    assert!(c.vote.is_none() && !c.paused);
+}
+
+/// Polish spec M8: any voter can turn a proposal down; it ends at once.
+#[test]
+fn a_voter_can_decline() {
+    let h = holders(&["alice", "bob"]);
+    let mut c = GameClock::new(false);
+    assert_eq!(c.decline("bob", &h), Ok(None), "nothing open");
+    c.vote("alice", Proposal::Pause, &h).unwrap();
+    assert_eq!(c.decline("sam", &h), Err(VoteError::NotAVoter));
+    assert_eq!(c.decline("bob", &h), Ok(Some(Proposal::Pause)));
     assert!(c.vote.is_none() && !c.paused);
 }

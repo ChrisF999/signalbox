@@ -14,7 +14,7 @@ fn base() -> View {
         sim_time: 25200.0,
         speed: 1,
         paused: false,
-        vote: Some(VoteView { proposal: Proposal::Pause, agreed: vec![s("alice")], expires_in_s: 12 }),
+        vote: Some(VoteView { proposal: Proposal::Pause, agreed: vec![s("alice")], waiting: vec![], expires_in_s: 12 }),
         holders: BTreeMap::from([(s("East"), s("robot")), (s("West"), s("alice"))]),
         score: Some(0),
         signals: BTreeMap::from([(s("A"), Aspect::Red), (s("W1"), Aspect::Red)]),

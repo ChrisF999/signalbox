@@ -40,7 +40,14 @@ fn commands_and_refusals() {
 
 #[test]
 fn votes() {
-    let v = VoteView { proposal: Proposal::Speed { x: 4 }, agreed: vec![s("ann"), s("bob")], expires_in_s: 25 };
+    let mut v = VoteView { proposal: Proposal::Speed { x: 4 }, agreed: vec![s("ann"), s("bob")], waiting: vec![], expires_in_s: 25 };
     assert_eq!(vote_text(&v), "Vote: 4× — ann, bob agreed, 25 s left");
+    v.waiting = vec![s("cat")];
+    assert_eq!(vote_text(&v), "Vote: 4× — waiting for cat, 25 s left", "polish spec M8");
+    let plain = Names::default();
+    let ended = |outcome| notice_text(&Notice::VoteEnded { proposal: Proposal::Pause, outcome }, &plain).0;
+    assert_eq!(ended(VoteOutcome::Passed), "Vote passed: pause");
+    assert_eq!(ended(VoteOutcome::Declined { by: s("bob") }), "Vote declined by bob: pause");
+    assert_eq!(ended(VoteOutcome::Lapsed), "Vote lapsed: pause");
     assert_eq!(proposal_text(Proposal::Pause), "pause");
 }
