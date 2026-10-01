@@ -149,7 +149,7 @@ fn the_simplifier_opens_at_the_first_train_not_yet_finished() {
 /// Polish spec M7: the enquiry says what the train does next.
 #[test]
 fn the_enquiry_says_what_the_train_does_next() {
-    let mut t = Table::new("eve", Some("East"));
+    let t = Table::new("eve", Some("East"));
     let row = |state, arr, dep| TrainRow {
         next_place: Some(s("EST")),
         next_platform: Some(s("1")),
@@ -170,5 +170,7 @@ fn the_enquiry_says_what_the_train_does_next() {
     assert_eq!(enquiry(&l, Some(&v), "1E01").next_text(&names).as_deref(), Some("pass EST 1 at 07:05½"));
     v.trains.insert(s("1E01"), row(TrainState::Due, Some(25_440.0), None));
     assert_eq!(enquiry(&l, Some(&v), "1E01").next_text(&names), None);
-    t.run(0.1);
+    // Review I2: standing where it terminates there is nothing to depart.
+    v.trains.insert(s("1E01"), row(TrainState::AtPlatform, Some(25_440.0), None));
+    assert_eq!(enquiry(&l, Some(&v), "1E01").next_text(&names).as_deref(), Some("terminates at EST 1"));
 }

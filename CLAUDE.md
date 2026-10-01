@@ -350,7 +350,7 @@ output is byte-identical for the same input.
   (`App::hint`); a left click on your points opens their menu and never swings them (polish spec M3, U9).
 - The headcode enquiry window opens 16 px right of and below the pointer (egui keeps it on screen), with a labelled
   State/Next/Runs grid and headed call rows; `Enquiry::next_text` says `depart|arrive|pass <place> <platform> at <time>`
-  (polish spec M7, U13). It is positioned only when first opened; clicking another headcode while it is open does not move it.
+  (polish spec M7, U13).  Every headcode click places it (`current_pos`, one frame; draggable after).
 - The train list is headed (Train, State, Next, Arr, Dep, Late) and writes lateness as
   the simplifier does, `OT`/`3L` (polish spec M6).
 - The top bar never reflows (polish spec M5): buttons right-aligned in a fixed order, fixed-width clock controls, the vote on

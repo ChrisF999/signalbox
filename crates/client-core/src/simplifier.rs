@@ -159,7 +159,8 @@ pub fn enquiry<'a>(l: &'a Layout, v: Option<&'a View>, headcode: &str) -> Enquir
 
 impl Enquiry<'_> {
     /// What the train does next (polish spec M7): `depart LIVERPOOL STREET 10
-    /// at 06:00` standing at a platform, else `arrive ... at ...` (or `pass
+    /// at 06:00` standing at a platform (`terminates at ...` when it has no
+    /// departure), else `arrive ... at ...` (or `pass
     /// ... at ...`); `None` when not running or its timetable is done.
     pub fn next_text(&self, names: &crate::Names) -> Option<String> {
         let t = self.train.filter(|t| t.state != TrainState::Due)?;
@@ -170,7 +171,8 @@ impl Enquiry<'_> {
         };
         let time = |v: Option<f64>| v.map(|s| format!(" at {}", fmt_wtt(s))).unwrap_or_default();
         Some(match (t.state, t.arr) {
-            (TrainState::AtPlatform, _) => format!("depart {at}{}", time(t.dep)),
+            (TrainState::AtPlatform, _) if t.dep.is_some() => format!("depart {at}{}", time(t.dep)),
+            (TrainState::AtPlatform, _) => format!("terminates at {at}"),
             (_, Some(_)) => format!("arrive {at}{}", time(t.arr)),
             (_, None) => format!("pass {at}{}", time(t.dep)),
         })

@@ -754,9 +754,13 @@ impl UiApp {
         let e = simplifier::enquiry(l, v, &h);
         let names = g.names();
         let place = |p: Option<&str>| p.map_or("?", |p| names.place(p)).to_string();
-        let mut w = egui::Window::new(format!("Train {}", names.headcode(&h))).id(egui::Id::new("enquiry")).open(&mut open).resizable(false);
-        if let Some(at) = self.enquiry_at {
-            w = w.default_pos(at + vec2(ENQUIRY_OFFSET_PX, ENQUIRY_OFFSET_PX));
+        let mut w = egui::Window::new(format!("Train {}", names.headcode(&h))).id(egui::Id::new("enquiry")).open(&mut open).resizable(false).drag_area(egui::WindowDrag::Anywhere);
+        // One-shot per click: positions the window for this frame, after which
+        // it can be dragged (egui keeps a closed window's place otherwise).
+        // `current_pos` is lost under egui's title-bar-only drag mode (it
+        // restores the pre-frame position), hence drag from anywhere.
+        if let Some(at) = self.enquiry_at.take() {
+            w = w.current_pos(at + vec2(ENQUIRY_OFFSET_PX, ENQUIRY_OFFSET_PX));
         }
         w.show(ui.ctx(), |ui| {
             egui::Grid::new("enquiry_facts").num_columns(2).show(ui, |ui| {
@@ -768,7 +772,7 @@ impl UiApp {
                     ui.label(next);
                     ui.end_row();
                 }
-                if let Some(r) = e.rows.first() {
+                for r in &e.rows {
                     ui.label(RichText::new("Runs").strong());
                     ui.label(format!("{} to {}", place(r.origin.as_deref()), place(r.destination.as_deref())));
                     ui.end_row();

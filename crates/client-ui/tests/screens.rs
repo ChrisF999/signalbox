@@ -1064,3 +1064,31 @@ fn the_train_list_is_headed_and_late_as_the_simplifier_says() {
     let mut r = Rig::in_game(empty, Some("West"));
     assert!(has_text(&r.frame(), "No trains here or due in the next 30 minutes"));
 }
+
+/// Polish spec M7, review I1: every open is placed beside its own click, not
+/// only the first of the session: after closing, and while another headcode's
+/// enquiry is already open.
+#[test]
+fn each_enquiry_click_places_the_window_beside_it() {
+    let mut r = Rig::in_game_with(drawn_twobox(), Some("West"), Some(enquiry_on()));
+    let berth = until_1e01_is_shown(&mut r);
+    let win = |r: &Rig| r.ctx.memory(|m| m.area_rect(egui::Id::new("enquiry"))).unwrap().min;
+    open_1e01_from_the_train_list(&mut r);
+    let out = r.frame();
+    let x = enquiry_close_button(&r, &out);
+    r.click(x, PointerButton::Primary);
+    assert!(r.ui.enquiry().is_none());
+    r.frame();
+    let at = berth_at(&r, &berth);
+    r.click(at, PointerButton::Primary);
+    r.frame();
+    assert_eq!(r.ui.enquiry(), Some("1E01"));
+    let p = win(&r);
+    assert!((p.y - at.y).abs() < 40.0 && (p.x - at.x).abs() < 40.0, "reopened {p:?} beside {at:?}");
+    // Still open: the train list's headcode asks again, elsewhere.
+    let before = p;
+    open_1e01_from_the_train_list(&mut r);
+    r.frame();
+    r.frame();
+    assert_ne!(win(&r), before, "a click while open moves the window");
+}
