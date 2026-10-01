@@ -387,13 +387,32 @@ impl Scene {
 
     /// The "Fit" camera: your own area (or everything) framed in `screen`; a
     /// player's area too long to read that way is shown at `FIT_MIN_SCALE`
-    /// round its busiest station instead (polish spec M13).
+    /// round its busiest station instead, moved just far enough to keep the
+    /// view inside the area where the area is longer than the screen (polish
+    /// spec M13).
     pub fn fit_camera(&self, screen: Rect) -> Option<Camera> {
         let fit = Camera::fit(self.fit_bounds()?, screen);
-        Some(match self.focus {
-            Some(centre) if fit.scale < FIT_MIN_SCALE => Camera { centre, scale: FIT_MIN_SCALE },
+        Some(match (self.focus, self.own) {
+            (Some(focus), Some(own)) if fit.scale < FIT_MIN_SCALE => {
+                let half = screen.size() / 2.0 / FIT_MIN_SCALE;
+                let within = |c: f32, lo: f32, hi: f32, half: f32| if hi - lo > 2.0 * half { c.clamp(lo + half, hi - half) } else { (lo + hi) / 2.0 };
+                let centre = pos2(
+                    within(focus.x, own.min.x, own.max.x, half.x),
+                    within(focus.y, own.min.y, own.max.y, half.y),
+                );
+                Camera { centre, scale: FIT_MIN_SCALE }
+            }
             _ => fit,
         })
+    }
+
+    /// Whether `fit_camera(screen)` shows only part of the area (the readable
+    /// Fit): the hint must not say Fit shows it all.
+    pub fn fit_is_partial(&self, screen: Rect) -> bool {
+        match (self.fit_camera(screen), self.fit_bounds()) {
+            (Some(cam), Some(b)) => cam.scale > Camera::fit(b, screen).scale,
+            _ => false,
+        }
     }
 
     /// What "Fit" frames: your own area, or everything.
@@ -407,7 +426,6 @@ impl Scene {
 /// area; `None` for a spectator or with no such place.
 fn busiest(l: &Layout, sc: &Scene) -> Option<Pos2> {
     let own = sc.own?;
-    l.area.as_ref()?;
     let mut calls: BTreeMap<&str, usize> = BTreeMap::new();
     for c in l.simplifier.iter().flat_map(|r| &r.calls) {
         *calls.entry(c.place.as_str()).or_default() += 1;

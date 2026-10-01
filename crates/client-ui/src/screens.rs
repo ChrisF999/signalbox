@@ -39,6 +39,8 @@ const ZOOM_INSET: f32 = 8.0;
 pub const VIEW_BAND: f32 = 2.0 * ZOOM_INSET + ZOOM_BUTTON;
 /// Until the player first moves the view, the diagram says how.
 pub const VIEW_HINT: &str = "Drag to move · wheel, + or - to zoom · Fit shows it all";
+/// The hint when Fit shows only part of a long area (polish spec M13).
+pub const VIEW_HINT_PARTIAL: &str = "Drag to move · wheel, + or - to zoom · drag or zoom to see the rest of your area";
 /// Simplifier columns, in points: headcode, lateness, from, to, at,
 /// platform, arrival, departure (wide enough for `BTHNLGR`, `ML_UP` and
 /// `05:03½`).
@@ -1017,7 +1019,8 @@ impl UiApp {
         };
         paint::paint(&painter, d);
         if !self.cam_moved {
-            painter.text(rect.left_bottom() + vec2(ZOOM_INSET, -ZOOM_INSET), Align2::LEFT_BOTTOM, VIEW_HINT, FontId::proportional(12.0), paint::LABEL);
+            let hint = if scene.fit_is_partial(rect.shrink2(vec2(0.0, VIEW_BAND))) { VIEW_HINT_PARTIAL } else { VIEW_HINT };
+            painter.text(rect.left_bottom() + vec2(ZOOM_INSET, -ZOOM_INSET), Align2::LEFT_BOTTOM, hint, FontId::proportional(12.0), paint::LABEL);
         }
         // The zoom buttons, on top of the diagram (polish spec M11).
         let plus = ui.put(plus_rect, egui::Button::new("+"));

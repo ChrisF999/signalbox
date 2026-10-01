@@ -1415,11 +1415,67 @@ fn fit_keeps_a_long_area_readable() {
     r.frame();
     let cam = r.ui.camera().unwrap();
     let sc = client_ui::scene::Scene::build(r.ui.core.game().unwrap().layout().unwrap()).unwrap();
-    assert_eq!((cam.scale, Some(cam.centre)), (FIT_MIN_SCALE, sc.focus), "{cam:?}");
+    let band = client_ui::screens::VIEW_BAND;
+    let view = r.ui.diagram_rect().unwrap().shrink2(vec2(0.0, band));
+    assert_eq!(cam.scale, FIT_MIN_SCALE, "{cam:?}");
+    assert!(view.contains(cam.to_screen(view, sc.focus.unwrap())), "the busiest station is on screen");
+    let hint = |r: &mut Rig, h: &str| has_text(&r.frame(), h);
+    assert!(hint(&mut r, client_ui::screens::VIEW_HINT_PARTIAL), "Fit shows only part: the hint says so");
+    assert!(!hint(&mut r, client_ui::screens::VIEW_HINT));
     let mut r = Rig::in_game(converted("gretz-armainvilliers"), None);
     r.frame();
     assert!(r.ui.camera().unwrap().scale < FIT_MIN_SCALE, "a spectator sees the whole layout");
     let mut r = Rig::in_game(drawn_twobox(), Some("West"));
     r.frame();
     assert!(r.ui.camera().unwrap().scale > FIT_MIN_SCALE);
+}
+
+/// Polish spec M13: a readable Fit keeps the view inside the area, so a
+/// station near the area's end does not leave half the screen empty.
+#[test]
+fn a_readable_fit_stays_inside_the_area() {
+    use client_ui::scene::{FIT_MIN_SCALE, Scene};
+    let screen = Rect::from_min_max(pos2(0.0, 45.0), pos2(882.0, 800.0)).shrink2(vec2(0.0, client_ui::screens::VIEW_BAND));
+    let world = converted("gretz-armainvilliers");
+    for area in ["Gretz", "Tournan & Marles", "Mortcerf & Coulommiers"] {
+        let r = Rig::in_game(world.clone(), Some(area));
+        let sc = Scene::build(r.ui.core.game().unwrap().layout().unwrap()).unwrap();
+        let (cam, own) = (sc.fit_camera(screen).unwrap(), sc.own.unwrap());
+        assert_eq!(cam.scale, FIT_MIN_SCALE, "{area}");
+        let view = Rect::from_center_size(cam.centre, screen.size() / cam.scale);
+        let shown = view.intersect(own).width() / own.width();
+        println!("{area}: {:.0}% of the area shown", shown * 100.0);
+        assert!(view.intersect(own).width() >= view.width() - 0.5, "{area}: nothing but the area on screen");
+        assert!(view.contains(sc.focus.unwrap()), "{area}: the busiest station is on screen");
+        if area.starts_with("Mortcerf") {
+            assert!(shown >= 0.7, "{area}: {shown}");
+        }
+    }
+}
+
+/// Polish spec M13, H7: with a readable Fit an untouched view follows the
+/// window and the Fit button comes back to it after a pan.
+#[test]
+fn a_readable_fit_follows_the_window_and_the_fit_button_returns_to_it() {
+    let mut r = Rig::in_game(converted("gretz-armainvilliers"), Some("Gretz"));
+    r.frame();
+    let first_rect = r.ui.diagram_rect().unwrap();
+    r.size = vec2(1100.0, 760.0);
+    r.frame();
+    r.frame();
+    let resized = r.ui.camera().unwrap();
+    let sc = client_ui::scene::Scene::build(r.ui.core.game().unwrap().layout().unwrap()).unwrap();
+    let band = client_ui::screens::VIEW_BAND;
+    let rect = r.ui.diagram_rect().unwrap();
+    assert_ne!(rect.size(), first_rect.size(), "the window really changed");
+    assert_eq!(Some(resized), sc.fit_camera(rect.shrink2(vec2(0.0, band))), "the untouched Fit followed the window");
+    assert_eq!(resized.scale, client_ui::scene::FIT_MIN_SCALE);
+    let out = r.frame();
+    click_text(&mut r, &out, "+");
+    r.frame();
+    assert_ne!(r.ui.camera().unwrap().scale, resized.scale);
+    let out = r.frame();
+    click_text(&mut r, &out, "Fit");
+    r.frame();
+    assert_eq!(r.ui.camera().unwrap(), resized, "Fit returns to the readable view");
 }

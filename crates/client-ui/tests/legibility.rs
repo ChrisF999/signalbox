@@ -84,8 +84,10 @@ fn every_view_is_legible_at_every_zoom() {
             let names = Names::new(&l);
             let view = format!("{name} {}", area.as_deref().unwrap_or("spectator"));
             for (window, screen) in windows() {
-                let fit = sc.fit_camera(screen).unwrap();
-                let readable = fit.scale > Camera::fit(sc.fit_bounds().unwrap(), screen).scale;
+                // The app fits into the diagram minus the button and hint bands.
+                let fit_to = screen.shrink2(egui::vec2(0.0, client_ui::screens::VIEW_BAND));
+                let fit = sc.fit_camera(fit_to).unwrap();
+                let readable = sc.fit_is_partial(fit_to);
                 for zoom in [1.0_f32, 2.0, 4.0] {
                     let cam = Camera { centre: fit.centre, scale: fit.scale * zoom };
                     let st = PaintState {
@@ -106,13 +108,16 @@ fn every_view_is_legible_at_every_zoom() {
                     let ms = t0.elapsed().as_secs_f64() * 1000.0;
                     // Own numbers hidden where the player looks (a readable Fit,
                     // polish spec M13, shows only part of a long area).
-                    let hidden: Vec<String> = d
-                        .movable
-                        .iter()
-                        .zip(&plan.spots)
-                        .filter(|(m, spot)| m.role == labels::Role::Number && spot.is_none() && screen.contains(d.texts[m.text].at))
-                        .map(|(m, _)| d.texts[m.text].text.clone())
-                        .collect();
+                    let hidden: Vec<String> = if readable {
+                        d.movable
+                            .iter()
+                            .zip(&plan.spots)
+                            .filter(|(m, spot)| m.role == labels::Role::Number && spot.is_none() && screen.contains(d.texts[m.text].at))
+                            .map(|(m, _)| d.texts[m.text].text.clone())
+                            .collect()
+                    } else {
+                        plan.hidden_numbers.clone()
+                    };
                     let audit = labels::audit(&on_screen(labels::apply(d, &plan), screen), &mut measure);
                     rows.push(Row { window, view: view.clone(), zoom, glyph: paint::glyph(cam.scale), audit, hidden, ms, readable });
                 }
