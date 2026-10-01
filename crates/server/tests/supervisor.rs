@@ -178,9 +178,30 @@ fn layouts_are_read_once_and_only_valid_names_count() {
     assert_eq!(l.path("twobox"), Some(dir.join("twobox.json")));
     assert_eq!(l.path("../layouts/twobox"), None);
     assert_eq!(l.path("Bad Name"), None);
-    std::fs::write(dir.join("broken.json"), r#"{"areas": [{"title": "no name"}]}"#).unwrap();
+    for broken in [
+        r#"{"areas": [{"title": "no name"}]}"#,
+        r#"{"areas": [{"name": "A"}, {"name": 5}]}"#,
+        r#"{"areas": null}"#,
+        r#"{"areas": {"name": "A"}}"#,
+        r#"{"title": "no areas"}"#,
+        r#"[]"#,
+    ] {
+        std::fs::write(dir.join("broken.json"), broken).unwrap();
+        let err = Layouts::load(&dir).unwrap_err();
+        assert!(err.contains("broken.json") && err.contains("no named areas"), "{broken}: {err}");
+    }
+    std::fs::write(dir.join("broken.json"), r#"{"areas": [{"name": "A"}"#).unwrap();
     let err = Layouts::load(&dir).unwrap_err();
-    assert!(err.contains("broken.json") && err.contains("no named areas"), "{err}");
+    assert!(err.contains("broken.json") && !err.contains("no named areas"), "not JSON: {err}");
+    // Only the area names are read; everything else in the world is skipped.
+    std::fs::write(
+        dir.join("broken.json"),
+        r#"{"title": "T", "areas": [{"name": "B", "seeds": ["x"]}, {"name": "A"}], "layout": {"lines": [[1, 2]]}, "areas_note": null}"#,
+    )
+    .unwrap();
+    let l = Layouts::load(&dir).unwrap();
+    assert_eq!(l.infos()[0], LayoutInfo { name: s("broken"), areas: vec![s("B"), s("A")] });
+    std::fs::remove_file(dir.join("broken.json")).unwrap();
     assert!(Layouts::load(&root.join("absent")).is_err());
 }
 

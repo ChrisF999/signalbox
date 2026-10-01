@@ -21,6 +21,23 @@ pub fn new_game_id() -> String {
     format!("g-{tail}")
 }
 
+/// A world's area names, in world order. Only `areas[].name` is read:
+/// the rest of the world is skipped without being built, so the front never
+/// holds a whole world in memory (Liverpool Street's is about 8 MB as a
+/// `serde_json::Value`).
+fn area_names(text: &str) -> Result<Vec<String>, serde_json::Error> {
+    #[derive(serde::Deserialize)]
+    struct World {
+        areas: Vec<Area>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Area {
+        name: String,
+    }
+    let w: World = serde_json::from_str(text)?;
+    Ok(w.areas.into_iter().map(|a| a.name).collect())
+}
+
 #[derive(Clone, Debug)]
 pub struct Layouts {
     dir: PathBuf,
@@ -41,11 +58,10 @@ impl Layouts {
                 continue;
             }
             let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-            let areas = v["areas"]
-                .as_array()
-                .and_then(|a| a.iter().map(|x| x["name"].as_str().map(str::to_string)).collect::<Option<Vec<String>>>())
-                .ok_or_else(|| format!("{}: no named areas", path.display()))?;
+            let areas = area_names(&text).map_err(|e| match e.is_data() {
+                true => format!("{}: no named areas ({e})", path.display()),
+                false => format!("{}: {e}", path.display()),
+            })?;
             list.push(LayoutInfo { name: name.to_string(), areas });
         }
         list.sort_by(|a, b| a.name.cmp(&b.name));
