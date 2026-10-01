@@ -303,7 +303,8 @@ output is byte-identical for the same input.
   every berth box, exits); `labels::plan` places them greedily in priority
   order (own numbers, ○A letters, line names, platform numbers, labels,
   fringe numbers) and hides what has no room; headcodes never move. Plans
-  depend only on scene, zoom and settings, and `UiApp` caches one per zoom.
+  depend only on scene, zoom and settings, and `UiApp` caches one per settled zoom (it replans every frame
+  while zooming).
   ○A buttons exist (drawn and hit) only where numbers are drawn.
   `tests/legibility.rs` is the acceptance measurement (`--nocapture` prints it).
 - `hit_test` takes the view as well as the scene; points and exits win over

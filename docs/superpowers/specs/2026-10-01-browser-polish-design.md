@@ -553,7 +553,7 @@ a screen test on Drain's TS2 timetable at 06:30 where BW01 is scrolled out of vi
   merged code. client-ui is not touched by the tutorial at `b5a9657`, but its lesson highlights may land in
   `paint.rs`; texts without placement data are left alone by design.
 - **Placement cost** on a zoom step: measured 3–5 ms native release per plan (Gretz spectator, 248 movable
-  texts, the worst), about three times that in debug, once per zoom level (panning reuses it); wasm will be
+  texts, the worst), about twenty times that in debug (93 ms measured; not a wasm estimate), once per zoom level (panning reuses it); wasm will be
   slower, so a continuous wheel zoom may stutter on a slow machine. The legibility test prints the times.
 - **Scratch versus merged code**: the numbers in §3.4 come from the scratch implementation on `5eb82f0`;
   the plan's legibility test is the judge after the tutorial merge, and its thresholds may need the owner's

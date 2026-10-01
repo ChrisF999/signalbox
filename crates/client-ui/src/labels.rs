@@ -6,7 +6,7 @@
 //! caller's `measure`. A plan holds offsets from each text's own spot, so it
 //! stays right when the camera pans and is made again only on a zoom.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use egui::{Align, Align2, Pos2, Rect, Vec2, vec2};
 
@@ -358,7 +358,21 @@ pub struct Audit {
 }
 
 pub fn audit(d: &Drawing, measure: &mut dyn FnMut(&TextItem) -> Vec2) -> Audit {
-    let rects: Vec<Rect> = d.texts.iter().map(|t| t.anchor.anchor_size(t.at, measure(t))).collect();
+    // A fixed text (a headcode) counts as its whole berth box (spec §3.1):
+    // the box whose rectangle holds its anchor.
+    let movable: BTreeSet<usize> = d.movable.iter().map(|m| m.text).collect();
+    let rects: Vec<Rect> = d
+        .texts
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let r = t.anchor.anchor_size(t.at, measure(t));
+            match d.keep.boxes.iter().find(|b| !movable.contains(&i) && b.contains(t.at)) {
+                Some(&b) => r.union(b),
+                None => r,
+            }
+        })
+        .collect();
     let mut a = Audit::default();
     for i in 0..rects.len() {
         for j in i + 1..rects.len() {
