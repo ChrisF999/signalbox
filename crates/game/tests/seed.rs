@@ -220,3 +220,30 @@ fn creating_over_an_existing_save_is_refused() {
     drop(Game::create(&path, &twobox_json(), meta()).unwrap());
     assert!(Seeding::create(&path, &twobox_json(), meta(), hms("07:30")).is_err());
 }
+
+/// Saves from before seeding moved the world's start instead (as an
+/// earlier start still does): they have no `seed` rows and no `seed_to`,
+/// and resume and play on exactly as before.
+#[test]
+fn a_save_with_a_moved_start_resumes_exactly_as_before() {
+    let mut v: serde_json::Value = serde_json::from_str(&twobox_json()).unwrap();
+    v["options"]["start_time"] = "07:05:00".into();
+    let json = v.to_string();
+    let path = temp_save("old-style");
+    let mut g = Game::create(&path, &json, meta()).unwrap();
+    run_to_tick(&mut g, 600);
+    g.save_now();
+    let copy = temp_save("old-style-copy");
+    std::fs::copy(&path, &copy).unwrap();
+    std::fs::copy(format!("{}-wal", path.display()), format!("{}-wal", copy.display())).unwrap();
+    run_to_tick(&mut g, 1800);
+    let mut r = Game::resume(&copy).unwrap();
+    assert_eq!(r.sim().tick(), 600);
+    r.set_paused(false);
+    run_to_tick(&mut r, 1800);
+    assert_eq!(r.sim().state_hash(), g.sim().state_hash());
+    assert_eq!(meta_row(&copy, "seed_to"), None);
+    assert_eq!(meta_row(&copy, "start").as_deref(), Some("07:05:00"));
+    let log = logged(&copy);
+    assert!(!log.is_empty() && log.iter().all(|(_, p, _)| p == ROBOT));
+}

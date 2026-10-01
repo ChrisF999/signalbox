@@ -26,6 +26,7 @@ scripts/cargo test --release -p signalbox-server --features dev-auth --test e2e 
 scripts/cargo test -p signalbox-client-core                   # client logic: connection, lobby, clicks (in-process game)
 scripts/cargo test -p signalbox-client-ui                     # diagram and screens, headless egui (no GPU)
 scripts/cargo test -p signalbox-game --test lessons -- --nocapture   # every lesson loads, draws and is played through
+scripts/cargo test --release -p signalbox-game --test seed_timing -- --ignored --nocapture --test-threads 1   # seeding cost; the real WTT at 07:30
 scripts/cargo test -p signalbox-server --features dev-auth --test client   # client-core over the real front
 scripts/wasm-build                                            # the browser client into target/web-dist/ (tools image on first use)
 scripts/ci/test.sh                                            # the CI gate (native cargo, offline, -D warnings; builds the web client when wasm is present, always on the runner via SIGNALBOX_REQUIRE_WASM=1)
@@ -196,6 +197,17 @@ output is byte-identical for the same input.
 - Resume (`game::save::resume_sim`) restores the newest snapshot and replays the
   log rows after its `last_seq` up to the last logged tick, leaving
   that tick's commands queued (and the robot marked as run if it logged there).
+- Late starts (timetables spec §3.4, P7/P8; `game::seed`): a game created
+  with a start later than its world's is run there first by the robot for
+  every area (`Seeding`; its runs logged as `seed`, one batch per run),
+  built at `<save>.seeding`, snapshotted at the start, given meta `seed_to`
+  and renamed into place; the world keeps its own start. An earlier start
+  still rewrites `options.start_time`. The game process does it after the
+  front connects (a `Status` with `preparing` every second, the front's
+  frames held until ready) within 60 s real time (`process::SEED_BUDGET`;
+  `--seed-budget-ms` for tests), else it exits 3 and the lobby gets
+  `seed_too_slow`. A create that fails while being prepared is not listed.
+  Cost (release): Liverpool St 05:00→23:00 about 9 s (`--test seed_timing`).
 - Saves are WAL with `synchronous=NORMAL` (a power cut may lose the last
   moments; the owner accepted that). Every command is logged before
   `sim.submit`; a robot run's commands are one transaction
