@@ -57,7 +57,7 @@ fn every_shipped_layout_draws_for_every_box() {
             let cam = Camera::fit(sc.fit_bounds().unwrap(), screen);
             let names = Names::new(&l);
             for (time, aspects) in [(0.0, AspectMode::RedGreen), (0.3, AspectMode::Real)] {
-                let st = PaintState { view: Some(&v), selected: None, exits: &[], refused: None, time, aspects, numbers: true, names: &names };
+                let st = PaintState { view: Some(&v), selected: None, exits: &[], refused: None, time, aspects, numbers: true, names: &names, highlight: &[] };
                 let d = draw(&sc, &cam, screen, &st);
                 assert!(d.shapes.iter().all(finite), "{name} {area:?}");
                 assert!(d.texts.iter().all(|t| t.at.is_finite() && t.size.is_finite()), "{name} {area:?}: texts");
@@ -71,6 +71,60 @@ fn every_shipped_layout_draws_for_every_box() {
             if name == "liverpool-st" && area.is_none() {
                 assert_eq!(sc.labels.iter().filter(|l| l.arrow.is_some()).count(), 8, "the eight line names");
                 assert!(!v.berths.is_empty(), "headcodes to draw");
+            }
+        }
+    }
+}
+
+/// The four lesson worlds, drawn for their player and for a spectator with
+/// their trains running and every highlight of every step: nothing panics,
+/// every shape is finite, every highlight names something on screen.
+#[test]
+fn every_lesson_draws_with_its_highlights() {
+    let screen = Rect::from_min_size(pos2(0.0, 40.0), vec2(880.0, 700.0));
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../lessons");
+    let mut dirs: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+    dirs.sort();
+    assert_eq!(dirs.len(), 4);
+    for d in dirs {
+        let lesson = game::lesson::load_lesson(&d).unwrap();
+        let steps = lesson.file.steps.clone();
+        let area = lesson.file.area.clone();
+        let (mut g, mut r) = game::lesson::start(lesson);
+        r.connect(&mut g, "pat");
+        g.connect("sam");
+        for step in &steps {
+            for a in &step.actions {
+                if let game::lesson::Action::Spawn { headcode, entry } = a {
+                    if let Some(i) = game::lesson::spawn_entry(g.sim().world(), headcode, entry) {
+                        let _ = g.offer_entry(i);
+                    }
+                }
+            }
+        }
+        for _ in 0..30 {
+            r.advance(&mut g, 1.0);
+        }
+        for who in ["pat", "sam"] {
+            let (l, v) = (g.layout_of(who).unwrap(), g.view_of(who).unwrap());
+            assert_eq!(l.area.as_deref(), (who == "pat").then_some(area.as_str()), "{}", d.display());
+            let sc = Scene::build(&l).unwrap_or_else(|| panic!("{}: no scene", d.display()));
+            let cam = Camera::fit(sc.fit_bounds().unwrap(), screen);
+            let names = Names::new(&l);
+            for step in &steps {
+                let diagram: Vec<_> = step.highlight.iter().filter(|h| !matches!(h, protocol::Highlight::Ui(u) if !u.starts_with("auto:"))).cloned().collect();
+                let st = PaintState { view: Some(&v), selected: None, exits: &[], refused: None, time: 0.25, aspects: AspectMode::Real, numbers: true, names: &names, highlight: &diagram };
+                let dr = draw(&sc, &cam, screen, &st);
+                assert!(dr.shapes.iter().all(finite), "{}", d.display());
+                if who == "pat" {
+                    let lit = dr.shapes.iter().filter(|s| match s {
+                        Shape::Circle(c) => c.stroke.color.r() == 0xFF && c.stroke.color.g() == 0x8C,
+                        Shape::Rect(r) => r.stroke.color.r() == 0xFF && r.stroke.color.g() == 0x8C,
+                        Shape::LineSegment { stroke, .. } => stroke.color.r() == 0xFF && stroke.color.g() == 0x8C,
+                        _ => false,
+                    }).count();
+                    assert!(lit >= diagram.len(), "{}: step `{}` highlights something not drawn", d.display(), step.say);
+                }
             }
         }
     }

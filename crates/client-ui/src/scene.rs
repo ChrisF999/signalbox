@@ -96,6 +96,8 @@ pub struct ExitMark {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlatformMark {
+    /// The station's code, as the timetable names it (`HXC`).
+    pub place: String,
     pub rect: Rect,
     /// The platform number, drawn inside the block.
     pub label: String,
@@ -329,7 +331,7 @@ impl Scene {
         sc.berths.extend(boundary_berths);
         for p in &g.platforms {
             if let (Some(a), Some(b)) = (pt(p.x1, p.y1), pt(p.x2, p.y2)) {
-                sc.platforms.push(PlatformMark { rect: Rect::from_two_pos(a, b), label: p.platform.clone() });
+                sc.platforms.push(PlatformMark { place: p.place.clone(), rect: Rect::from_two_pos(a, b), label: p.platform.clone() });
             }
         }
         for t in &g.labels {

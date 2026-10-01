@@ -83,6 +83,7 @@ impl Rig {
             aspects: self.aspects,
             numbers: self.numbers,
             names: &self.names,
+            highlight: &[],
         };
         draw(&self.sc, &self.cam, screen(), &st)
     }
@@ -375,6 +376,7 @@ fn no_view_yet_draws_everything_idle() {
         aspects: AspectMode::RedGreen,
         numbers: true,
         names: &names,
+        highlight: &[],
     };
     let d = draw(&r.sc, &r.cam, screen(), &st);
     assert_eq!(lines_of(&d, TRACK_FREE, r.w()).len(), 2);
@@ -613,7 +615,7 @@ fn absurdly_long_runs_have_a_bounded_number_of_arrows() {
     }];
     sc.tracks.clear();
     let names = Names::new(&r.layout);
-    let st = PaintState { view: None, selected: None, exits: &[], refused: None, time: 0.0, aspects: AspectMode::RedGreen, numbers: true, names: &names };
+    let st = PaintState { view: None, selected: None, exits: &[], refused: None, time: 0.0, aspects: AspectMode::RedGreen, numbers: true, names: &names, highlight: &[] };
     let cam = Camera { centre: pos2(0.0, 0.0), scale: client_ui::camera::MAX_SCALE };
     let d = draw(&sc, &cam, screen(), &st);
     let arrows: Vec<Pos2> = d
@@ -641,7 +643,7 @@ fn a_backward_runs_arrow_is_on_the_right_of_its_travel() {
         loose_end: false,
     }];
     let names = Names::new(&r.layout);
-    let st = PaintState { view: None, selected: None, exits: &[], refused: None, time: 0.0, aspects: AspectMode::RedGreen, numbers: true, names: &names };
+    let st = PaintState { view: None, selected: None, exits: &[], refused: None, time: 0.0, aspects: AspectMode::RedGreen, numbers: true, names: &names, highlight: &[] };
     let d = draw(&sc, &r.cam, screen(), &st);
     let tips: Vec<Pos2> = d
         .shapes
@@ -672,4 +674,67 @@ fn headcodes_are_drawn_under_signals_and_auto_buttons() {
     let disc = d.shapes.iter().position(|s| matches!(s, Shape::Circle(c) if c.center == w2)).unwrap();
     let auto = d.shapes.iter().position(|s| matches!(s, Shape::Circle(c) if c.radius == AUTO_R && c.stroke.color == AUTO)).unwrap();
     assert!(knockout < disc && knockout < auto, "knock-out {knockout}, disc {disc}, ○A {auto}");
+}
+
+/// The tutorial's highlight shapes, drawn at time 0.
+fn highlighted(d: &Drawing) -> Vec<&Shape> {
+    let lit = |c: Color32| c == highlight_colour(0.0);
+    d.shapes
+        .iter()
+        .filter(|s| match s {
+            Shape::Circle(c) => lit(c.stroke.color),
+            Shape::Rect(r) => lit(r.stroke.color),
+            Shape::LineSegment { stroke, .. } => lit(stroke.color),
+            _ => false,
+        })
+        .collect()
+}
+
+/// Tutorial spec §4: a pulsing outline round each highlighted thing.
+#[test]
+fn a_lesson_highlight_outlines_what_it_names_and_pulses() {
+    let r = Rig::new(None);
+    let with = |h: &[Highlight], time: f64| {
+        let st = PaintState {
+            view: Some(&r.view),
+            selected: None,
+            exits: &[],
+            refused: None,
+            time,
+            aspects: AspectMode::RedGreen,
+            numbers: true,
+            names: &r.names,
+            highlight: h,
+        };
+        draw(&r.sc, &r.cam, screen(), &st)
+    };
+    assert!(highlighted(&with(&[], 0.0)).is_empty());
+    let s = |x: &str| x.to_string();
+    let cases = [
+        (Highlight::Signal(s("W1")), 1),
+        (Highlight::Exit(ExitName::Signal(s("A"))), 1),
+        (Highlight::Exit(ExitName::Node(s("E"))), 1),
+        (Highlight::Points(s("P")), 1),
+        (Highlight::Berth(s("BA")), 1),
+        (Highlight::Section(s("TW2")), 2),
+        (Highlight::Section(s("TP")), 6),
+        (Highlight::Platform { place: s("EST"), platform: s("1") }, 1),
+        (Highlight::Ui(s("auto:W1")), 1),
+        (Highlight::Signal(s("Z9")), 0),
+        (Highlight::Berth(s("nope")), 0),
+        (Highlight::Platform { place: s("NST"), platform: s("9") }, 0),
+        (Highlight::Ui(s("settings")), 0),
+        (Highlight::Ui(s("auto:Z9")), 0),
+    ];
+    for (h, n) in cases {
+        assert_eq!(highlighted(&with(std::slice::from_ref(&h), 0.0)).len(), n, "{h:?}");
+    }
+    let w1 = r.sc.signals.iter().find(|m| m.name == "W1").unwrap();
+    let d = with(&[Highlight::Signal(s("W1"))], 0.0);
+    let Shape::Circle(c) = highlighted(&d)[0] else { panic!() };
+    assert!(close(c.center, signal_disc(&r.cam, screen(), w1)), "round the lamp");
+    // 1 Hz between a third and full strength.
+    assert_eq!(highlight_colour(0.25).a(), 255);
+    assert_eq!(highlight_colour(0.75).a(), 89);
+    assert_eq!(highlight_colour(1.25), highlight_colour(0.25));
 }

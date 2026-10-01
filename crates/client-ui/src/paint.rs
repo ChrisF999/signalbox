@@ -8,7 +8,7 @@
 
 use client_core::{AspectMode, Names};
 use egui::{Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, Vec2, vec2};
-use protocol::{Aspect, ExitName, Held, PointsPos, RouteState, SectionView, View};
+use protocol::{Aspect, ExitName, Held, Highlight, PointsPos, RouteState, SectionView, View};
 
 use crate::camera::Camera;
 use crate::hit::{auto_button, berth_rect, signal_disc};
@@ -32,6 +32,11 @@ pub const FRINGE: Color32 = Color32::from_rgb(0x6E, 0x6E, 0x6E);
 pub const SELECT: Color32 = Color32::from_rgb(0x00, 0xC8, 0xFF);
 /// The steady outline on a refused command's signal.
 pub const REFUSED: Color32 = Color32::from_rgb(0xFF, 0x3C, 0xFF);
+/// What a tutorial step points at: a colour no panel state uses.
+pub const HIGHLIGHT: Color32 = Color32::from_rgb(0xFF, 0x8C, 0x1A);
+/// The highlight's outline: this wide, and this far round what it marks.
+pub const HIGHLIGHT_W: f32 = 2.5;
+pub const HIGHLIGHT_GAP_PX: f32 = 5.0;
 
 /// Track width: this many pixels per layout unit, within the limits.
 pub const TRACK_UNITS: f32 = 9.0;
@@ -120,6 +125,14 @@ pub fn blink_on(time: f64) -> bool {
     (time * 4.0).floor().rem_euclid(2.0) == 0.0
 }
 
+/// A tutorial highlight's colour at `time`: a calm 1 Hz pulse between a
+/// third and full strength (tutorial spec §4: UI, not panel state).
+pub fn highlight_colour(time: f64) -> Color32 {
+    let k = 0.5 + 0.5 * (time * std::f64::consts::TAU).sin();
+    let a = (255.0 * (0.35 + 0.65 * k)).round().clamp(0.0, 255.0) as u8;
+    Color32::from_rgba_unmultiplied(HIGHLIGHT.r(), HIGHLIGHT.g(), HIGHLIGHT.b(), a)
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextItem {
     pub at: Pos2,
@@ -151,6 +164,8 @@ pub struct PaintState<'a> {
     /// Signal numbers on.
     pub numbers: bool,
     pub names: &'a Names,
+    /// What the tutorial step points at (empty outside a tutorial).
+    pub highlight: &'a [Highlight],
 }
 
 /// A bar from `a` to `b`: solid, or for the fringe two thin edge lines.
@@ -479,7 +494,81 @@ pub fn draw(scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) -> Drawi
             }
         }
     }
+    highlight_shapes(&mut d, scene, cam, screen, st);
     d
+}
+
+/// Outlines round what a tutorial step points at, pulsing; on top of
+/// everything else. Names the scene does not have draw nothing; `ui`
+/// highlights other than `auto:<signal>` are drawn by the screens.
+fn highlight_shapes(d: &mut Drawing, scene: &Scene, cam: &Camera, screen: Rect, st: &PaintState) {
+    if st.highlight.is_empty() {
+        return;
+    }
+    let colour = highlight_colour(st.time);
+    let stroke = Stroke::new(HIGHLIGHT_W, colour);
+    let to = |p: Pos2| cam.to_screen(screen, p);
+    let w = track_w(cam.scale);
+    let ring = |d: &mut Drawing, c: Pos2, r: f32| d.shapes.push(Shape::circle_stroke(c, r, stroke));
+    let boxed = |d: &mut Drawing, r: Rect| {
+        d.shapes.push(Shape::rect_stroke(r.expand(HIGHLIGHT_GAP_PX - 2.0), CornerRadius::same(2), stroke, StrokeKind::Outside));
+    };
+    // Both sides of a bar, clear of it.
+    let along = |d: &mut Drawing, a: Pos2, b: Pos2| {
+        let v = b - a;
+        if v.length() == 0.0 {
+            return;
+        }
+        let n = vec2(-v.y, v.x).normalized() * (w / 2.0 + HIGHLIGHT_GAP_PX);
+        for side in [n, -n] {
+            d.shapes.push(Shape::line_segment([a + side, b + side], stroke));
+        }
+    };
+    let signal = |name: &str| scene.signals.iter().find(|s| s.name == name);
+    for h in st.highlight {
+        match h {
+            Highlight::Signal(s) | Highlight::Exit(ExitName::Signal(s)) => {
+                if let Some(m) = signal(s) {
+                    ring(d, signal_disc(cam, screen, m), LAMP_R + HIGHLIGHT_GAP_PX + 4.0);
+                }
+            }
+            Highlight::Exit(ExitName::Node(n)) => {
+                if let Some(e) = scene.exits.iter().find(|e| e.node == *n) {
+                    boxed(d, Rect::from_center_size(to(e.at), vec2(7.0, 7.0)));
+                }
+            }
+            Highlight::Points(p) => {
+                if let Some(m) = scene.points.iter().find(|m| m.name == *p) {
+                    ring(d, to(m.at), w + HIGHLIGHT_GAP_PX * 2.0);
+                }
+            }
+            Highlight::Berth(b) => {
+                if let Some(m) = scene.berths.iter().find(|m| m.name == *b) {
+                    boxed(d, berth_rect(cam, screen, m.at, m.offset_px));
+                }
+            }
+            Highlight::Section(s) => {
+                for t in scene.tracks.iter().filter(|t| t.section == *s) {
+                    along(d, to(t.a), to(t.b));
+                }
+                for p in scene.points.iter().filter(|p| p.section == *s) {
+                    for leg in [p.toe, p.normal, p.reverse].into_iter().flatten() {
+                        along(d, to(p.at), to(leg));
+                    }
+                }
+            }
+            Highlight::Platform { place, platform } => {
+                for p in scene.platforms.iter().filter(|p| p.place == *place && p.label == *platform) {
+                    boxed(d, Rect::from_two_pos(to(p.rect.min), to(p.rect.max)));
+                }
+            }
+            Highlight::Ui(u) => {
+                if let Some(c) = u.strip_prefix("auto:").and_then(signal).and_then(|m| auto_button(cam, screen, m)) {
+                    ring(d, c, AUTO_R + HIGHLIGHT_GAP_PX);
+                }
+            }
+        }
+    }
 }
 
 /// Put a drawing on screen.

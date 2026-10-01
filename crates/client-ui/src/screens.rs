@@ -1,17 +1,21 @@
-//! The screens (spec D1 §3, realism spec §3–§4): the lobby, and in a game
-//! the top bar (game, workstation, clock, votes, settings, players), the
-//! diagram, the train list or the simplifier and the alarms on the right,
-//! and the headcode enquiry window. `UiApp::ui` is the whole frame; the
-//! shell calls it.
+//! The screens (spec D1 §3, realism spec §3–§4, tutorial spec §3–§4): the
+//! lobby with its Tutorial list, and in a game the top bar (game,
+//! workstation, clock, votes, settings, players), the diagram, the lesson
+//! box in a tutorial, the train list or the simplifier and the alarms on
+//! the right, and the headcode enquiry window. `UiApp::ui` is the whole
+//! frame; the shell calls it.
 
 use std::time::Duration;
 
 use client_core::simplifier::{self, Line};
 use client_core::text::{fmt_hms, proposal_text, train_state_text, vote_text};
 use client_core::trains::train_list;
-use client_core::{App, AspectMode, Link, Settings, SettingsStore, Target};
-use egui::{Align, Align2, Color32, CornerRadius, FontId, Frame, Key, Layout, PointerButton, Rect, RichText, Sense, Ui, vec2};
-use protocol::{GameState, Proposal};
+use client_core::{App, AspectMode, LessonTicks, Link, Settings, SettingsStore, Target};
+use egui::{
+    Align, Align2, Color32, CornerRadius, FontId, Frame, Key, Layout, PointerButton, Rect, Response, RichText, Sense, Stroke,
+    StrokeKind, Ui, vec2,
+};
+use protocol::{GameState, Highlight, Proposal};
 
 use crate::camera::Camera;
 use crate::hit::hit_test;
@@ -87,6 +91,10 @@ pub struct UiApp {
     /// The simplifier's lines (each marked if it is its row's first) for
     /// (layout generation, search).
     simplifier_lines: Option<((u64, String), Vec<(Line, bool)>)>,
+    /// The lessons completed in this browser.
+    ticks: LessonTicks,
+    /// Where the ticks are kept between visits (none in most tests).
+    ticks_store: Option<Box<dyn SettingsStore>>,
 }
 
 impl UiApp {
@@ -109,6 +117,8 @@ impl UiApp {
             enquiry: None,
             shown_game: None,
             simplifier_lines: None,
+            ticks: LessonTicks::default(),
+            ticks_store: None,
         }
     }
 
@@ -120,8 +130,37 @@ impl UiApp {
         ui
     }
 
+    /// `with_store`, and the lesson ticks `lessons` holds, saving each new
+    /// one back to it.
+    pub fn with_stores(core: App, settings: Box<dyn SettingsStore>, lessons: Box<dyn SettingsStore>) -> UiApp {
+        let mut ui = UiApp::with_store(core, settings);
+        ui.ticks = lessons.load().map_or_else(LessonTicks::default, |t| LessonTicks::from_text(&t));
+        ui.ticks_store = Some(lessons);
+        ui
+    }
+
     pub fn settings(&self) -> Settings {
         self.settings
+    }
+
+    /// The lessons completed in this browser.
+    pub fn ticks(&self) -> &LessonTicks {
+        &self.ticks
+    }
+
+    /// A finished lesson is ticked (and kept) as soon as it is seen.
+    fn tick_finished_lesson(&mut self) {
+        let Some(id) = self.core.game().and_then(|g| g.lesson()).filter(|v| v.done).map(|v| v.lesson.clone()) else { return };
+        if self.ticks.insert(&id) {
+            if let Some(store) = self.ticks_store.as_mut() {
+                store.save(&self.ticks.to_text());
+            }
+        }
+    }
+
+    /// The highlights of the lesson step showing (none outside a tutorial).
+    fn highlights(&self) -> Vec<Highlight> {
+        self.core.game().and_then(|g| g.lesson()).map_or_else(Vec::new, |v| if v.done { vec![] } else { v.highlight.clone() })
     }
 
     fn set_settings(&mut self, s: Settings) {
@@ -156,6 +195,7 @@ impl UiApp {
     pub fn ui(&mut self, ui: &mut Ui) {
         let now = ui.input(|i| i.time);
         self.core.tick(now);
+        self.tick_finished_lesson();
         let game = self.core.game().map(|g| g.id.clone());
         if game != self.shown_game {
             self.enquiry = None;
@@ -188,6 +228,8 @@ impl UiApp {
             if let Some(n) = self.core.lobby_note() {
                 ui.label(RichText::new(n).color(ALARM));
             }
+            ui.separator();
+            self.tutorials(ui);
             ui.separator();
             ui.label(RichText::new("New game").strong());
             let layouts: Vec<String> = self.core.layouts().iter().map(|l| l.name.clone()).collect();
@@ -277,22 +319,56 @@ impl UiApp {
         });
     }
 
+    /// The lobby's Tutorial list: each lesson, ticked once done here.
+    fn tutorials(&mut self, ui: &mut Ui) {
+        ui.label(RichText::new("Tutorial").strong());
+        let lessons = self.core.lessons().to_vec();
+        if lessons.is_empty() {
+            ui.label("No lessons on this server.");
+            return;
+        }
+        let mut start = None;
+        egui::Grid::new("lessons").striped(true).show(ui, |ui| {
+            for l in &lessons {
+                ui.label(&l.title);
+                ui.label(format!("{} steps", l.steps));
+                ui.label(if self.ticks.done(&l.id) { RichText::new("done").color(paint::GREEN) } else { RichText::new("") });
+                if ui.button("Start").clicked() {
+                    start = Some(l.id.clone());
+                }
+                ui.end_row();
+            }
+        });
+        if let Some(id) = start {
+            self.core.start_lesson(&id);
+        }
+    }
+
     fn game(&mut self, ui: &mut Ui, now: f64) {
-        self.top_bar(ui);
-        egui::Panel::right("side").default_size(SIDE_W).min_size(SIDE_W).show(ui, |ui| self.side(ui));
+        let tab = match self.side_tab {
+            SideTab::Trains => "trains",
+            SideTab::Simplifier => "simplifier",
+        };
+        self.core.report_screen(tab);
+        self.top_bar(ui, now);
+        egui::Panel::right("side").default_size(SIDE_W).min_size(SIDE_W).show(ui, |ui| self.side(ui, now));
         egui::CentralPanel::default().frame(Frame::NONE.fill(BG)).show(ui, |ui| self.diagram_ui(ui, now));
         self.enquiry_window(ui);
     }
 
-    fn top_bar(&mut self, ui: &mut Ui) {
+    fn top_bar(&mut self, ui: &mut Ui, now: f64) {
         let Some(g) = self.core.game() else { return };
+        let lesson = g.lesson().is_some();
+        let id = if lesson { "Tutorial" } else { g.id.as_str() };
         let title = match g.area() {
             Some(a) => match g.names().workstation(a) {
-                Some(ws) => format!("{} · Workstation {ws} · {a} ({})", g.id, g.you),
-                None => format!("{} · {a} ({})", g.id, g.you),
+                Some(ws) => format!("{id} · Workstation {ws} · {a} ({})", g.you),
+                None => format!("{id} · {a} ({})", g.you),
             },
-            None => format!("{} · spectating ({})", g.id, g.you),
+            None => format!("{id} · spectating ({})", g.you),
         };
+        let lit = self.highlights();
+        let marked = |name: &str| lit.contains(&Highlight::Ui(name.to_string()));
         let view = g.view().cloned();
         let areas: Vec<String> = g.layout().map(|l| l.areas.clone()).unwrap_or_default();
         let holding = g.area().is_some();
@@ -303,7 +379,8 @@ impl UiApp {
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(title).strong());
                 if let Some(v) = &view {
-                    ui.label(RichText::new(fmt_hms(v.sim_time)).monospace().size(16.0));
+                    let clock = ui.label(RichText::new(fmt_hms(v.sim_time)).monospace().size(16.0));
+                    mark(ui, &clock, marked("clock"), now);
                     ui.label(if v.paused { "paused".to_string() } else { format!("{}×", v.speed) });
                     // Only voters get the buttons (owner decision 12).
                     if can_vote {
@@ -320,14 +397,15 @@ impl UiApp {
                     if let Some(vote) = &v.vote {
                         ui.label(RichText::new(vote_text(vote)).color(paint::YELLOW));
                     }
-                    if let Some(score) = v.score {
+                    // A tutorial keeps no score (tutorial spec §3).
+                    if let Some(score) = v.score.filter(|_| !lesson) {
                         ui.label(format!("Penalty {score}"));
                     }
                 }
                 if ui.button("Fit").clicked() {
                     self.fitted = None;
                 }
-                ui.menu_button("Settings", |ui| {
+                let menu = ui.menu_button("Settings", |ui| {
                     ui.label(RichText::new("Signal aspects").strong());
                     ui.radio_value(&mut settings.aspects, AspectMode::RedGreen, "Red/green (panel)");
                     ui.radio_value(&mut settings.aspects, AspectMode::Real, "Real aspects");
@@ -335,7 +413,9 @@ impl UiApp {
                     ui.checkbox(&mut settings.enquiry, "Headcode enquiry");
                     ui.checkbox(&mut settings.numbers, "Signal numbers");
                 });
-                if holding {
+                mark(ui, &menu.response, marked("settings"), now);
+                // A tutorial's player keeps the lesson's area.
+                if holding && !lesson {
                     if ui.button("Release area").clicked() {
                         act.push(Box::new(|a| a.release()));
                     }
@@ -349,7 +429,7 @@ impl UiApp {
                 for area in &areas {
                     let holder = view.as_ref().and_then(|v| v.holders.get(area)).map_or("robot", String::as_str);
                     ui.label(format!("{area}: {holder}"));
-                    if !holding && holder == "robot" && ui.small_button("Claim").clicked() {
+                    if !holding && !lesson && holder == "robot" && ui.small_button("Claim").clicked() {
                         let area = area.clone();
                         act.push(Box::new(move |a| a.claim(&area)));
                     }
@@ -362,12 +442,16 @@ impl UiApp {
         }
     }
 
-    /// The upper half: the train list or the simplifier; the lower half:
-    /// the alarms, always in view.
-    fn side(&mut self, ui: &mut Ui) {
+    /// In a tutorial the lesson box on top; then the train list or the
+    /// simplifier; below them the alarms, always in view.
+    fn side(&mut self, ui: &mut Ui, now: f64) {
+        self.lesson_box(ui);
+        let lit = self.highlights();
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.side_tab, SideTab::Trains, RichText::new("TRAINS").strong());
-            ui.selectable_value(&mut self.side_tab, SideTab::Simplifier, RichText::new("SIMPLIFIER").strong());
+            let trains = ui.selectable_value(&mut self.side_tab, SideTab::Trains, RichText::new("TRAINS").strong());
+            mark(ui, &trains, lit.contains(&Highlight::Ui("trains".into())), now);
+            let simplifier = ui.selectable_value(&mut self.side_tab, SideTab::Simplifier, RichText::new("SIMPLIFIER").strong());
+            mark(ui, &simplifier, lit.contains(&Highlight::Ui("simplifier".into())), now);
         });
         let half = ui.available_height() * 0.5;
         match self.side_tab {
@@ -384,6 +468,46 @@ impl UiApp {
                 ui.label(if e.alarm { text.color(ALARM) } else { text });
             }
         });
+    }
+
+    /// The lesson (tutorial spec §4): title, step, what to do, the alert,
+    /// and its buttons; on `done`, the way back to the lobby.
+    fn lesson_box(&mut self, ui: &mut Ui) {
+        let Some(v) = self.core.game().and_then(|g| g.lesson()).cloned() else { return };
+        let mut act: Option<fn(&mut App)> = None;
+        ui.label(RichText::new(&v.title).strong().size(15.0));
+        if v.done {
+            ui.label(RichText::new("Lesson complete. Well done!").color(paint::GREEN));
+            ui.horizontal(|ui| {
+                if ui.button("Back to tutorials").clicked() {
+                    act = Some(App::leave);
+                }
+                if ui.button("Restart lesson").clicked() {
+                    act = Some(App::lesson_restart);
+                }
+            });
+        } else {
+            ui.label(format!("Step {} of {}", v.index + 1, v.count));
+            ui.label(RichText::new(&v.say).size(14.0));
+            if let Some(a) = &v.alert {
+                ui.label(RichText::new(a).color(ALARM));
+            }
+            ui.horizontal(|ui| {
+                if v.needs_next && ui.button("Next").clicked() {
+                    act = Some(App::lesson_next);
+                }
+                if ui.button("Restart step").clicked() {
+                    act = Some(App::lesson_restart_step);
+                }
+                if ui.button("Restart lesson").clicked() {
+                    act = Some(App::lesson_restart);
+                }
+            });
+        }
+        ui.separator();
+        if let Some(f) = act {
+            f(&mut self.core);
+        }
     }
 
     fn trains_ui(&mut self, ui: &mut Ui, height: f32) {
@@ -535,6 +659,7 @@ impl UiApp {
             self.menu_target = hit_at(resp.interact_pointer_pos()).map(|h| h.target);
         }
         let exits = self.core.valid_exits();
+        let highlight = self.highlights();
         let Some(g) = self.core.game() else { return };
         let st = PaintState {
             view: g.view(),
@@ -545,6 +670,7 @@ impl UiApp {
             aspects: self.settings.aspects,
             numbers: self.settings.numbers,
             names: g.names(),
+            highlight: &highlight,
         };
         paint::paint(&painter, paint::draw(scene, &cam, rect, &st));
         match click {
@@ -598,6 +724,14 @@ impl UiApp {
                 }
             });
         }
+    }
+}
+
+/// The tutorial's pulsing outline round a control the step points at.
+fn mark(ui: &Ui, r: &Response, on: bool, now: f64) {
+    if on {
+        let stroke = Stroke::new(paint::HIGHLIGHT_W, paint::highlight_colour(now));
+        ui.painter().rect_stroke(r.rect.expand(2.0), CornerRadius::same(3), stroke, StrokeKind::Outside);
     }
 }
 
