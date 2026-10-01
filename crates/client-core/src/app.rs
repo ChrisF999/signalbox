@@ -446,7 +446,8 @@ impl App {
                     g.blocking = by.as_deref().and_then(|r| g.names.route_entrance(r)).map(str::to_string);
                     match entrance_of(cmd) {
                         Some(e) => g.refused = Some((e.to_string(), self.now + REFUSED_S)),
-                        // Points have no entrance: outline the blocking route alone.
+                        // Points (and berths) have no entrance: outline the blocking
+                        // route alone, or nothing; the newest refusal wins.
                         None => g.refused = g.blocking.clone().map(|b| (b, self.now + REFUSED_S)),
                     }
                 }

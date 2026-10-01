@@ -90,7 +90,7 @@ fn rejected_commands_come_back_as_events() {
     sim.submit(bad.clone());
     sim.submit(Command::CancelRoute { entrance: SignalId(99) });
     let ev = sim.step();
-    assert!(ev.contains(&Event::CommandRejected { cmd: bad, reason: signalbox_core::events::Rejection::NoSuchRoute }));
+    assert!(ev.contains(&Event::CommandRejected { cmd: bad, reason: signalbox_core::events::Rejection::NoSuchRoute, by: None }));
     assert!(ev.iter().any(|e| matches!(e, Event::CommandRejected { reason: signalbox_core::events::Rejection::UnknownId, .. })));
 }
 
@@ -201,4 +201,24 @@ fn time_advances_by_ticks() {
     sim.run_for(10.0);
     assert_eq!(sim.tick(), 100);
     assert!((sim.now_s() - (6.0 * 3600.0 + 10.0)).abs() < 1e-9);
+}
+
+/// Polish spec M4: a refusal carries the route in the way, found when the
+/// command was refused.
+#[test]
+fn a_refusal_carries_the_route_in_the_way() {
+    use signalbox_core::events::Rejection;
+    use signalbox_core::network::PointsPos;
+    let mut sim = Sim::new(world("terminus"), 1);
+    let (s1, s3, p) = (sig(sim.world(), "S1"), sig(sim.world(), "S3"), node(sim.world(), "P"));
+    let e1 = sim.world().route_by_name("S1-E1").unwrap();
+    sim.submit(Command::SetRoute { entrance: s1, exit: Exit::Node(node(sim.world(), "E1")) });
+    sim.step();
+    let set = Command::SetRoute { entrance: s3, exit: Exit::Node(node(sim.world(), "W")) };
+    let swing = Command::SwingPoints { points: p, to: PointsPos::Reverse };
+    sim.submit(set.clone());
+    sim.submit(swing.clone());
+    let ev = sim.step();
+    assert!(ev.contains(&Event::CommandRejected { cmd: set, reason: Rejection::ConflictingRoute, by: Some(e1) }), "{ev:?}");
+    assert!(ev.contains(&Event::CommandRejected { cmd: swing, reason: Rejection::PointsLocked, by: Some(e1) }), "{ev:?}");
 }

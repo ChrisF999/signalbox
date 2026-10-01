@@ -191,8 +191,12 @@ output is byte-identical for the same input.
   (`game::areas::AreaMap`), refuses commands outside the sender's area, and runs
   `robot::commands` every `ROBOT_EVERY_TICKS` for areas nobody holds.
 - A refusal names the route in its way when the interlocking can say
-  (`Notice::Rejected.by`, `game::names::blocker`, polish spec M4); the client
-  outlines that route's entrance too.
+  (`Notice::Rejected.by`, polish spec M4). Core finds it as it refuses:
+  `Interlocking::conflict` is the one set of route checks (`check_set_route`
+  is it without the route) and a points swing names the route holding them;
+  `Event::CommandRejected.by` carries it (events are never stored, so no state
+  or hash change). The client outlines that route's entrance too, if its
+  layout lists the route (else the text says "another route").
 - Views are built from sim state per player (`game::view::build_view`) — own area
   plus a fringe walked along the track to the first signal — and sent as deltas
   (`protocol::diff`, `View::apply`); a client that sees a `seq` gap resyncs.

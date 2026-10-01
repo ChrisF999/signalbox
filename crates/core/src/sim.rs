@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::aspect::Aspect;
 use crate::describer::Describer;
 use crate::driver;
-use crate::events::{Command, Event, Rejection};
+use crate::events::{Command, Event, Refused, Rejection};
 use crate::ids::*;
 use crate::interlocking::Interlocking;
 use crate::network::{Dir, Network, NodeKind};
@@ -288,7 +288,7 @@ impl Sim {
             self.st.log.push((self.st.tick, cmd.clone()));
             match self.apply(&cmd) {
                 Ok(e) => ev.extend(e),
-                Err(reason) => ev.push(Event::CommandRejected { cmd, reason }),
+                Err(Refused { reason, by }) => ev.push(Event::CommandRejected { cmd, reason, by }),
             }
         }
         for (p, to) in self.st.points.tick(TICK_S) {
@@ -307,7 +307,7 @@ impl Sim {
         ev
     }
 
-    fn apply(&mut self, cmd: &Command) -> Result<Vec<Event>, Rejection> {
+    fn apply(&mut self, cmd: &Command) -> Result<Vec<Event>, Refused> {
         let w = &self.world;
         let net = &w.net;
         let signal_ok = |s: &SignalId| if s.idx() < net.signals.len() { Ok(()) } else { Err(Rejection::UnknownId) };
@@ -320,23 +320,23 @@ impl Sim {
             Command::CancelRoute { entrance } => {
                 signal_ok(entrance)?;
                 let r = self.st.il.active_route_from(w, *entrance).ok_or(Rejection::RouteNotSet)?;
-                self.st.il.cancel_route(w, &self.st.points, &self.occ, r)
+                Ok(self.st.il.cancel_route(w, &self.st.points, &self.occ, r)?)
             }
             Command::SetAutoWorking { entrance, on } => {
                 signal_ok(entrance)?;
                 let r = self.st.il.active_route_from(w, *entrance).ok_or(Rejection::RouteNotSet)?;
-                self.st.il.set_auto_working(r, *on)
+                Ok(self.st.il.set_auto_working(r, *on)?)
             }
             Command::SwingPoints { points, to } => {
                 if points.idx() >= net.nodes.len() {
-                    return Err(Rejection::UnknownId);
+                    return Err(Rejection::UnknownId.into());
                 }
                 let sec = net.points_section(*points).ok_or(Rejection::NotPoints)?;
-                if self.st.il.owner[sec.idx()].is_some() {
-                    return Err(Rejection::PointsLocked);
+                if let Some(o) = self.st.il.owner[sec.idx()] {
+                    return Err(Refused { reason: Rejection::PointsLocked, by: Some(o.route()) });
                 }
                 if self.occ.occupied(sec) {
-                    return Err(Rejection::PointsOccupied);
+                    return Err(Rejection::PointsOccupied.into());
                 }
                 if self.st.points.detected(*points) == Some(*to) {
                     return Ok(vec![]);
@@ -346,13 +346,13 @@ impl Sim {
             }
             Command::Interpose { berth, headcode } => {
                 if berth.idx() >= net.berths.len() {
-                    return Err(Rejection::UnknownId);
+                    return Err(Rejection::UnknownId.into());
                 }
                 Ok(self.st.describer.interpose(*berth, headcode))
             }
             Command::CancelBerth { berth } => {
                 if berth.idx() >= net.berths.len() {
-                    return Err(Rejection::UnknownId);
+                    return Err(Rejection::UnknownId.into());
                 }
                 Ok(self.st.describer.cancel(*berth).into_iter().collect())
             }

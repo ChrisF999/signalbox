@@ -32,10 +32,30 @@ pub enum Rejection {
     NotPoints,
 }
 
+/// A refusal, with the route in its way when the interlocking can say
+/// (polish spec M4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Refused {
+    pub reason: Rejection,
+    pub by: Option<RouteId>,
+}
+
+impl From<Rejection> for Refused {
+    fn from(reason: Rejection) -> Refused {
+        Refused { reason, by: None }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
-    CommandRejected { cmd: Command, reason: Rejection },
+    /// `by`: the route in the way, found when the command was refused.
+    CommandRejected {
+        cmd: Command,
+        reason: Rejection,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        by: Option<RouteId>,
+    },
     PointsMoving { points: NodeId, to: PointsPos },
     PointsMoved { points: NodeId, to: PointsPos },
     RouteSetting { route: RouteId },

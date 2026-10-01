@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::aspect::{cleared_aspect, Aspect};
-use crate::events::{Event, Rejection};
+use crate::events::{Event, Refused, Rejection};
 use crate::ids::*;
 use crate::network::NodeKind;
 use crate::occupancy::Occupancy;
@@ -97,12 +97,21 @@ impl Interlocking {
     /// Whether route `r` could be set now, and if not, why. `set_route`
     /// makes exactly these checks.
     pub fn check_set_route(&self, w: &World, pts: &PointsTable, occ: &Occupancy, r: RouteId) -> Result<(), Rejection> {
+        self.conflict(w, pts, occ, r).map_err(|e| e.reason)
+    }
+
+    /// `check_set_route`, with the route in the way when there is one
+    /// (polish spec M4): the route already set from the entrance, the route
+    /// holding track the route needs, or the route holding points it needs
+    /// elsewhere.
+    pub fn conflict(&self, w: &World, pts: &PointsTable, occ: &Occupancy, r: RouteId) -> Result<(), Refused> {
+        let by = |reason, x| Err(Refused { reason, by: Some(x) });
         let def = &w.routes[r.idx()];
         if self.routes[r.idx()].state != RouteState::Idle {
-            return Err(Rejection::AlreadySet);
+            return Err(Rejection::AlreadySet.into());
         }
-        if self.active_route_from(w, def.entrance).is_some() {
-            return Err(Rejection::ConflictingRoute);
+        if let Some(x) = self.active_route_from(w, def.entrance) {
+            return by(Rejection::ConflictingRoute, x);
         }
         for &s in def.path.iter().chain(def.overlap.iter()) {
             match self.owner[s.idx()] {
@@ -111,7 +120,7 @@ impl Interlocking {
                 Some(Owner::Overlap(x)) if w.routes[x.idx()].exit == Exit::Signal(def.entrance) => {}
                 // Our overlap may lie over the path of the route that continues from our exit.
                 Some(Owner::Path(x)) if def.overlap.contains(&s) && def.exit == Exit::Signal(w.routes[x.idx()].entrance) => {}
-                Some(_) => return Err(Rejection::ConflictingRoute),
+                Some(o) => return by(Rejection::ConflictingRoute, o.route()),
             }
         }
         // Overlap points inside another route's path must be where that route needs them.
@@ -119,7 +128,7 @@ impl Interlocking {
             let sec = w.net.points_section(p).expect("route points are validated at load");
             if let Some(Owner::Path(x)) = self.owner[sec.idx()] {
                 if w.routes[x.idx()].all_points().any(|&(q, qpos)| q == p && qpos != pos) {
-                    return Err(Rejection::PointsLocked);
+                    return by(Rejection::PointsLocked, x);
                 }
             }
         }
@@ -128,11 +137,11 @@ impl Interlocking {
                 continue;
             }
             let sec = w.net.points_section(p).expect("route points are validated at load");
-            if matches!(self.owner[sec.idx()], Some(o) if o.route() != r) {
-                return Err(Rejection::PointsLocked);
+            if let Some(o) = self.owner[sec.idx()].filter(|o| o.route() != r) {
+                return by(Rejection::PointsLocked, o.route());
             }
             if occ.occupied(sec) {
-                return Err(Rejection::PointsOccupied);
+                return Err(Rejection::PointsOccupied.into());
             }
         }
         Ok(())
@@ -144,8 +153,8 @@ impl Interlocking {
         pts: &mut PointsTable,
         occ: &Occupancy,
         r: RouteId,
-    ) -> Result<Vec<Event>, Rejection> {
-        self.check_set_route(w, pts, occ, r)?;
+    ) -> Result<Vec<Event>, Refused> {
+        self.conflict(w, pts, occ, r)?;
         let def = &w.routes[r.idx()];
         let mut ev = Vec::new();
         for &(p, pos) in def.all_points() {

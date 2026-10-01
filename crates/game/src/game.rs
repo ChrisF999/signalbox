@@ -19,7 +19,7 @@ use crate::clock::{GameClock, VoteError};
 use crate::display::Display;
 use crate::geometry::WorldGeometry;
 use crate::layout::build_layout;
-use crate::names::{blocker, resolve, to_player_command, valid_headcode};
+use crate::names::{resolve, to_player_command, valid_headcode};
 use crate::notices::area_notices;
 use crate::save::{Logged, SaveDb, SaveError, refresh_display, resume_sim};
 use crate::view::{Shared, build_view};
@@ -817,14 +817,15 @@ impl Game {
                 Event::SignalPassedAtDanger { .. } => self.stats.spads += 1,
                 Event::Collision { .. } => self.stats.collisions += 1,
                 Event::InvariantViolated { .. } => self.stats.invariant_violations += 1,
-                Event::CommandRejected { cmd, reason } => {
+                Event::CommandRejected { cmd, reason, by } => {
                     self.stats.sim_rejections += 1;
                     if let Some(i) = (cursor..queued.len()).find(|&i| queued[i].1 == *cmd) {
                         cursor = i + 1;
                         let who = &queued[i].0;
                         if self.players.get(who).is_some_and(|p| p.connected) {
                             let named = to_player_command(self.sim.world(), cmd);
-                            let by = blocker(self.sim.world(), self.sim.interlocking(), cmd, *reason);
+                            // The route in the way, found when the sim refused it (polish spec M4).
+                            let by = by.map(|r| self.sim.world().routes[r.idx()].name.clone());
                             out.push(notice(who, Notice::Rejected { cmd: named, reason: *reason, by }));
                         }
                     }

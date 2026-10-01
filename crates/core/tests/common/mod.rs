@@ -76,7 +76,7 @@ impl Rig {
 
     pub fn set(&mut self, name: &str, occ: &Occupancy) -> Result<Vec<Event>, Rejection> {
         let r = route(&self.w, name);
-        self.il.set_route(&self.w, &mut self.pts, occ, r)
+        self.il.set_route(&self.w, &mut self.pts, occ, r).map_err(|e| e.reason)
     }
 
     /// Run points and interlocking for `secs` seconds of sim time.
