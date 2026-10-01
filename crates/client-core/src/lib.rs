@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod input;
+pub mod lessons;
 pub mod log;
 pub mod names;
 pub mod select;
@@ -16,6 +17,7 @@ pub mod transport;
 
 pub use app::{App, InGame, Link};
 pub use input::Target;
+pub use lessons::LessonTicks;
 pub use names::Names;
 pub use settings::{AspectMode, MemStore, Settings, SettingsStore};
 pub use transport::{ConnState, MemHandle, MemTransport, Transport};

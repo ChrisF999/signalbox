@@ -66,7 +66,7 @@ fn it_connects_at_once_and_asks_for_the_lobby_when_open() {
     app.tick(0.2);
     assert_eq!(app.link(), Link::Open);
     assert_eq!(app.banner(), None);
-    assert_eq!(h.take_sent(), [lobby(LobbyMsg::ListLayouts), lobby(LobbyMsg::ListGames)]);
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::ListLayouts), lobby(LobbyMsg::ListLessons), lobby(LobbyMsg::ListGames)]);
 }
 
 #[test]
@@ -216,7 +216,7 @@ fn a_failed_rejoin_goes_back_to_the_lobby_with_the_reason() {
     app.tick(3.5);
     h.open();
     app.tick(3.6);
-    assert_eq!(h.take_sent(), [lobby(LobbyMsg::ListLayouts), lobby(LobbyMsg::ListGames)], "no rejoin any more");
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::ListLayouts), lobby(LobbyMsg::ListLessons), lobby(LobbyMsg::ListGames)], "no rejoin any more");
 }
 
 #[test]
@@ -457,7 +457,7 @@ fn a_stopped_game_returns_to_the_lobby_with_a_banner() {
     app.tick(3.5);
     h.open();
     app.tick(3.6);
-    assert_eq!(h.take_sent(), [lobby(LobbyMsg::ListLayouts), lobby(LobbyMsg::ListGames)], "no rejoin");
+    assert_eq!(h.take_sent(), [lobby(LobbyMsg::ListLayouts), lobby(LobbyMsg::ListLessons), lobby(LobbyMsg::ListGames)], "no rejoin");
 }
 
 /// Twenty silent seconds in a game (a lost `game_crashed`, say): join the

@@ -6,7 +6,7 @@
 
 use bot::Bot;
 use protocol::{
-    ClientFrame, ClientMsg, GameInfo, Layout, LayoutInfo, LobbyMsg, LobbyReply, Notice, PlayerCommand, Proposal, ServerFrame,
+    ClientFrame, ClientMsg, GameInfo, Layout, LayoutInfo, LessonInfo, LessonView, LobbyMsg, LobbyReply, Notice, PlayerCommand, Proposal, ServerFrame,
     ServerMsg, View, codes,
 };
 
@@ -59,6 +59,10 @@ pub struct InGame {
     pub(crate) log: Log,
     /// Display names for the layout held (rebuilt with every layout).
     pub(crate) names: Names,
+    /// The lesson, in a tutorial (the last `lesson` received).
+    pub(crate) lesson: Option<LessonView>,
+    /// The (tab, selected entrance) last told to the lesson.
+    pub(crate) screen_sent: Option<(Option<String>, Option<String>)>,
 }
 
 impl InGame {
@@ -72,6 +76,8 @@ impl InGame {
             refused: None,
             log: Log::default(),
             names: Names::default(),
+            lesson: None,
+            screen_sent: None,
         }
     }
 
@@ -114,6 +120,11 @@ impl InGame {
         &self.names
     }
 
+    /// The lesson, when this game is a tutorial.
+    pub fn lesson(&self) -> Option<&LessonView> {
+        self.lesson.as_ref()
+    }
+
     pub fn log(&self) -> &Log {
         &self.log
     }
@@ -147,6 +158,7 @@ pub struct App {
     pub(crate) now: f64,
     pub(crate) games: Vec<GameInfo>,
     pub(crate) layouts: Vec<LayoutInfo>,
+    pub(crate) lessons: Vec<LessonInfo>,
     /// A message for the lobby screen (a crash, a failed rejoin, an error).
     pub(crate) lobby_note: Option<String>,
     pub(crate) game: Option<InGame>,
@@ -174,6 +186,7 @@ impl App {
             now,
             games: Vec::new(),
             layouts: Vec::new(),
+            lessons: Vec::new(),
             lobby_note: None,
             game: None,
             rejoin: None,
@@ -273,6 +286,7 @@ impl App {
             }
             None => {
                 self.send(ClientFrame::Lobby(LobbyMsg::ListLayouts));
+                self.send(ClientFrame::Lobby(LobbyMsg::ListLessons));
                 self.send(ClientFrame::Lobby(LobbyMsg::ListGames));
             }
         }
@@ -333,7 +347,7 @@ impl App {
         match r {
             LobbyReply::Games { games } => self.games = games,
             LobbyReply::Layouts { layouts } => self.layouts = layouts,
-            LobbyReply::Lessons { .. } => {}
+            LobbyReply::Lessons { lessons } => self.lessons = lessons,
             LobbyReply::Joined { game, you } => {
                 self.joining = None;
                 self.me = Some(you.clone());
@@ -387,7 +401,12 @@ impl App {
                 }
             }
             ServerMsg::Layout(_) => g.layout_gen += 1,
-            ServerMsg::View(_) | ServerMsg::Delta(_) | ServerMsg::Lesson(_) => {}
+            ServerMsg::Lesson(v) => {
+                g.lesson = Some(v.clone());
+                // Tell the new step what the screen shows.
+                g.screen_sent = None;
+            }
+            ServerMsg::View(_) | ServerMsg::Delta(_) => {}
         }
         let is_layout = matches!(m, ServerMsg::Layout(_));
         let reply = g.bot.receive(m);
@@ -434,6 +453,18 @@ impl App {
 
     pub fn layouts(&self) -> &[LayoutInfo] {
         &self.layouts
+    }
+
+    /// The tutorial lessons the front offers.
+    pub fn lessons(&self) -> &[LessonInfo] {
+        &self.lessons
+    }
+
+    /// Start a private tutorial of `lesson` (answered like `create_game`).
+    pub fn start_lesson(&mut self, lesson: &str) {
+        if self.send(ClientFrame::Lobby(LobbyMsg::StartLesson { lesson: lesson.to_string() })) {
+            self.joining = Some(Joining { game: None, rejoin: false });
+        }
     }
 
     pub fn lobby_note(&self) -> Option<&str> {
@@ -492,6 +523,57 @@ impl App {
 
     pub fn command(&mut self, cmd: PlayerCommand) {
         self.send_game(ClientMsg::Command { cmd });
+    }
+
+    // ---- tutorial ----
+
+    fn in_lesson(&self) -> bool {
+        self.game.as_ref().is_some_and(|g| g.lesson.is_some())
+    }
+
+    /// The step said "press Next".
+    pub fn lesson_next(&mut self) {
+        if self.in_lesson() {
+            self.send_game(ClientMsg::LessonNext);
+        }
+    }
+
+    pub fn lesson_restart_step(&mut self) {
+        if self.in_lesson() {
+            self.send_game(ClientMsg::LessonRestartStep);
+        }
+    }
+
+    /// Back to the first step. The game forgets what the screen showed, so
+    /// the chosen entrance is dropped here too: the `lesson` that answers
+    /// makes the next `report_screen` tell the lesson afresh, and a stale
+    /// selection would complete a `selected` step at once.
+    pub fn lesson_restart(&mut self) {
+        if self.in_lesson() {
+            self.send_game(ClientMsg::LessonRestart);
+            if let Some(g) = self.game.as_mut() {
+                g.selected = None;
+                g.screen_sent = None;
+            }
+        }
+    }
+
+    /// Call every frame with the side panel's tab: in a tutorial, the
+    /// lesson hears whenever the tab or the chosen entrance changes.
+    pub fn report_screen(&mut self, tab: &str) {
+        let Some(g) = self.game.as_ref() else { return };
+        if g.lesson.as_ref().is_none_or(|v| v.done) {
+            return;
+        }
+        let now = (Some(tab.to_string()), g.selected.clone());
+        if g.screen_sent.as_ref() == Some(&now) || self.link != Link::Open {
+            return;
+        }
+        let (tab, selected) = now.clone();
+        self.send_game(ClientMsg::LessonUi { tab, selected });
+        if let Some(g) = self.game.as_mut() {
+            g.screen_sent = Some(now);
+        }
     }
 }
 
