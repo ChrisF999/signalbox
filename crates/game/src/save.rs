@@ -201,6 +201,24 @@ impl SaveDb {
         Ok(())
     }
 
+    /// Record the start time a seeded game was prepared to (meta
+    /// `seed_to`, timetables spec §3.4); `start` stays the world's. A plain
+    /// meta row like `creator`, so the save schema stays 2.
+    pub fn set_seed_to(&self, hms: &str) -> Result<(), SaveError> {
+        self.conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('seed_to', ?1)", params![hms])?;
+        Ok(())
+    }
+
+    /// Close the save with everything in the main file (the WAL
+    /// checkpointed and emptied), so the file alone may be moved.
+    pub fn close(self) -> Result<(), SaveError> {
+        let busy: i64 = self.conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get(0))?;
+        if busy != 0 {
+            return Err(SaveError::Bad("the save is busy: its WAL could not be checkpointed".into()));
+        }
+        self.conn.close().map_err(|(_, e)| SaveError::Sql(e))
+    }
+
     /// Wall time spent writing commands and snapshots so far.
     pub fn busy(&self) -> Duration {
         self.busy.get()

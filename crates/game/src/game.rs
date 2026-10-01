@@ -719,7 +719,7 @@ impl Game {
     /// unclaimed). One `save_failed` names the run, and every tick ends
     /// with a snapshot attempt until one succeeds (`log_lost`), so later
     /// logged commands never replay over the gap.
-    fn run_robot(&mut self) -> Vec<Out> {
+    fn run_robot(&mut self, sender: &str) -> Vec<Out> {
         let mut out = Vec::new();
         let cmds: Vec<Command> = robot::commands(&self.sim)
             .into_iter()
@@ -733,9 +733,9 @@ impl Game {
         for cmd in cmds {
             self.stats.robot_commands += 1;
             if failed.is_none() {
-                failed = self.log_command(ROBOT, &cmd).err();
+                failed = self.log_command(sender, &cmd).err();
             }
-            self.enqueue(ROBOT, cmd);
+            self.enqueue(sender, cmd);
         }
         if let Some(db) = &self.save {
             let result = match failed {
@@ -750,11 +750,34 @@ impl Game {
         out
     }
 
+    /// One tick of seeding (`crate::seed`): the robot's run for every area
+    /// (nobody holds one yet) logged as `seed`, then the step. Save
+    /// failures are left in `take_save_errors`.
+    pub(crate) fn seed_tick(&mut self) {
+        if self.sim.tick() % robot::ROBOT_EVERY_TICKS == 0 {
+            self.run_robot(crate::seed::SEED);
+        }
+        self.queued.clear();
+        self.sim.step();
+        if self.log_lost {
+            self.cover_gap();
+        }
+    }
+
+    /// The save, taken out (seeding moves its file).
+    pub(crate) fn take_save(&mut self) -> Option<SaveDb> {
+        self.save.take()
+    }
+
+    pub(crate) fn put_save(&mut self, db: SaveDb) {
+        self.save = Some(db);
+    }
+
     fn tick(&mut self) -> (Vec<Out>, Vec<Event>) {
         let mut out = Vec::new();
         let t = self.sim.tick();
         if t % robot::ROBOT_EVERY_TICKS == 0 && self.robot_ran_at != Some(t) {
-            out.extend(self.run_robot());
+            out.extend(self.run_robot(ROBOT));
         }
         let before = self.sim.describer().berths.clone();
         let queued = std::mem::take(&mut self.queued);

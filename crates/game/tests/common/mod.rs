@@ -36,6 +36,22 @@ pub fn liverpool_json() -> String {
     serde_json::to_string(&w).unwrap()
 }
 
+/// Drain converted from TS2, split by its shipped area file, with the
+/// synthetic Waterloo & City WTT as its timetable (the real WTT's shape:
+/// trains enter from the depot from the timetable's start onwards).
+pub fn drain_wtt_json() -> String {
+    use ts2_import::wtt;
+    let dir = env!("CARGO_MANIFEST_DIR");
+    let ts2 = std::fs::read_to_string(format!("{dir}/../ts2-import/tests/data/drain.json")).unwrap();
+    let areas = std::fs::read_to_string(format!("{dir}/../../layouts/drain.areas.json")).unwrap();
+    let bbox = std::fs::read_to_string(format!("{dir}/../ts2-import/tests/data/wtt-synthetic.bbox.html")).unwrap();
+    let mut w = ts2_import::convert(&ts2).unwrap().world;
+    ts2_import::areas::apply(&mut w, &ts2_import::areas::parse(&areas).unwrap()).unwrap();
+    let day = wtt::on_day(&wtt::parse(&bbox).unwrap(), wtt::DAY).unwrap();
+    wtt::apply(&mut w, &day).unwrap();
+    serde_json::to_string(&w).unwrap()
+}
+
 use game::areas::AreaMap;
 use game::names::to_player_command;
 use game::{Game, GameMeta, Out};
