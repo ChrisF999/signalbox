@@ -25,9 +25,10 @@ scripts/cargo test -p signalbox-server --features dev-auth    # + the front over
 scripts/cargo test --release -p signalbox-server --features dev-auth --test e2e -- --ignored --nocapture   # 1 sim hour; prints SQLite write cost
 scripts/cargo test -p signalbox-client-core                   # client logic: connection, lobby, clicks (in-process game)
 scripts/cargo test -p signalbox-client-ui                     # diagram and screens, headless egui (no GPU)
+scripts/cargo test -p signalbox-game --test lessons -- --nocapture   # every lesson loads, draws and is played through
 scripts/cargo test -p signalbox-server --features dev-auth --test client   # client-core over the real front
 scripts/wasm-build                                            # the browser client into target/web-dist/ (tools image on first use)
-scripts/ci/test.sh                                            # the CI gate (native cargo, offline, -D warnings)
+scripts/ci/test.sh                                            # the CI gate (native cargo, offline, -D warnings; builds the web client when wasm is present, always on the runner via SIGNALBOX_REQUIRE_WASM=1)
 
 scripts/cargo run -p sim-cli -- run crates/core/tests/fixtures/junction.json --robot --hours 1 --record /w/target/log.json
 scripts/cargo run -p sim-cli -- replay crates/core/tests/fixtures/junction.json /w/target/log.json
@@ -223,7 +224,7 @@ output is byte-identical for the same input.
   (aspects red/green or real, headcode enquiry, signal numbers) live behind
   `client_core::SettingsStore`, which `client-web` backs with `localStorage`
   (`LocalStore`). Nothing flashes except points moving, the selected entrance
-  and a cancelling route's lamp. Arrows and the ○A button are shapes: egui's
+  and a cancelling route's lamp; the tutorial highlight is a calm pulse. Arrows and the ○A button are shapes: egui's
   default fonts have no arrow glyphs.
 - ○A (spec decision 6, amended) sits beside a controlled signal the player
   works and makes a set route stay set for following trains (real
@@ -232,6 +233,35 @@ output is byte-identical for the same input.
 - `hit_test` takes the view as well as the scene; points and exits win over
   an empty berth under the pointer. The side panel's minimum width is 398 pt
   (it fits the simplifier).
+
+### Tutorials (`lessons/`, `game::lesson`)
+- Design: `docs/superpowers/specs/2026-10-01-tutorial-design.md`; decisions in
+  `docs/superpowers/plans/2026-10-01-tutorial.md`. Each `lessons/<id>/` holds a
+  hand-made `world.json` (core format, drawn like a converted layout, all trains
+  `on_demand` entries) and a `lesson.json` (steps: `say`, `highlight`, `do`,
+  `wait_for`, `solution`; `deny_unknown_fields`).
+- `game::lesson::check` validates a lesson against its world (the front at
+  startup leaves a broken one out with one log line; `SIGNALBOX_LESSONS`,
+  default `/opt/signalbox/lessons`). `game::lesson::Runner` runs one over a
+  `Game`: a `(GameSnapshot, seen)` at each step's start, then its actions; the
+  condition is checked after every tick (`Game::advance_with`) and every player
+  message; Restart step restores the snapshot. The clock runs only while the
+  lesson's player is connected.
+- `signalbox-game --lesson <dir>` runs a tutorial with no save at all. The
+  front keeps tutorials private (`Entry.owner`: never listed, others get
+  `unknown_game`), caps them separately (`MAX_TUTORIALS`, transiently +1 while
+  a user replaces their own tutorial), starting anything ends the user's other
+  tutorials, ends one when its player leaves, and gives a dropped socket 60 s
+  to come back.
+- `Sim::offer_entry` (on-demand entries) and `Event::SignalPassed` exist for
+  lessons; neither is logged state, and no converted world uses them.
+- Changing a lesson: `crates/game/tests/lessons.rs` plays every lesson through
+  with a scripted player (its `solution`, else what `wait_for` asks for, robot
+  routing for train steps); keep texts naming signals as the client shows them.
+- Client: the tutorial list's ticks live behind a second store
+  (`client_core::lessons::LESSONS_KEY`, `UiApp::with_stores`; `client-web`
+  gives each its own `LocalStore::new(key)`). The lesson highlight is UI, not
+  panel state.
 
 ### Tests
 - Core fixtures: `crates/core/tests/fixtures/{plain_line,terminus,junction}.json`.

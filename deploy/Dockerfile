@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # signalbox: the front (signalbox-server), the game process (signalbox-game),
-# the browser client and the three converted TS2 layouts (with their areas, box
-# prefixes and line names). Release build: no
+# the browser client, the three converted TS2 layouts (with their areas, box
+# prefixes and line names) and the tutorial lessons. Release build: no
 # dev login.
 # Build from the repository root:
 #   docker build -f deploy/Dockerfile -t local/signalbox:$(git rev-parse --short HEAD) .
@@ -33,7 +33,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
  && for n in liverpool-st drain gretz-armainvilliers; do \
       target/release/ts2-import "crates/ts2-import/tests/data/$n.json" -o "/out/layouts/$n.json" \
         --areas "layouts/$n.areas.json" --lines "layouts/$n.lines.json" || exit 1; \
-    done
+    done \
+ && cp -r lessons /out/lessons \
+ && chmod -R a+rX /out/lessons
 
 FROM debian:bookworm-slim
 # TLS to Authentik is rustls with bundled webpki roots: no CA bundle, no OpenSSL.
@@ -42,10 +44,13 @@ RUN useradd --system --uid 10160 --user-group --home-dir /data --no-create-home 
 COPY --from=build /out/bin/ /opt/signalbox/bin/
 COPY --from=build /out/layouts/ /opt/signalbox/layouts/
 COPY --from=web /out/web/ /opt/signalbox/web/
+# Checked-out files may be private to their owner: the build stage made them readable.
+COPY --from=build /out/lessons/ /opt/signalbox/lessons/
 USER signalbox
 ENV SIGNALBOX_ADDR=0.0.0.0:9160 \
     SIGNALBOX_DATA=/data \
     SIGNALBOX_LAYOUTS=/opt/signalbox/layouts \
+    SIGNALBOX_LESSONS=/opt/signalbox/lessons \
     SIGNALBOX_GAME_BIN=/opt/signalbox/bin/signalbox-game \
     SIGNALBOX_WEB=/opt/signalbox/web
 EXPOSE 9160

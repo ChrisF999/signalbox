@@ -1,11 +1,19 @@
-//! The display settings in the browser's `localStorage` (realism spec §4):
-//! remembered per browser. Without storage (private windows, blocked
-//! cookies) the defaults simply apply.
+//! The display settings and the tutorial ticks in the browser's
+//! `localStorage` (realism spec §4, tutorial spec §3): remembered per
+//! browser, each under its own key. Without storage (private windows,
+//! blocked cookies) the defaults simply apply.
 
 use client_core::SettingsStore;
-use client_core::settings::SETTINGS_KEY;
 
-pub struct LocalStore;
+pub struct LocalStore {
+    key: &'static str,
+}
+
+impl LocalStore {
+    pub fn new(key: &'static str) -> LocalStore {
+        LocalStore { key }
+    }
+}
 
 fn storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok().flatten()
@@ -13,13 +21,13 @@ fn storage() -> Option<web_sys::Storage> {
 
 impl SettingsStore for LocalStore {
     fn load(&self) -> Option<String> {
-        storage()?.get_item(SETTINGS_KEY).ok().flatten()
+        storage()?.get_item(self.key).ok().flatten()
     }
 
     fn save(&mut self, text: &str) {
         if let Some(s) = storage() {
-            // A full or refused store just means the setting is not kept.
-            let _ = s.set_item(SETTINGS_KEY, text);
+            // A full or refused store just means it is not kept.
+            let _ = s.set_item(self.key, text);
         }
     }
 }

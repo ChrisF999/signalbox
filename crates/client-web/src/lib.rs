@@ -9,6 +9,8 @@ mod store;
 mod transport;
 
 use client_core::App;
+use client_core::lessons::LESSONS_KEY;
+use client_core::settings::SETTINGS_KEY;
 use client_ui::UiApp;
 use eframe::egui;
 use eframe::egui_wgpu::WgpuSetup;
@@ -80,7 +82,9 @@ async fn run(canvas: web_sys::HtmlCanvasElement) -> Result<(), String> {
                 cc.egui_ctx.set_theme(egui::Theme::Dark);
                 let now = cc.egui_ctx.input(|i| i.time);
                 let transport = WebSocketTransport::new(cc.egui_ctx.clone());
-                let ui = UiApp::with_store(App::new(Box::new(transport), now), Box::new(LocalStore));
+                let settings = Box::new(LocalStore::new(SETTINGS_KEY));
+                let lessons = Box::new(LocalStore::new(LESSONS_KEY));
+                let ui = UiApp::with_stores(App::new(Box::new(transport), now), settings, lessons);
                 Ok(Box::new(WebApp { ui, sent_to_login: false }))
             }),
         )
