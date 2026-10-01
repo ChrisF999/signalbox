@@ -302,6 +302,42 @@ async fn the_lobby_lists_layouts_and_saved_games() {
     assert!(games[1].error.as_deref().unwrap().contains("not a database"), "{:?}", games[1].error);
 }
 
+/// Polish spec §5: a resumed save takes the listed layout's display data
+/// when the network matches (here a stale box prefix).
+#[tokio::test]
+async fn a_resumed_save_shows_the_layouts_current_names() {
+    let rig = rig("refresh", 600);
+    let with_prefix = |p: &str| {
+        let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(TWOBOX).unwrap()).unwrap();
+        v["layout"] = serde_json::json!({ "box_prefix": p });
+        v.to_string()
+    };
+    std::fs::write(rig.root.join("layouts/twobox.json"), with_prefix("T")).unwrap();
+    let id = "g-cccccccccccc";
+    drop(Game::create(&rig.saves().join(format!("{id}.sqlite")), &with_prefix("Q"), GameMeta { layout: s("twobox"), seed: 2 }).unwrap());
+    let ann = rig.attach("ann");
+    rig.lobby(&ann, LobbyMsg::Join { game: s(id) });
+    let got = until(&ann, |f| matches!(f, ServerFrame::Game(ServerMsg::Layout(_)))).await;
+    let Some(ServerFrame::Game(ServerMsg::Layout(l))) = got.last() else { unreachable!() };
+    assert_eq!(l.box_prefix, "T", "today's prefix, not the save's Q");
+}
+
+/// Review focus 2: a save whose layout the front no longer lists resumes
+/// with its own display data.
+#[tokio::test]
+async fn a_save_of_a_layout_no_longer_listed_still_resumes() {
+    let rig = rig("unlisted", 600);
+    let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(TWOBOX).unwrap()).unwrap();
+    v["layout"] = serde_json::json!({ "box_prefix": "Q" });
+    let id = "g-dddddddddddd";
+    drop(Game::create(&rig.saves().join(format!("{id}.sqlite")), &v.to_string(), GameMeta { layout: s("gone"), seed: 2 }).unwrap());
+    let ann = rig.attach("ann");
+    rig.lobby(&ann, LobbyMsg::Join { game: s(id) });
+    let got = until(&ann, |f| matches!(f, ServerFrame::Game(ServerMsg::Layout(_)))).await;
+    let Some(ServerFrame::Game(ServerMsg::Layout(l))) = got.last() else { unreachable!() };
+    assert_eq!(l.box_prefix, "Q");
+}
+
 #[tokio::test]
 async fn lobby_rejects_bad_layouts_starts_and_ids() {
     let rig = rig("reject", 600);

@@ -104,7 +104,8 @@ struct State {
 
 enum Start {
     Create { world: PathBuf, layout: String, seed: u64, start: Option<String>, creator: String },
-    Resume,
+    /// `current`: the layout file the save was made from, if still listed.
+    Resume { current: Option<PathBuf> },
     /// A tutorial of the lesson in this directory.
     Lesson { dir: PathBuf },
 }
@@ -529,10 +530,11 @@ impl Supervisor {
             return;
         }
         Self::leave(&mut st, user, Some(&game));
+        let current = self.layouts.path(&layout);
         let rx = Self::insert_starting(&mut st, &game, layout, None);
         Self::enter(&mut st, user, &game);
         drop(st);
-        self.spawn_game(game, rx, Start::Resume);
+        self.spawn_game(game, rx, Start::Resume { current });
     }
 
     // ---- deleting (owner decision 13) ----
@@ -704,7 +706,7 @@ impl Supervisor {
                 cmd.arg("--lesson").arg(dir).arg("--socket").arg(&socket);
                 cmd.arg("--empty-exit-s").arg(TUTORIAL_EMPTY_EXIT_S.min(self.cfg.empty_exit_s).to_string());
             }
-            Start::Create { .. } | Start::Resume => {
+            Start::Create { .. } | Start::Resume { .. } => {
                 cmd.arg("--save").arg(self.save_path(&id)).arg("--socket").arg(&socket);
                 cmd.arg("--empty-exit-s").arg(self.cfg.empty_exit_s.to_string());
             }
@@ -715,6 +717,9 @@ impl Supervisor {
                 cmd.arg("--start").arg(s);
             }
             cmd.arg("--creator").arg(creator);
+        }
+        if let Start::Resume { current: Some(p) } = &start {
+            cmd.arg("--current-layout").arg(p);
         }
         cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(true);
         // Its own process group: a terminal's Ctrl-C reaches only the front,

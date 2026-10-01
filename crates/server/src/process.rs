@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use game::lesson::{self, Runner, load_lesson};
 use game::seed::{self, Progress, Seeding};
-use game::{Game, GameMeta, GameStatus, Out};
+use game::{Game, GameMeta, GameStatus, Out, Refresh};
 use ipc::{Counters, FromGame, LogLevel, PlayerStatus, StatusMsg, ToGame, read_frame, write_frame};
 use protocol::{Preparing, codes};
 use signalbox_core::sim::TICK_S;
@@ -23,7 +23,7 @@ use tokio::time::{Instant, MissedTickBehavior, interval, timeout};
 
 pub const USAGE: &str = "usage: signalbox-game --save <db> --socket <path> [--empty-exit-s <secs>] \
 [--create --layout <world.json> --layout-name <name> --seed <u64> [--start HH:MM:SS] [--creator <user>] \
-[--seed-budget-ms <ms>]]\n\
+[--seed-budget-ms <ms>] | --current-layout <world.json>]\n\
        signalbox-game --lesson <dir> --socket <path> [--empty-exit-s <secs>]";
 /// Real seconds a game with nobody connected waits before it saves and exits.
 pub const EMPTY_EXIT_S: u64 = 600;
@@ -69,6 +69,8 @@ pub struct Args {
     pub empty_exit: Duration,
     /// Create the save first; without it, resume the save.
     pub create: Option<CreateArgs>,
+    /// Resuming: the layout file as it is now, for its display data (polish spec §5).
+    pub current_layout: Option<PathBuf>,
     /// Run this lesson directory as a tutorial (tutorial spec §3).
     pub lesson: Option<PathBuf>,
 }
@@ -79,6 +81,7 @@ impl Args {
         let (mut save, mut socket, mut empty_exit_s, mut create, mut lesson) = (None, None, EMPTY_EXIT_S, false, None);
         let (mut world, mut layout_name, mut seed, mut start, mut creator) = (None, None, None, None, None);
         let mut seed_budget = None;
+        let mut current_layout = None;
         let mut it = args.iter();
         while let Some(a) = it.next() {
             let mut value = || it.next().cloned().ok_or_else(|| format!("{a} needs a value"));
@@ -102,20 +105,24 @@ impl Args {
                     seed_budget = Some(Duration::from_millis(ms));
                 }
                 "--lesson" => lesson = Some(PathBuf::from(value()?)),
+                "--current-layout" => current_layout = Some(PathBuf::from(value()?)),
                 other => return Err(format!("unknown argument `{other}`")),
             }
         }
         if let Some(lesson) = lesson {
             let saved = save.is_some() || create || world.is_some() || layout_name.is_some();
-            if saved || seed.is_some() || start.is_some() || creator.is_some() || seed_budget.is_some() {
+            if saved || current_layout.is_some() || seed.is_some() || start.is_some() || creator.is_some() || seed_budget.is_some() {
                 return Err("--lesson takes only --socket and --empty-exit-s".into());
             }
             let socket = socket.ok_or("--socket is required")?;
             let empty_exit = Duration::from_secs(empty_exit_s);
-            return Ok(Args { save: PathBuf::new(), socket, empty_exit, create: None, lesson: Some(lesson) });
+            return Ok(Args { save: PathBuf::new(), socket, empty_exit, create: None, current_layout: None, lesson: Some(lesson) });
         }
         let save = save.ok_or("--save is required")?;
         let socket = socket.ok_or("--socket is required")?;
+        if create && current_layout.is_some() {
+            return Err("--current-layout is for resuming, not with --create".into());
+        }
         let create = if create {
             Some(CreateArgs {
                 world: world.ok_or("--create needs --layout")?,
@@ -134,7 +141,7 @@ impl Args {
             }
             None
         };
-        Ok(Args { save, socket, empty_exit: Duration::from_secs(empty_exit_s), create, lesson: None })
+        Ok(Args { save, socket, empty_exit: Duration::from_secs(empty_exit_s), create, current_layout, lesson: None })
     }
 }
 
@@ -201,7 +208,23 @@ pub fn open_game(args: &Args) -> Result<Opened, String> {
             }
             Ok(Opened::Ready(g))
         }
-        None => Game::resume(&args.save).map(Opened::Ready).map_err(|e| e.to_string()),
+        None => {
+            // An unreadable layout file only costs the refresh, never the game.
+            let current = args.current_layout.as_ref().and_then(|p| match std::fs::read_to_string(p) {
+                Ok(t) => Some(t),
+                Err(e) => {
+                    eprintln!("kept the saved display data: {}: {e}", p.display());
+                    None
+                }
+            });
+            let (g, refresh) = Game::resume_with_layout(&args.save, current.as_deref()).map_err(|e| e.to_string())?;
+            match refresh {
+                Refresh::Refreshed => eprintln!("display data from layout {}", g.meta().layout),
+                Refresh::Kept(why) => eprintln!("kept the saved display data: {why}"),
+                Refresh::NotAsked => {}
+            }
+            Ok(Opened::Ready(g))
+        }
     }
 }
 

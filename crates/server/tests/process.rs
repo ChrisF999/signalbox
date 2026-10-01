@@ -105,6 +105,41 @@ fn arguments_parse_and_bad_ones_are_explained() {
     assert_eq!(exit_status("preparing failed: save: disk is full"), EXIT_NOT_PREPARED);
 }
 
+/// Polish spec §5.3: a resume may name the layout file as it is now.
+#[test]
+fn resuming_may_name_the_current_layout() {
+    let a = Args::parse(&args(&["--save", "g.sqlite", "--socket", "g.sock", "--current-layout", "/l/drain.json"])).unwrap();
+    assert_eq!((a.create, a.current_layout), (None, Some(PathBuf::from("/l/drain.json"))));
+    let err = Args::parse(&args(&[
+        "--save", "x", "--socket", "y", "--create", "--layout", "w.json", "--layout-name", "drain", "--seed", "1",
+        "--current-layout", "w.json",
+    ]))
+    .unwrap_err();
+    assert_eq!(err, "--current-layout is for resuming, not with --create");
+    let err = Args::parse(&args(&["--lesson", "l", "--socket", "y", "--current-layout", "w.json"])).unwrap_err();
+    assert_eq!(err, "--lesson takes only --socket and --empty-exit-s");
+}
+
+/// Task 5 review carry: a missing layout file never fails the resume.
+#[test]
+fn a_missing_current_layout_file_still_resumes() {
+    let dir = std::env::temp_dir().join(format!("sb-t6-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let save = dir.join("g.sqlite");
+    let json = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../game/tests/fixtures/twobox.json")).unwrap();
+    drop(Game::create(&save, &json, GameMeta { layout: "twobox".into(), seed: 1 }).unwrap());
+    let a = Args {
+        save,
+        socket: dir.join("g.sock"),
+        empty_exit: Duration::from_secs(1),
+        create: None,
+        current_layout: Some(dir.join("absent.json")),
+        lesson: None,
+    };
+    assert!(open_game(&a).is_ok());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn start_times_are_normalised_and_bounded() {
     assert_eq!(normalise_start("06:30").as_deref(), Some("06:30:00"));
