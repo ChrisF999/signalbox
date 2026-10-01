@@ -136,8 +136,12 @@ pub struct Game {
     /// Save failures not yet taken by the caller.
     save_errors: Vec<String>,
     /// A command was submitted that the log does not hold: snapshot after
-    /// the next step.
+    /// every step until a snapshot succeeds (until then a resume could
+    /// replay later logged commands over the gap).
     log_lost: bool,
+    /// A retried covering snapshot failed and was reported: later failures
+    /// of it are not reported again.
+    retry_reported: bool,
 }
 
 fn error(player: &str, code: &str, message: &str) -> Out {
@@ -279,13 +283,35 @@ impl Game {
     /// `take_save_errors`; the game carries on.
     pub fn save_now(&mut self) -> Vec<Out> {
         self.since_snapshot_s = 0.0;
-        let Some(db) = &self.save else { return vec![] };
-        match db.write_snapshot(&self.sim.snapshot()) {
-            Ok(()) => {
-                self.last_snapshot = Some(self.sim.tick());
-                vec![]
-            }
+        if self.save.is_none() {
+            return vec![];
+        }
+        match self.write_snapshot() {
+            Ok(()) => vec![],
             Err(e) => self.save_failed(&e.to_string()),
+        }
+    }
+
+    /// Write a snapshot; one that succeeds closes any gap in the log.
+    fn write_snapshot(&mut self) -> Result<(), SaveError> {
+        let Some(db) = &self.save else { return Ok(()) };
+        db.write_snapshot(&self.sim.snapshot())?;
+        self.last_snapshot = Some(self.sim.tick());
+        self.log_lost = false;
+        self.retry_reported = false;
+        Ok(())
+    }
+
+    /// After a step while the log has a gap: the covering snapshot, retried
+    /// every tick until it succeeds; only its first failure is reported.
+    fn cover_gap(&mut self) -> Vec<Out> {
+        match self.write_snapshot() {
+            Ok(()) => vec![],
+            Err(_) if self.retry_reported => vec![],
+            Err(e) => {
+                self.retry_reported = true;
+                self.save_failed(&format!("snapshot after a lost command: {e}"))
+            }
         }
     }
 
@@ -359,6 +385,7 @@ impl Game {
             last_snapshot: None,
             save_errors: Vec::new(),
             log_lost: false,
+            retry_reported: false,
         }
     }
 
@@ -687,10 +714,11 @@ impl Game {
     /// A run is saved whole or not at all. If any part of its log fails
     /// (SQLite may have rolled the whole transaction back by itself), the
     /// rest of the run is not logged and the batch is dropped: with no
-    /// robot rows at this tick a resume runs the robot here again and gets
-    /// the same commands. One `save_failed` names the run, and the tick
-    /// ends with a snapshot (`log_lost`) so later logged commands do not
-    /// replay over the gap.
+    /// robot rows at this tick a resume runs the robot here again (the same
+    /// commands, unless players held areas then: a resume leaves every area
+    /// unclaimed). One `save_failed` names the run, and every tick ends
+    /// with a snapshot attempt until one succeeds (`log_lost`), so later
+    /// logged commands never replay over the gap.
     fn run_robot(&mut self) -> Vec<Out> {
         let mut out = Vec::new();
         let cmds: Vec<Command> = robot::commands(&self.sim)
@@ -733,8 +761,8 @@ impl Game {
         let events = self.sim.step();
         // A command the log lost ran anyway: a snapshot now holds it, so a
         // resume does not replay later commands over the gap.
-        if std::mem::take(&mut self.log_lost) {
-            out.extend(self.save_now());
+        if self.log_lost {
+            out.extend(self.cover_gap());
         }
         let mut cursor = 0;
         for e in &events {

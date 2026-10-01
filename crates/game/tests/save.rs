@@ -485,8 +485,9 @@ fn a_robot_run_that_fails_part_way_is_not_saved_and_a_snapshot_covers_it() {
 
 /// The run is lost and so is the snapshot that should cover it (the disk
 /// is still full), and then the process dies: with no robot rows at tick 10
-/// the resumed game runs the robot there again and plays exactly what the
-/// clients saw.
+/// the resumed game runs the robot there again. Nobody holds an area here,
+/// so that is exactly what the clients saw; with holders it would not be
+/// (a resume leaves every area unclaimed).
 #[test]
 fn a_lost_robot_run_with_no_snapshot_after_it_is_run_again_on_resume() {
     let path = temp_save("batch-lost");
@@ -514,6 +515,52 @@ fn a_lost_robot_run_with_no_snapshot_after_it_is_run_again_on_resume() {
     unpause(&mut resumed);
     run_to_tick(&mut resumed, 11);
     assert_eq!(resumed.sim().log(), &seen[..], "the same robot run, at the same tick");
+    run_to_tick(&mut resumed, 3000);
+    assert_eq!(resumed.sim().state_hash(), reference.sim().state_hash());
+}
+
+/// While the snapshot that should cover a lost robot run keeps failing, it
+/// is retried every tick (its failure reported once). Once the disk
+/// recovers, the next tick's snapshot closes the gap before commands logged
+/// later can make a resume replay past the lost run.
+#[test]
+fn a_failed_covering_snapshot_is_retried_until_it_succeeds() {
+    let path = temp_save("batch-retry");
+    // A player command at tick 16, logged after the gap closed.
+    let swing = |g: &mut Game| {
+        join(g, "alice", Some("East"));
+        assert!(command(g, "alice", PlayerCommand::SwingPoints { points: s("P"), to: PointsPos::Reverse }).is_empty());
+        send(g, "alice", ClientMsg::Release);
+    };
+    let mut reference = game();
+    run_to_tick(&mut reference, 16);
+    swing(&mut reference);
+    run_to_tick(&mut reference, 3000);
+    let mut saved = Game::create(&path, &twobox_json(), meta()).unwrap();
+    run_to_tick(&mut saved, 9);
+    fail_second_robot_insert(&path, "ROLLBACK");
+    let no_snapshots = "CREATE TRIGGER nosnap BEFORE INSERT ON snapshots BEGIN SELECT RAISE(ABORT, 'disk full'); END";
+    open(&path).execute(no_snapshots, []).unwrap();
+    run_to_tick(&mut saved, 15);
+    let errors = saved.take_save_errors();
+    assert_eq!(errors.len(), 2, "the run and the first snapshot failure only: {errors:?}");
+    assert_eq!(snapshot_ticks(&path), [0]);
+    // The disk recovers: the next tick's retry succeeds.
+    let c = open(&path);
+    c.execute("DROP TRIGGER fail", []).unwrap();
+    c.execute("DROP TRIGGER nosnap", []).unwrap();
+    drop(c);
+    run_to_tick(&mut saved, 16);
+    assert_eq!(snapshot_ticks(&path), [0, 16]);
+    assert!(saved.take_save_errors().is_empty());
+    // Logged after the gap closed, then the process dies.
+    swing(&mut saved);
+    assert_eq!(count_commands(&path, "tick = 16 AND player = 'alice'"), 1);
+    run_to_tick(&mut saved, 25);
+    drop(saved);
+
+    let mut resumed = Game::resume(&path).unwrap();
+    unpause(&mut resumed);
     run_to_tick(&mut resumed, 3000);
     assert_eq!(resumed.sim().state_hash(), reference.sim().state_hash());
 }
