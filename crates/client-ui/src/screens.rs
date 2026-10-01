@@ -1,14 +1,17 @@
-//! The screens (spec D1 §3): the lobby, and in a game the top bar (game,
-//! area, clock, votes, players), the diagram, and the train list and alarms
-//! on the right. `UiApp::ui` is the whole frame; the shell calls it.
+//! The screens (spec D1 §3, realism spec §3–§4): the lobby, and in a game
+//! the top bar (game, workstation, clock, votes, settings, players), the
+//! diagram, the train list or the simplifier and the alarms on the right,
+//! and the headcode enquiry window. `UiApp::ui` is the whole frame; the
+//! shell calls it.
 
 use std::time::Duration;
 
-use client_core::text::{fmt_hms, proposal_text, vote_text};
+use client_core::simplifier::{self, Line};
+use client_core::text::{fmt_hms, proposal_text, train_state_text, vote_text};
 use client_core::trains::train_list;
-use client_core::{App, Link, Settings, Target};
-use egui::{Align2, Color32, CornerRadius, FontId, Frame, Key, PointerButton, Rect, RichText, Sense, Ui};
-use protocol::{GameState, Proposal, TrainState};
+use client_core::{App, AspectMode, Link, Settings, SettingsStore, Target};
+use egui::{Align, Align2, Color32, CornerRadius, FontId, Frame, Key, Layout, PointerButton, Rect, RichText, Sense, Ui, vec2};
+use protocol::{GameState, Proposal};
 
 use crate::camera::Camera;
 use crate::hit::hit_test;
@@ -19,6 +22,18 @@ use crate::scene::Scene;
 pub const ALARM: Color32 = Color32::from_rgb(0xFF, 0x5A, 0x5A);
 /// How far one wheel "line" (egui points of scroll) zooms.
 const ZOOM_PER_POINT: f32 = 1.0 / 200.0;
+/// Simplifier columns, in points: headcode, lateness, from, to, at,
+/// platform, arrival, departure (wide enough for `BTHNLGR`, `ML_UP` and
+/// `05:03½`; the panel scrolls sideways when narrower).
+const SIMPLIFIER_COLUMNS: [f32; 8] = [38.0, 26.0, 50.0, 50.0, 56.0, 48.0, 46.0, 46.0];
+
+/// The upper half of the side panel.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SideTab {
+    #[default]
+    Trains,
+    Simplifier,
+}
 
 #[derive(Default)]
 struct NewGame {
@@ -42,8 +57,14 @@ pub struct UiApp {
     new_game: NewGame,
     /// The game whose Delete was pressed and awaits "Yes, delete".
     confirm_delete: Option<String>,
-    /// How the diagram is drawn (defaults until the settings menu exists).
     settings: Settings,
+    /// Where the settings are kept between visits (none in most tests).
+    store: Option<Box<dyn SettingsStore>>,
+    side_tab: SideTab,
+    /// The simplifier's headcode search.
+    search: String,
+    /// The headcode whose enquiry window is open.
+    enquiry: Option<String>,
 }
 
 impl UiApp {
@@ -60,7 +81,41 @@ impl UiApp {
             new_game: NewGame::default(),
             confirm_delete: None,
             settings: Settings::default(),
+            store: None,
+            side_tab: SideTab::default(),
+            search: String::new(),
+            enquiry: None,
         }
+    }
+
+    /// With the settings `store` holds, saving every change back to it.
+    pub fn with_store(core: App, store: Box<dyn SettingsStore>) -> UiApp {
+        let mut ui = UiApp::new(core);
+        ui.settings = store.load().map_or_else(Settings::default, |t| Settings::from_text(&t));
+        ui.store = Some(store);
+        ui
+    }
+
+    pub fn settings(&self) -> Settings {
+        self.settings
+    }
+
+    fn set_settings(&mut self, s: Settings) {
+        if s == self.settings {
+            return;
+        }
+        self.settings = s;
+        if let Some(store) = self.store.as_mut() {
+            store.save(&s.to_text());
+        }
+        if !s.enquiry {
+            self.enquiry = None;
+        }
+    }
+
+    /// The headcode whose enquiry window is open.
+    pub fn enquiry(&self) -> Option<&str> {
+        self.enquiry.as_deref()
     }
 
     /// The diagram's camera (tests and the "Fit" button).
@@ -195,16 +250,24 @@ impl UiApp {
         self.top_bar(ui);
         egui::Panel::right("side").default_size(330.0).show(ui, |ui| self.side(ui));
         egui::CentralPanel::default().frame(Frame::NONE.fill(BG)).show(ui, |ui| self.diagram_ui(ui, now));
+        self.enquiry_window(ui);
     }
 
     fn top_bar(&mut self, ui: &mut Ui) {
         let Some(g) = self.core.game() else { return };
-        let title = format!("{} · {} ({})", g.id, g.area().unwrap_or("spectating"), g.you);
+        let title = match g.area() {
+            Some(a) => match g.names().workstation(a) {
+                Some(ws) => format!("{} · Workstation {ws} · {a} ({})", g.id, g.you),
+                None => format!("{} · {a} ({})", g.id, g.you),
+            },
+            None => format!("{} · spectating ({})", g.id, g.you),
+        };
         let view = g.view().cloned();
         let areas: Vec<String> = g.layout().map(|l| l.areas.clone()).unwrap_or_default();
         let holding = g.area().is_some();
         let can_vote = g.can_vote();
         let mut act: Vec<Box<dyn FnOnce(&mut App)>> = Vec::new();
+        let mut settings = self.settings;
         egui::Panel::top("bar").show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(title).strong());
@@ -233,6 +296,14 @@ impl UiApp {
                 if ui.button("Fit").clicked() {
                     self.fitted = None;
                 }
+                ui.menu_button("Settings", |ui| {
+                    ui.label(RichText::new("Signal aspects").strong());
+                    ui.radio_value(&mut settings.aspects, AspectMode::RedGreen, "Red/green (panel)");
+                    ui.radio_value(&mut settings.aspects, AspectMode::Real, "Real aspects");
+                    ui.separator();
+                    ui.checkbox(&mut settings.enquiry, "Headcode enquiry");
+                    ui.checkbox(&mut settings.numbers, "Signal numbers");
+                });
                 if holding {
                     if ui.button("Release area").clicked() {
                         act.push(Box::new(|a| a.release()));
@@ -254,25 +325,54 @@ impl UiApp {
                 }
             });
         });
+        self.set_settings(settings);
         for f in act {
             f(&mut self.core);
         }
     }
 
+    /// The upper half: the train list or the simplifier; the lower half:
+    /// the alarms, always in view.
     fn side(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.side_tab, SideTab::Trains, RichText::new("TRAINS").strong());
+            ui.selectable_value(&mut self.side_tab, SideTab::Simplifier, RichText::new("SIMPLIFIER").strong());
+        });
+        let half = ui.available_height() * 0.5;
+        match self.side_tab {
+            SideTab::Trains => self.trains_ui(ui, half),
+            SideTab::Simplifier => self.simplifier_ui(ui, half),
+        }
         let Some(g) = self.core.game() else { return };
-        ui.label(RichText::new("TRAINS").strong());
-        egui::ScrollArea::vertical().id_salt("trains").max_height(ui.available_height() * 0.5).show(ui, |ui| {
+        ui.separator();
+        ui.label(RichText::new("ALARMS").strong());
+        egui::ScrollArea::vertical().id_salt("alarms").show(ui, |ui| {
+            for e in g.log().entries().rev() {
+                let when = e.sim_time.map(fmt_hms).unwrap_or_default();
+                let text = RichText::new(format!("{when} {}", e.text));
+                ui.label(if e.alarm { text.color(ALARM) } else { text });
+            }
+        });
+    }
+
+    fn trains_ui(&mut self, ui: &mut Ui, height: f32) {
+        let Some(g) = self.core.game() else { return };
+        let enquiry = self.settings.enquiry;
+        let mut open = None;
+        egui::ScrollArea::vertical().id_salt("trains").max_height(height).show(ui, |ui| {
             let Some(v) = g.view() else { return };
             egui::Grid::new("train_list").striped(true).show(ui, |ui| {
                 for (h, r) in train_list(v) {
-                    ui.label(RichText::new(h).monospace().color(paint::HEADCODE));
-                    ui.label(match r.state {
-                        TrainState::AtPlatform => "at platform",
-                        TrainState::InArea => "in area",
-                        TrainState::Approaching => "approaching",
-                        TrainState::Due => "due",
-                    });
+                    let code = RichText::new(h).monospace().color(paint::HEADCODE);
+                    // With the enquiry on, a headcode opens its window.
+                    if enquiry {
+                        if ui.add(egui::Label::new(code).sense(Sense::click())).clicked() {
+                            open = Some(h.to_string());
+                        }
+                    } else {
+                        ui.label(code);
+                    }
+                    ui.label(train_state_text(r.state));
                     let next = match (&r.next_place, &r.next_platform) {
                         (Some(p), Some(pf)) => format!("{p} {pf}"),
                         (Some(p), None) => p.clone(),
@@ -285,15 +385,71 @@ impl UiApp {
                 }
             });
         });
-        ui.separator();
-        ui.label(RichText::new("ALARMS").strong());
-        egui::ScrollArea::vertical().id_salt("alarms").show(ui, |ui| {
-            for e in g.log().entries().rev() {
-                let when = e.sim_time.map(fmt_hms).unwrap_or_default();
-                let text = RichText::new(format!("{when} {}", e.text));
-                ui.label(if e.alarm { text.color(ALARM) } else { text });
+        if open.is_some() {
+            self.enquiry = open;
+        }
+    }
+
+    /// The simplifier (realism spec §3): the layout's rows in running
+    /// order, searched by headcode, drawn only where the scroll shows them.
+    fn simplifier_ui(&mut self, ui: &mut Ui, height: f32) {
+        ui.add(egui::TextEdit::singleline(&mut self.search).id_salt("simplifier_search").desired_width(120.0).hint_text("headcode"));
+        let Some(g) = self.core.game() else { return };
+        let Some(l) = g.layout() else { return };
+        let v = g.view();
+        let lines: Vec<(Line, Option<String>)> = simplifier::rows(l, &self.search)
+            .into_iter()
+            .flat_map(|r| {
+                let late = simplifier::lateness(v, &r.headcode);
+                simplifier::lines(r).into_iter().enumerate().map(move |(i, line)| (line, late.clone().filter(|_| i == 0)))
+            })
+            .collect();
+        if lines.is_empty() {
+            ui.label(if l.simplifier.is_empty() { "No booked trains here" } else { "No headcode matches" });
+            return;
+        }
+        let row_h = ui.text_style_height(&egui::TextStyle::Body) + 4.0;
+        let header = ["Train", "Late", "From", "To", "At", "Plat", "Arr", "Dep"];
+        simplifier_row(ui, row_h, header.map(|h| RichText::new(h).strong()));
+        egui::ScrollArea::both().id_salt("simplifier").max_height(height).show_rows(ui, row_h, lines.len(), |ui, range| {
+            for (line, late) in &lines[range] {
+                let late = late.as_deref().unwrap_or("");
+                let cells = [
+                    RichText::new(&line.headcode).monospace().color(paint::HEADCODE),
+                    RichText::new(late).color(if late == "OT" { paint::LABEL } else { ALARM }),
+                    RichText::new(&line.from),
+                    RichText::new(&line.to),
+                    RichText::new(&line.place),
+                    RichText::new(&line.platform),
+                    RichText::new(&line.arr),
+                    RichText::new(&line.dep),
+                ];
+                simplifier_row(ui, row_h, cells);
             }
         });
+    }
+
+    fn enquiry_window(&mut self, ui: &mut Ui) {
+        let Some(h) = self.enquiry.clone() else { return };
+        let mut open = true;
+        let Some(g) = self.core.game() else { return };
+        let (Some(l), v) = (g.layout(), g.view()) else { return };
+        let e = simplifier::enquiry(l, v, &h);
+        egui::Window::new(format!("Train {h}")).id(egui::Id::new("enquiry")).open(&mut open).resizable(false).show(ui.ctx(), |ui| {
+            ui.label(e.live_text());
+            if e.rows.is_empty() {
+                ui.label("Not in the simplifier for this area");
+            }
+            for r in &e.rows {
+                ui.label(format!("{} to {}", r.origin.as_deref().unwrap_or("?"), r.destination.as_deref().unwrap_or("?")));
+                for line in simplifier::lines(r) {
+                    ui.label(format!("{} {} {} {}", line.place, line.platform, line.arr, line.dep));
+                }
+            }
+        });
+        if !open {
+            self.enquiry = None;
+        }
     }
 
     fn diagram_ui(&mut self, ui: &mut Ui, now: f64) {
@@ -356,7 +512,11 @@ impl UiApp {
         };
         paint::paint(&painter, paint::draw(scene, &cam, rect, &st));
         match click {
-            Some(Some(t)) => self.core.click(&t),
+            // With the enquiry on, a headcode opens its window and nothing else.
+            Some(Some(t)) => match self.core.headcode_at(&t).filter(|_| self.settings.enquiry) {
+                Some(h) => self.enquiry = Some(h),
+                None => self.core.click(&t),
+            },
             Some(None) => self.core.escape(),
             None => {}
         }
@@ -403,4 +563,17 @@ impl UiApp {
             });
         }
     }
+}
+
+/// One simplifier line in fixed-width cells.
+fn simplifier_row(ui: &mut Ui, row_h: f32, cells: [RichText; 8]) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        for (text, w) in cells.into_iter().zip(SIMPLIFIER_COLUMNS) {
+            ui.allocate_ui_with_layout(vec2(w, row_h), Layout::left_to_right(Align::Center), |ui| {
+                ui.set_min_width(w);
+                ui.add(egui::Label::new(text).truncate());
+            });
+        }
+    });
 }

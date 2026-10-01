@@ -15,8 +15,14 @@ pub fn s(x: &str) -> String {
 
 /// twobox with `twobox-layout.json` as its drawing.
 pub fn drawn_twobox() -> World {
+    drawn_twobox_with(|_| {})
+}
+
+/// `drawn_twobox`, its world JSON changed by `f` first.
+pub fn drawn_twobox_with(f: impl FnOnce(&mut Value)) -> World {
     let mut w: Value = serde_json::from_str(&std::fs::read_to_string(format!("{FIXTURES}/twobox.json")).unwrap()).unwrap();
     w["layout"] = serde_json::from_str(&std::fs::read_to_string(format!("{FIXTURES}/twobox-layout.json")).unwrap()).unwrap();
+    f(&mut w);
     World::from_json(&w.to_string()).unwrap()
 }
 

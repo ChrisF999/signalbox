@@ -3,7 +3,7 @@
 
 mod common;
 
-use client_core::{App, MemHandle, MemTransport};
+use client_core::{App, AspectMode, MemHandle, MemStore, MemTransport};
 use client_ui::UiApp;
 use common::*;
 use egui::{Event, FullOutput, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, Shape, pos2, vec2};
@@ -24,11 +24,20 @@ struct Rig {
 impl Rig {
     /// Open, in the lobby, the front's lists delivered.
     fn lobby(world: signalbox_core::world::World) -> Rig {
+        Rig::lobby_with(world, None)
+    }
+
+    /// `lobby`, the settings kept in `store`.
+    fn lobby_with(world: signalbox_core::world::World, store: Option<MemStore>) -> Rig {
         let (tr, h) = MemTransport::new();
         let core = App::new(Box::new(tr), 0.0);
         h.open();
         let game = Game::new(world, GameMeta { layout: s("twobox"), seed: 1 });
-        let mut r = Rig { ctx: egui::Context::default(), ui: UiApp::new(core), h, game, t: 0.0, events: vec![], lobby_sent: vec![] };
+        let ui = match store {
+            Some(st) => UiApp::with_store(core, Box::new(st)),
+            None => UiApp::new(core),
+        };
+        let mut r = Rig { ctx: egui::Context::default(), ui, h, game, t: 0.0, events: vec![], lobby_sent: vec![] };
         r.frame();
         r.lobby_sent.clear();
         r.h.push(ServerFrame::Lobby(LobbyReply::Layouts { layouts: vec![LayoutInfo { name: s("twobox"), areas: vec![s("West"), s("East")] }] }));
@@ -38,7 +47,11 @@ impl Rig {
 
     /// In the game as "ann", holding `area`.
     fn in_game(world: signalbox_core::world::World, area: Option<&str>) -> Rig {
-        let mut r = Rig::lobby(world);
+        Rig::in_game_with(world, area, None)
+    }
+
+    fn in_game_with(world: signalbox_core::world::World, area: Option<&str>, store: Option<MemStore>) -> Rig {
+        let mut r = Rig::lobby_with(world, store);
         r.h.push(ServerFrame::Lobby(LobbyReply::Joined { game: s("g-test"), you: s("ann") }));
         for (_, m) in r.game.connect("ann") {
             r.h.push(ServerFrame::Game(m));
@@ -183,7 +196,7 @@ fn deleting_a_game_asks_first() {
 fn the_game_screen_shows_bar_trains_alarms_and_the_fitted_diagram() {
     let mut r = Rig::in_game(drawn_twobox(), Some("West"));
     let out = r.frame();
-    for want in ["g-test · West (ann)", "07:00:0", "1×", "TRAINS", "ALARMS", "West: ann", "East: robot", "1E01", "Leave"] {
+    for want in ["g-test · Workstation A · West (ann)", "07:00:0", "1×", "TRAINS", "ALARMS", "West: ann", "East: robot", "1E01", "Leave"] {
         assert!(has_text(&out, want), "{want} in {:?}", texts(&out));
     }
     let rect = r.ui.diagram_rect().unwrap();
@@ -319,7 +332,7 @@ fn a_lost_connection_shows_the_banner() {
     r.frame();
     let out = r.frame();
     assert!(has_text(&out, "Connection lost. Reconnecting in"), "{:?}", texts(&out));
-    assert!(has_text(&out, "g-test · West (ann)"), "the game stays on screen");
+    assert!(has_text(&out, "g-test · Workstation A · West (ann)"), "the game stays on screen");
 }
 
 /// egui's default fonts lack some symbols (an arrow, for one) and draw a box
@@ -341,6 +354,28 @@ fn every_character_on_screen_has_a_glyph() {
     r.frame();
     let with_banner = r.frame();
     let mut shown: String = texts(&with_menu).into_iter().chain(texts(&with_banner)).map(|(t, _)| t).collect();
+    // The realism pass: the settings menu, the simplifier (with a half
+    // minute) and the enquiry window.
+    let half = drawn_twobox_with(|w| w["services"][0]["calls"][0]["arr"] = serde_json::json!("07:04:30"));
+    let store = MemStore::new();
+    let mut st = store.clone();
+    client_core::SettingsStore::save(&mut st, "enquiry=on");
+    let mut r2 = Rig::in_game_with(half, Some("East"), Some(store));
+    let out = r2.frame();
+    click_text(&mut r2, &out, "Settings");
+    shown.extend(texts(&r2.frame()).into_iter().map(|(t, _)| t));
+    r2.events.push(Event::Key { key: Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::default() });
+    r2.frame();
+    let out = r2.frame();
+    let right = r2.ui.diagram_rect().unwrap().max.x;
+    let at = texts(&out).into_iter().find(|(t, at)| t == "1E01" && at.min.x >= right).unwrap().1.center();
+    r2.click(at, PointerButton::Primary);
+    let out = r2.frame();
+    click_text(&mut r2, &out, "SIMPLIFIER");
+    let out = r2.frame();
+    shown.extend(texts(&out).into_iter().map(|(t, _)| t));
+    assert!(shown.contains("07:04½") && shown.contains("Train 1E01") && shown.contains("Real aspects"), "{shown}");
+    assert!(!shown.contains(['→', '←', '○', '●']), "arrows and the auto button are shapes: {shown}");
     assert!(shown.contains("Refused") && shown.contains("Cancel route TAW1 to TAA"), "{shown}");
     // Not reached above: a train with no next call and an open vote show a dash.
     shown.push('—');
@@ -352,4 +387,128 @@ fn every_character_on_screen_has_a_glyph() {
             .collect()
     });
     assert!(missing.is_empty(), "no glyph for {missing:?}");
+}
+
+// ---- the realism pass: workstation, settings, simplifier, enquiry ----
+
+/// Text drawn right of the diagram: the side panel.
+fn side_texts(r: &Rig, out: &FullOutput) -> Vec<String> {
+    let right = r.ui.diagram_rect().unwrap().max.x;
+    texts(out).into_iter().filter(|(_, at)| at.min.x >= right).map(|(t, _)| t).collect()
+}
+
+fn click_text(r: &mut Rig, out: &FullOutput, want: &str) {
+    let at = texts(out).into_iter().find(|(t, _)| t == want).unwrap_or_else(|| panic!("no {want:?} in {:?}", texts(out))).1.center();
+    r.click(at, PointerButton::Primary);
+}
+
+/// Where berth `name` is drawn now.
+fn berth_at(r: &Rig, name: &str) -> Pos2 {
+    let g = r.ui.core.game().unwrap();
+    let sc = client_ui::scene::Scene::build(g.layout().unwrap()).unwrap();
+    let b = sc.berths.iter().find(|b| b.name == name).unwrap();
+    client_ui::hit::berth_rect(&r.ui.camera().unwrap(), r.ui.diagram_rect().unwrap(), b.at, b.offset_px).center()
+}
+
+/// Frames until 1E01 (entering at W at 07:00) is described in a berth.
+fn until_1e01_is_shown(r: &mut Rig) -> String {
+    for _ in 0..100 {
+        r.frame();
+        if let Some((b, _)) = r.view().berths.iter().find(|(_, h)| *h == "1E01") {
+            return b.clone();
+        }
+    }
+    panic!("1E01 never described: {:?}", r.view().berths);
+}
+
+#[test]
+fn the_top_bar_names_the_workstation_or_says_spectating() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("East"));
+    assert!(has_text(&r.frame(), "g-test · Workstation B · East (ann)"));
+    let mut r = Rig::in_game(drawn_twobox(), None);
+    assert!(has_text(&r.frame(), "g-test · spectating (ann)"));
+}
+
+#[test]
+fn settings_change_from_the_menu_and_are_kept() {
+    let store = MemStore::new();
+    let mut r = Rig::in_game_with(drawn_twobox(), Some("West"), Some(store.clone()));
+    assert_eq!(r.ui.settings(), client_core::Settings::default());
+    for item in ["Real aspects", "Signal numbers"] {
+        let out = r.frame();
+        click_text(&mut r, &out, "Settings");
+        let out = r.frame();
+        click_text(&mut r, &out, item);
+    }
+    assert_eq!((r.ui.settings().aspects, r.ui.settings().numbers), (AspectMode::Real, false));
+    assert_eq!(store.text().as_deref(), Some("aspects=real\nenquiry=off\nnumbers=off\n"));
+    let again = Rig::in_game_with(drawn_twobox(), Some("West"), Some(store));
+    assert_eq!(again.ui.settings().aspects, AspectMode::Real, "a new page reads them back");
+}
+
+#[test]
+fn the_simplifier_tab_lists_searches_and_shows_lateness() {
+    let mut r = Rig::in_game(drawn_twobox(), None);
+    let out = r.frame();
+    click_text(&mut r, &out, "SIMPLIFIER");
+    let out = r.frame();
+    let side = side_texts(&r, &out);
+    for want in ["Train", "Late", "Plat", "1E01", "1N02", "2W03", "EST", "07:04", "07:05"] {
+        assert!(side.iter().any(|t| t == want), "{want} in {side:?}");
+    }
+    assert!(has_text(&out, "ALARMS"), "the alarms stay in view");
+    until_1e01_is_shown(&mut r);
+    let out = r.frame();
+    let side = side_texts(&r, &out);
+    assert!(side.iter().any(|t| t == "OT"), "1E01 is running, on time: {side:?}");
+    let out = r.frame();
+    click_text(&mut r, &out, "headcode");
+    r.events.push(Event::Text(s("1n")));
+    r.frame();
+    let out = r.frame();
+    let side = side_texts(&r, &out);
+    assert!(side.iter().any(|t| t == "1N02") && !side.iter().any(|t| t == "1E01"), "{side:?}");
+    r.events.push(Event::Text(s("zz")));
+    r.frame();
+    assert!(has_text(&r.frame(), "No headcode matches"));
+}
+
+#[test]
+fn a_headcode_click_opens_the_enquiry_only_when_it_is_on() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    let berth = until_1e01_is_shown(&mut r);
+    let w1 = r.at(100.0, -5.0);
+    r.click(w1, PointerButton::Primary);
+    r.click(berth_at(&r, &berth), PointerButton::Primary);
+    assert!(!has_text(&r.frame(), "Train 1E01"), "enquiry off: no window");
+    assert_eq!(r.ui.core.game().unwrap().selected(), None, "off, it is a dead click as in D1");
+
+    let store = MemStore::new();
+    let mut w = store.clone();
+    client_core::SettingsStore::save(&mut w, "enquiry=on");
+    let mut r = Rig::in_game_with(drawn_twobox(), Some("West"), Some(store));
+    let berth = until_1e01_is_shown(&mut r);
+    let w1 = r.at(100.0, -5.0);
+    r.click(w1, PointerButton::Primary);
+    r.click(berth_at(&r, &berth), PointerButton::Primary);
+    let out = r.frame();
+    assert!(has_text(&out, "Train 1E01") && has_text(&out, "in area, OT"), "{:?}", texts(&out));
+    assert!(has_text(&out, "Not in the simplifier for this area"), "West has no platforms");
+    assert_eq!(r.ui.enquiry(), Some("1E01"));
+    assert_eq!(r.ui.core.game().unwrap().selected(), Some("W1"), "looking a train up never touches the entrance");
+}
+
+#[test]
+fn a_headcode_in_the_train_list_opens_the_enquiry() {
+    let store = MemStore::new();
+    let mut w = store.clone();
+    client_core::SettingsStore::save(&mut w, "enquiry=on");
+    let mut r = Rig::in_game_with(drawn_twobox(), Some("East"), Some(store));
+    let out = r.frame();
+    let right = r.ui.diagram_rect().unwrap().max.x;
+    let at = texts(&out).into_iter().find(|(t, at)| t == "1E01" && at.min.x >= right).expect("1E01 in the train list").1.center();
+    r.click(at, PointerButton::Primary);
+    let out = r.frame();
+    assert!(has_text(&out, "Train 1E01"), "{:?}", texts(&out));
+    assert!(has_text(&out, "EST to EST") && has_text(&out, "EST 1 07:04 07:05"), "East's simplifier row");
 }
