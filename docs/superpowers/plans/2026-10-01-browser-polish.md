@@ -2,15 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A diagram legible at every zoom (no text over text, numbers off the track), a Drain timetable that runs until 14:00, old Drain saves showing today's `W…` names, the simplifier opening at "now", and a real-browser check of the WebGL2 fallback.
+**Goal:** A diagram legible at every zoom (no text over text, numbers off the track), Drain running the real Waterloo & City Working Timetable for a whole day (from the owner's own PDF; only the reader is committed), old Drain saves showing today's `W…` names, the simplifier opening at "now", and a real-browser check of the WebGL2 fallback.
 
-**Architecture:** `paint::draw` stays pure and now records which texts may move (role + other spots) and what must be kept clear; a new pure `labels` module plans placement greedily by priority and `UiApp` caches the plan per zoom. The converter gains a per-layout `--repeat` file (a pure `WorldFile` transform). Resume optionally takes the current layout file and swaps in its display-only `layout` JSON when the saved network matches. A shell + Python script drives Playwright Chromium against a throwaway dev-login front.
+**Architecture:** `paint::draw` stays pure and now records which texts may move (role + other spots) and what must be kept clear; a new pure `labels` module plans placement greedily by priority and `UiApp` caches the plan per zoom. The converter gains `--wtt`: a reader of `pdftotext -bbox` output of LU WTT No. 7 that checks the timetable against the WTT's own figures and replaces Drain's services, entries and start time (a pure `WorldFile` transform); the image gets that text from the git-ignored `external/wtt/` in a Docker stage. The robot gains one standing rule (core), without which the WTT's peaks gridlock. Resume optionally takes the current layout file and swaps in its display-only `layout` JSON when the saved network matches. A shell + Python script drives Playwright Chromium against a throwaway dev-login front.
 
-**Tech Stack:** Rust 1.98 (Docker `scripts/cargo`), egui 0.36 (headless tests), serde_json, rusqlite, tokio; Playwright 1.55 Chromium (Docker image on ra).
+**Tech Stack:** Rust 1.98 (Docker `scripts/cargo`), egui 0.36 (headless tests), serde_json, rusqlite, tokio; Playwright 1.55 Chromium (Docker image on ra); poppler-utils `pdftotext` 22.12 (Debian bookworm, in the image's `wtt` stage).
 
 **Spec:** `docs/superpowers/specs/2026-10-01-browser-polish-design.md`
 
-**Base:** `main` **after the `tutorial` branch merges** (this plan was written against `5eb82f0`). Before Task 1, re-check every file and line reference below against the merged code — the tutorial edits `crates/server/src/process.rs`, `crates/server/src/supervisor.rs` and `crates/game/src/game.rs`, which Tasks 6 and 7 touch, and may add lesson highlights to `crates/client-ui/src/paint.rs`. Every Rust and script block in this plan was compiled and its tests run (and `deploy/browser-check.sh` run end to end) on a scratch copy of `5eb82f0`; the `deploy/Dockerfile` loop was not built (the controller's deploy exercises it). Where the merged code differs, keep the intent and the tests.
+**Base:** `main` **after the `tutorial` branch merges** (this plan was written against `5eb82f0`). Before Task 1, re-check every file and line reference below against the merged code — the tutorial edits `crates/server/src/process.rs`, `crates/server/src/supervisor.rs` and `crates/game/src/game.rs`, which Tasks 6 and 7 touch, and may add lesson highlights to `crates/client-ui/src/paint.rs`. Every Rust and script block in this plan was compiled and its tests run (and `deploy/browser-check.sh` run end to end) on a scratch copy of `5eb82f0`; the `deploy/Dockerfile` loop was not built (the controller's deploy exercises it). Where the merged code differs, keep the intent and the tests. **Amended 2026-10-01:** the tutorial has merged (`main` = `0c0ea67`); Tasks 4a–4c (the WTT, replacing the repeat timetable) and Task 5's screen test were written and run on a scratch copy of `0c0ea67`, including the `wtt` Docker stage (not the full image).
 
 ## Global Constraints
 
@@ -23,16 +23,19 @@
 - Placement depends only on the scene, the zoom and the settings: never on train state, never on the screen edge (spec P3).
 - Priority (spec P2): own signal numbers, ○A letters, line names, platform numbers, labels, fringe signal numbers. Headcodes are never moved or hidden.
 - The legibility targets (spec §3.4): 0 overlapping texts and 0 covered texts in all 66 renders; at 1280 × 800 Fit every own number drawn in every box view and ≤ 4 numbers tight against track in total.
-- Drain repeat (spec P8): `every` 00:10:00, `until` 14:00:00, `headcode_step` 2 → 192 services, last BW96/WB96.
+- **Licence (spec §4.1, owner decision):** TfL's WTT PDF, its text and anything made from it (parsed trips, a converted world) are never committed, logged into a commit message or pasted into a test. `external/wtt/` ignores everything but its `README.md` and `.gitignore`; tests use only the synthetic `wtt-synthetic.bbox.html`; the real-WTT soak is `#[ignore]` and skips without the file. Before every commit in Tasks 4b/4c, `git status --short` must show nothing from `external/wtt/`.
+- Drain from the WTT (spec §4.4): Wednesday, 574 services, 5 entries, start 05:40, headcodes `<train>/<trip>` (`201/7` … `202/163`), roads `DPT` 5/6/7 for both the siding and the depot.
+- The only core change is the robot's standing rule (Task 4a, spec P22); the sim, protocol and save schema are untouched.
 - Infra (deploying, the CI runner, `/opt/stack`, `tailscale serve`) is controller-only, in the final Controller section. Subagents may run `scripts/cargo`, `scripts/wasm-build` and `deploy/browser-check.sh` (it starts and removes its own throwaway container), and must not touch any other container, image, volume or network.
 
 ## Review Focus
 
 1. **Nonsense geometry reaching the placer** — coordinates of ±1e9 or NaN from a bad layout, a text that measures NaN: `plan` must return within a second, place nothing at a non-finite offset, and hide what it cannot measure rather than draw it somewhere odd. Pinned in Task 1 (`nonsense_geometry_stays_cheap_and_finite`).
 2. **A save whose layout the front no longer lists** (renamed or removed from the image) or whose layout file is unreadable: it must still resume, with its own display data, exactly as today. Pinned in Task 7 (`a_save_of_a_layout_no_longer_listed_still_resumes`) and Task 6 (`a_different_network_or_a_bad_file_keeps_the_saves_own`).
-3. **A repeat file that adds nothing** (an `until` before the next repeat): the converted timetable must come out byte-identical, ends included. Pinned in Task 4 (`an_until_before_the_next_repeat_changes_nothing`).
+3. **A WTT that is damaged or not WTT No. 7** (another PDF, a different `pdftotext`): the conversion must stop with a message naming the page or the failed check, never produce a partial timetable, and the image build must fail with it. Pinned in Task 4b (`a_wrong_file_is_refused`, `a_day_is_checked_against_what_the_wtt_says`, CLI `wtt_flag_checks_the_timetable_and_writes_nothing_when_it_fails`).
 4. **A stale placement plan** applied to a different drawing (numbers toggled, a claim changing the layout, a tutorial pushing extra texts): nothing may be moved by another drawing's offsets. Pinned in Task 1 (`apply_drops_hidden_texts_and_points_the_rest_at_their_new_index`: a plan of the wrong length changes nothing) and Task 3 (the cache key holds game, layout generation, scale and the numbers setting).
 5. **Train movement re-placing labels** (flicker): placement must be identical with and without a headcode in a berth and after a pan. Pinned in Task 2 (`a_plan_depends_on_neither_pan_nor_trains`).
+6. **The robot standing where it blocks a route to somewhere else** (Task 4a): `may_stand` must refuse sections with points and sections used by a route ending at another signal. Pinned by the Liverpool Street and bot soaks (no stuck trains) and Task 4a's Drain test.
 
 ## File Structure
 
@@ -48,14 +51,15 @@
 | `crates/client-ui/tests/paint.rs` | 2 | ○A threshold, keep-clear lists, number spots, berth width |
 | `crates/client-ui/tests/legibility.rs` (new) | 3 | The spec §3.4 acceptance measurement over the shipped layouts |
 | `crates/client-ui/tests/screens.rs` | 3, 5 | Wiring: no text over text on screen; simplifier opens at now |
-| `crates/ts2-import/src/repeat.rs` (new), `src/lib.rs`, `src/main.rs` | 4 | The repeat rule and the `--repeat` flag |
-| `crates/ts2-import/tests/repeat.rs` (new), `tests/cli.rs`, `tests/soak.rs` | 4 | Rule, errors, Drain, CLI, soak |
-| `layouts/drain.repeat.json` (new), `deploy/Dockerfile` | 4 | Drain's pattern; the image converts with it |
+| `crates/core/src/robot.rs`, `crates/ts2-import/tests/soak.rs` | 4a | `may_stand`: wait at an automatic signal on plain line |
+| `crates/ts2-import/src/wtt.rs` (new), `src/lib.rs`, `src/main.rs` | 4b | Read, check and apply the WTT; the `--wtt` flag |
+| `crates/ts2-import/tests/wtt.rs`, `tests/data/wtt-synthetic.py`, `tests/data/wtt-synthetic.bbox.html` (new), `tests/cli.rs` | 4b | Reader, checks, Drain, CLI on the synthetic WTT |
+| `external/wtt/README.md`, `external/wtt/.gitignore`, `crates/ts2-import/tests/wtt_day.rs` (new), `deploy/Dockerfile`, `deploy/README.md` | 4c | Where the owner's PDF lives; the image's `wtt` stage; the owner-run whole-day soak |
 | `crates/client-core/src/simplifier.rs`, `tests/simplifier.rs` | 5 | `last_time`, `now_line` |
 | `crates/game/src/save.rs`, `src/game.rs`, `src/lib.rs`, `tests/refresh.rs` (new) | 6 | `refresh_display`, `Game::resume_with_layout`, `Refresh` |
 | `crates/server/src/process.rs`, `src/supervisor.rs`, `tests/process.rs`, `tests/supervisor.rs` | 7 | `--current-layout`; the front passes it on resume |
 | `deploy/browser-check.sh`, `deploy/browser-check.py` (new), `deploy/README.md` | 8 | The real-browser renderer check |
-| `CLAUDE.md` | 3, 4, 6, 7, 8 | One paragraph per change, in the task that makes it |
+| `CLAUDE.md` | 3, 4a, 4b, 4c, 6, 7, 8 | One paragraph per change, in the task that makes it |
 
 ---
 
@@ -1244,473 +1248,1355 @@ git commit -m "feat(client-ui): place the diagram's texts on screen, cached per 
 
 ---
 
-### Task 4: Repeat timetables (Drain until 14:00)
+### Task 4a: The robot may wait at an automatic signal on plain line (spec P22)
+
+Replaces the repeat timetable's Task 4 (spec P7/P8 withdrawn). The real WTT (Tasks 4b, 4c) gridlocks under today's
+robot at 06:52 (spec §4.6); this is the one core change it needs.
 
 **Files:**
-- Create: `crates/ts2-import/src/repeat.rs`, `layouts/drain.repeat.json`, `crates/ts2-import/tests/repeat.rs`
-- Modify: `crates/ts2-import/src/lib.rs`, `crates/ts2-import/src/main.rs`, `crates/ts2-import/tests/cli.rs`, `crates/ts2-import/tests/soak.rs`, `deploy/Dockerfile`, `deploy/README.md`, `CLAUDE.md`
+- Modify: `crates/core/src/robot.rs` (`plan`, `shared_sections` → `route_users`, new `may_stand`), `CLAUDE.md`
+- Test: `crates/ts2-import/tests/soak.rs`
 
 **Interfaces:**
-- Consumes: `signalbox_core::world::file::{WorldFile, ServiceFile, CallFile, EndFile}`, `signalbox_core::time::{parse_hms, fmt_hms}`.
-- Produces: `ts2_import::repeat::{RepeatSpec { schema: u32, every: String, until: String, headcode_step: u32 }, RepeatError, parse(&str) -> Result<RepeatSpec, RepeatError>, apply(&mut WorldFile, &RepeatSpec) -> Result<(), RepeatError>}`; CLI flag `--repeat <repeat.json>` (applied after `--areas` and `--lines`). Task 5 uses `layouts/drain.repeat.json`.
+- Consumes: `robot::{commands, ROBOT_EVERY_TICKS}`, Drain (`crates/ts2-import/tests/data/drain.json`): signals 72/82 (Bank
+  platforms 7/8) both route to automatic signal 73 over plain section T19 (`L1000003`); platform 26 is `L1000009`.
+- Produces: no new public items; `robot::commands` sets routes to an automatic signal on plain line even where
+  routes from several signals (all ending at it) use the sections the train would stand on.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the failing test**
 
-Create `crates/ts2-import/tests/repeat.rs`:
+In `crates/ts2-import/tests/soak.rs` the `use` line becomes
+`use signalbox_core::robot::{self, ROBOT_EVERY_TICKS, SoakReport, soak};`, and before the doc comment of
+`liverpool_street_runs_three_hours` (`/// Three sim-hours from 05:00:15.`) add:
 
 ```rust
-//! Repeating a timetable (polish spec §4): the rule on a small shuttle, its
-//! hard errors, and Drain's shipped file.
-
-use signalbox_core::world::World;
-use signalbox_core::world::file::{EndFile, WorldFile};
-use ts2_import::repeat::{RepeatError, RepeatSpec, apply, parse};
-
-const DRAIN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/drain.json");
-const DRAIN_REPEAT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../layouts/drain.repeat.json");
-
-fn spec(every: &str, until: &str, step: u32) -> RepeatSpec {
-    RepeatSpec { schema: 1, every: every.into(), until: until.into(), headcode_step: step }
-}
-
-/// A one-train shuttle X ⇄ Y every 20 minutes, written out for two rounds:
-/// A01 06:00 X→Y forms B01 06:10 Y→X forms A03 06:20 forms B03 06:30, stables.
-fn shuttle() -> WorldFile {
-    let svc = |h: &str, from: &str, to: &str, dep: &str, arr: &str, end: &str| {
-        format!(
-            r#"{{"headcode": "{h}", "train_type": "T", "calls": [
-                {{"place": "{from}", "platform": "1", "dep": "{dep}"}},
-                {{"place": "{to}", "platform": "1", "arr": "{arr}"}}], "end": {end}}}"#
-        )
-    };
-    let form = |s: &str| format!(r#"{{"kind": "form", "service": "{s}"}}"#);
-    let services = [
-        svc("A01", "X", "Y", "06:00:00", "06:05:00", &form("B01")),
-        svc("B01", "Y", "X", "06:10:00", "06:15:00", &form("A03")),
-        svc("A03", "X", "Y", "06:20:00", "06:25:00", &form("B03")),
-        svc("B03", "Y", "X", "06:30:00", "06:35:00", r#"{"kind": "stable"}"#),
-    ]
-    .join(",");
-    serde_json::from_str(&format!(
-        r#"{{"schema": 1, "areas": [], "sections": [], "nodes": [], "segments": [],
-            "services": [{services}], "entries": [{{"service": "A01", "boundary": "X", "time": "05:59:00"}}]}}"#
-    ))
-    .unwrap()
-}
-
-fn heads(w: &WorldFile) -> Vec<&str> {
-    w.services.iter().map(|s| s.headcode.as_str()).collect()
-}
-
-fn end_of<'a>(w: &'a WorldFile, h: &str) -> &'a EndFile {
-    &w.services.iter().find(|s| s.headcode == h).unwrap().end
-}
-
-fn forms(w: &WorldFile, h: &str) -> Option<String> {
-    match end_of(w, h) {
-        EndFile::Form { service } => Some(service.clone()),
-        _ => None,
-    }
-}
-
+/// The robot lets a train wait at an automatic signal on plain line where
+/// routes from two platforms meet before it (polish spec §4.6): a westbound
+/// train leaves Bank for signal 73 while platform 26 is still occupied,
+/// instead of waiting at Bank until it clears.
 #[test]
-fn the_file_is_checked() {
-    let ok = r#"{"schema": 1, "every": "00:10:00", "until": "14:00:00", "headcode_step": 2}"#;
-    assert_eq!(parse(ok).unwrap(), spec("00:10:00", "14:00:00", 2));
-    assert!(matches!(parse(r#"{"schema": 1, "every": "00:10:00", "until": "14:00", "headcode_step": 2, "x": 1}"#), Err(RepeatError::Parse(_))));
-    assert_eq!(parse(r#"{"schema": 2, "every": "00:10:00", "until": "14:00", "headcode_step": 2}"#), Err(RepeatError::Schema(2)));
-    for bad in [
-        r#"{"schema": 1, "every": "00:00:30", "until": "14:00", "headcode_step": 2}"#,
-        r#"{"schema": 1, "every": "13:00:00", "until": "14:00", "headcode_step": 2}"#,
-        r#"{"schema": 1, "every": "00:10:00", "until": "24:00:00", "headcode_step": 2}"#,
-        r#"{"schema": 1, "every": "00:10:00", "until": "14:00", "headcode_step": 0}"#,
-        r#"{"schema": 1, "every": "ten", "until": "14:00", "headcode_step": 2}"#,
-    ] {
-        assert_eq!(parse(bad), Err(RepeatError::Bad), "{bad}");
-    }
-}
-
-#[test]
-fn a_shuttle_carries_on_until_the_last_repeat_then_stables() {
-    let mut w = shuttle();
-    apply(&mut w, &spec("00:20:00", "07:00:00", 2)).unwrap();
-    // The converted services first, then the repeats by round, then root order.
-    assert_eq!(heads(&w), ["A01", "B01", "A03", "B03", "A05", "B05", "A07"]);
-    let a05 = w.services.iter().find(|s| s.headcode == "A05").unwrap();
-    assert_eq!((a05.calls[0].dep.as_deref(), a05.calls[1].arr.as_deref()), (Some("06:40:00"), Some("06:45:00")));
-    assert_eq!(a05.calls[0].place, "X");
-    assert_eq!(forms(&w, "B03").as_deref(), Some("A05"), "the old last service now works on");
-    assert_eq!(forms(&w, "A05").as_deref(), Some("B05"));
-    assert_eq!(forms(&w, "B05").as_deref(), Some("A07"));
-    assert!(matches!(end_of(&w, "A07"), EndFile::Stable), "07:10 is past `until`: it stables as before");
-    assert_eq!(forms(&w, "A01").as_deref(), Some("B01"), "converted workings stay");
-}
-
-/// Review focus 3: an `until` that adds nothing leaves the timetable as it was.
-#[test]
-fn an_until_before_the_next_repeat_changes_nothing() {
-    let mut w = shuttle();
-    let before = serde_json::to_string(&w).unwrap();
-    apply(&mut w, &spec("00:20:00", "06:30:00", 2)).unwrap();
-    assert_eq!(serde_json::to_string(&w).unwrap(), before);
-}
-
-#[test]
-fn the_same_input_gives_the_same_output() {
-    let run = || {
-        let mut w = shuttle();
-        apply(&mut w, &spec("00:20:00", "09:00:00", 2)).unwrap();
-        serde_json::to_string(&w).unwrap()
-    };
-    assert_eq!(run(), run());
-}
-
-#[test]
-fn headcodes_that_do_not_follow_the_step_or_outgrow_it_are_errors() {
-    let mut w = shuttle();
-    assert_eq!(
-        apply(&mut w, &spec("00:20:00", "07:00:00", 4)),
-        Err(RepeatError::Step("A03".into(), "A01".into(), "A05".into()))
+fn drain_trains_wait_at_automatic_signal_73() {
+    let dir = env!("CARGO_MANIFEST_DIR");
+    let mut w = ts2_import::convert(&std::fs::read_to_string(format!("{dir}/tests/data/drain.json")).unwrap()).unwrap().world;
+    // A runs from Bank platform 8 into platform 26 and stands there; B leaves platform 7 behind it.
+    let (services, entries) = (
+        r#"[{"headcode": "A", "train_type": "UT", "calls": [{"place": "BNK", "platform": "8", "dep": "06:00:00"},
+                {"place": "WTL", "platform": "26", "arr": "06:03:00", "dep": "23:00:00"}], "end": {"kind": "stable"}},
+            {"headcode": "B", "train_type": "UT", "calls": [{"place": "BNK", "platform": "7", "dep": "06:04:00"},
+                {"place": "WTL", "platform": "26", "arr": "06:08:00"}], "end": {"kind": "stable"}}]"#,
+        r#"[{"service": "A", "at": {"segment": "L8", "offset_m": 79.0, "direction": "up"}, "time": "06:00:00"},
+            {"service": "B", "at": {"segment": "L7", "offset_m": 79.0, "direction": "up"}, "time": "06:00:00"}]"#,
     );
-    let mut w = shuttle();
-    for s in &mut w.services {
-        s.headcode = s.headcode.replace("01", "X").replace("03", "Y");
-    }
-    for s in &mut w.services {
-        if let EndFile::Form { service } = &mut s.end {
-            *service = service.replace("01", "X").replace("03", "Y");
-        }
-    }
-    w.entries[0].service = "AX".into();
-    assert_eq!(apply(&mut w, &spec("00:20:00", "07:00:00", 2)), Err(RepeatError::NoNumber("AX".into())));
-    let mut w = shuttle();
-    assert!(matches!(apply(&mut w, &spec("00:20:00", "23:00:00", 2)), Err(RepeatError::Headcode(_, h, _)) if h == "A101"));
-}
-
-#[test]
-fn a_repeat_may_not_take_another_services_headcode_run_past_midnight_or_form_twice() {
-    let mut w = shuttle();
-    let mut other = w.services[0].clone();
-    other.headcode = "A05".into();
-    other.calls[0].place = "Z".into();
-    other.end = EndFile::Stable;
-    w.services.push(other);
-    assert!(matches!(apply(&mut w, &spec("00:20:00", "07:00:00", 2)), Err(RepeatError::Headcode(_, h, _)) if h == "A05"));
-    let mut w = shuttle();
-    for s in &mut w.services {
-        for c in &mut s.calls {
-            for t in [&mut c.arr, &mut c.dep].into_iter().flatten() {
-                let h: u32 = t[..2].parse().unwrap();
-                *t = format!("{:02}{}", h + 17, &t[2..]); // 23:00 to 23:35
+    w.services = serde_json::from_str(services).unwrap();
+    w.entries = serde_json::from_str(entries).unwrap();
+    let mut sim = Sim::new(World::from_file(w).unwrap(), 7);
+    for i in 0..(8 * 600) {
+        if i % ROBOT_EVERY_TICKS == 0 {
+            for c in robot::commands(&sim) {
+                sim.submit(c);
             }
         }
+        sim.step();
     }
-    // A runs take 25 minutes: the 23:40 repeat would arrive at 00:05.
-    w.services[0].calls[1].arr = Some("23:25:00".into());
-    w.services[2].calls[1].arr = Some("23:45:00".into());
-    assert_eq!(apply(&mut w, &spec("00:20:00", "23:50:00", 2)), Err(RepeatError::Midnight("A01".into())));
-    let mut w = shuttle();
-    w.services[3].end = EndFile::Form { service: "A03".into() };
-    assert_eq!(apply(&mut w, &spec("01:00:00", "06:00:00", 2)), Err(RepeatError::Formed("A03".into())));
-}
-
-/// Drain (spec P8): every 10 minutes until 14:00, three trains all day.
-#[test]
-fn drain_runs_until_two_in_the_afternoon() {
-    let mut w = ts2_import::convert(&std::fs::read_to_string(DRAIN).unwrap()).unwrap().world;
-    let before = w.services.len();
-    apply(&mut w, &parse(&std::fs::read_to_string(DRAIN_REPEAT).unwrap()).unwrap()).unwrap();
-    assert_eq!((before, w.services.len()), (16, 192));
-    let h = heads(&w);
-    assert!(h.contains(&"BW96") && h.contains(&"WB96") && !h.contains(&"BW98"), "{h:?}");
-    let ends: Vec<&str> = w.services.iter().filter(|s| !matches!(s.end, EndFile::Form { .. })).map(|s| s.headcode.as_str()).collect();
-    assert_eq!(ends.len(), 3, "three trains stable at the end of the day: {ends:?}");
-    assert_eq!(forms(&w, "BW08").as_deref(), Some("WB09"));
-    assert_eq!(forms(&w, "WB07").as_deref(), Some("BW09"));
-    assert_eq!(forms(&w, "WB08").as_deref(), Some("BW10"));
-    World::from_file(w).expect("the repeated world loads");
+    let b = sim.trains().iter().find(|t| t.headcode == "B").unwrap();
+    let net = &sim.world().net;
+    assert_eq!(net.segments[b.head().0.idx()].name, "L1000003", "B waits on the plain line at 73");
+    assert_eq!(b.speed, 0.0);
+    let a = sim.trains().iter().find(|t| t.headcode == "A").unwrap();
+    assert_eq!(net.segments[a.head().0.idx()].name, "L1000009", "A still in platform 26");
 }
 ```
 
-In `crates/ts2-import/tests/cli.rs`: the first doc line becomes ``//! The converter CLI's `--areas`, `--lines` and `--repeat` flags.``, add after `DRAIN_LINES`:
+- [ ] **Step 2: Run it to see it fail**
+
+Run: `scripts/cargo test -p ts2-import --test soak drain_trains_wait_at_automatic_signal_73`
+Expected: FAIL, `B waits on the plain line at 73` with `left: "L7"` (B is still at Bank).
+
+- [ ] **Step 3: Implement**
+
+In `crates/core/src/robot.rs`, replace `plan` and `shared_sections` (from the doc comment of `plan` up to the doc
+comment of `commands`, `/// Route requests for trains facing a red signal…`) with:
 
 ```rust
-const DRAIN_REPEAT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../layouts/drain.repeat.json");
+/// The routes from `entrance` the train should have set together: up to its
+/// next stopping call or its exit, or to the first signal before that where
+/// it could stand without fouling track that routes from other signals use
+/// (`may_stand`).
+fn plan(w: &World, t: &Train, entrance: SignalId, users: &[Vec<(SignalId, Exit)>]) -> Option<Vec<RouteId>> {
+    let next = t.next_call + usize::from(t.dwell.is_some());
+    let (full, _) = itinerary(w, t, entrance, next, None)?;
+    let mut chain = Vec::new();
+    for (r, ends_leg) in full {
+        chain.push(r);
+        let exit = w.routes[r.idx()].exit;
+        let clear = matches!(exit, Exit::Signal(_))
+            && footprint(w, &chain, t.length_m).iter().all(|&s| may_stand(w, users, s, exit));
+        if ends_leg || clear {
+            break;
+        }
+    }
+    (!chain.is_empty()).then_some(chain)
+}
+
+/// For each section, the entrance and exit of every route whose path uses it.
+fn route_users(w: &World) -> Vec<Vec<(SignalId, Exit)>> {
+    let mut users: Vec<Vec<(SignalId, Exit)>> = vec![Vec::new(); w.net.sections.len()];
+    for def in &w.routes {
+        for &s in &def.path {
+            if !users[s.idx()].contains(&(def.entrance, def.exit)) {
+                users[s.idx()].push((def.entrance, def.exit));
+            }
+        }
+    }
+    users
+}
+
+/// Whether a train may stand on section `s` waiting at `exit`: no route
+/// from another signal uses `s`, or `s` is plain line (no points) whose
+/// routes all end at `exit` and `exit` is an automatic signal (polish spec
+/// §4.6). There the train blocks nothing that could go anywhere else: it is
+/// waiting in a block section, as on any plain line.
+fn may_stand(w: &World, users: &[Vec<(SignalId, Exit)>], s: SectionId, exit: Exit) -> bool {
+    let here = &users[s.idx()];
+    if here.iter().all(|u| u.0 == here[0].0) {
+        return true;
+    }
+    let automatic = match exit {
+        Exit::Signal(x) => {
+            let onward = &w.routes_from[x.idx()];
+            !onward.is_empty() && onward.iter().all(|&o| w.routes[o.idx()].automatic)
+        }
+        Exit::Node(_) => false,
+    };
+    let plain = w.net.sections[s.idx()].segments.iter().all(|g| {
+        let sg = &w.net.segments[g.idx()];
+        [sg.a, sg.b].iter().all(|n| !matches!(w.net.nodes[n.idx()].kind, NodeKind::Points { .. }))
+    });
+    automatic && plain && here.iter().all(|u| u.1 == exit)
+}
+```
+
+and in `commands`: `let shared = shared_sections(w);` becomes `let users = route_users(w);`, and
+`let Some(chain) = plan(w, t, entrance, &shared) else { continue };` becomes
+`let Some(chain) = plan(w, t, entrance, &users) else { continue };`. (`NodeKind`, `Exit`, `SectionId` and
+`SignalId` are already in scope.)
+
+- [ ] **Step 4: Run the tests to see them pass, and the soaks**
+
+Run: `scripts/cargo test -p ts2-import --test soak` → PASS (3 passed, 1 ignored).
+Run: `scripts/cargo test -p signalbox-core` → PASS.
+Run: `scripts/cargo test --release -p ts2-import --test soak -- --ignored` → PASS (Liverpool Street, 3 h).
+Run: `scripts/cargo test --release -p signalbox-bot --test soak -- --ignored` → PASS.
+Run: `scripts/cargo test -p signalbox-game` → PASS.
+For the branch report: `scripts/cargo run -q -p ts2-import -- crates/ts2-import/tests/data/liverpool-st.json -o /w/target/lst.json`
+then `scripts/cargo run -q --release -p sim-cli -- run /w/target/lst.json --robot --hours 3` (scratch, on `0c0ea67`:
+entered 76, exited 60, no stuck, `max_fringe_wait_s` 997; before this task 71, 58, none, 686).
+
+- [ ] **Step 5: Document**
+
+`CLAUDE.md`, "Trains and the robot", after `…violations or stuck trains).` add: "The robot sets a train's routes
+only all the way to its next stop, or to a signal where it fouls no route from another signal, or
+(`robot::may_stand`, polish spec P22) to an automatic signal on plain line whose routes all end there."
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/core/src/robot.rs crates/ts2-import/tests/soak.rs CLAUDE.md
+git commit -m "feat(core): the robot may hold a train at an automatic signal on plain line"
+```
+
+---
+
+### Task 4b: Read the WTT and put it into Drain (`ts2-import --wtt`)
+
+**Files:**
+- Create: `crates/ts2-import/src/wtt.rs`, `crates/ts2-import/tests/wtt.rs`,
+  `crates/ts2-import/tests/data/wtt-synthetic.py`, `crates/ts2-import/tests/data/wtt-synthetic.bbox.html` (generated)
+- Modify: `crates/ts2-import/src/lib.rs`, `crates/ts2-import/src/main.rs`, `crates/ts2-import/tests/cli.rs`, `CLAUDE.md`
+
+**Interfaces:**
+- Consumes: `signalbox_core::world::file::{CallFile, EndFile, EntryFile, PositionFile, ServiceFile, WorldFile}`,
+  `signalbox_core::time::fmt_hms`, `Sim::new` + `Network::first_signal_ahead` (to stand entering trains facing their
+  starting signal), Drain's places `BNK` 7/8, `WTL` 25/26, `DPT` 5/6/7.
+- Produces (Task 4c relies on these): `ts2_import::wtt::{parse(&str) -> Result<Vec<Trip>, WttError>, on_day(&[Trip], Day)
+  -> Result<Vec<Trip>, WttError>, DAY, check(&[Trip], &Checks) -> Result<CheckReport, WttError>, Checks::waterloo_city(),
+  apply(&mut WorldFile, &[Trip]) -> Result<ApplyReport, WttError>, headcode(&Trip) -> String, Trip, Bound, Day,
+  WttError}`; CLI flag `--wtt <wtt.bbox.html>` (after `--areas` and `--lines`; exit 1 and nothing written if the
+  WTT does not read or fails the checks).
+- **Licence (spec §4.1):** nothing made from TfL's WTT is committed in this task or any other. The tests use only the
+  synthetic fixture (fictional trains 301–303).
+
+- [ ] **Step 1: The synthetic fixture**
+
+Create `crates/ts2-import/tests/data/wtt-synthetic.py`:
+
+```python
+#!/usr/bin/env python3
+# Writes wtt-synthetic.bbox.html: a made-up Working Timetable in the form
+# `pdftotext -bbox` gives for LU WTTs (words with their boxes), for the tests
+# of ts2_import::wtt. Fictional trains 301-303 and times; nothing in it comes
+# from TfL's timetable. Rerun after editing:
+#   python3 crates/ts2-import/tests/data/wtt-synthetic.py > crates/ts2-import/tests/data/wtt-synthetic.bbox.html
+out = []
+def word(x0, y0, w, h, t):
+    t = t.replace('&', '&amp;')
+    out.append(f'    <word xMin="{x0:.6f}" yMin="{y0:.6f}" xMax="{x0+w:.6f}" yMax="{y0+h:.6f}">{t}</word>')
+def text(x, y, s, h=6.07, cw=3.6):
+    for part in s.split():
+        w = cw * len(part)
+        word(x, y, w, h, part); x += w + 1.8
+def centred(c, y, s, h=4.55):
+    width = sum(3.0 * len(p) for p in s.split()) + 1.8 * (len(s.split()) - 1)
+    text(c - width / 2, y, s, h, 3.0)
+def time(c, y, hh, mm, frac=None, stacked=None, wash=False):
+    if wash:
+        word(c - 9.87, y, 18.16, 5.99, f'{hh}z{mm}'); x1 = c + 8.29
+    else:
+        word(c - 9.87, y, 7.18, 5.99, hh); word(c + 1.11, y, 7.18, 5.99, mm); x1 = c + 8.29
+    if frac: word(x1, y + 0.17, 1.82, 5.89, frac)
+    if stacked:
+        n, d = stacked
+        word(x1, y + 0.12, 1.63, 3.04, n); word(x1 + 0.2, y + 3.02, 1.63, 3.04, d)
+def page(direction, rows, cols):
+    out.append('  <page width="595.220000" height="842.000000">')
+    text(42.83, 54.31, 'MONDAYS TO FRIDAYS', 8.4)
+    text(466.45 if direction == 'WESTBOUND' else 42.83, 54.31 if direction == 'WESTBOUND' else 62.0, direction, 8.4)
+    labels = {'train': 'Train No.', 'trip': 'Trip No.', 'crew': 'Crew Running No.', 'notes': 'Notes', 'pf': 'Platform No.',
+              'bank': 'BANK', 'arr': 'arr.', 'dep': 'dep.', 'siding': 'Waterloo Siding', 'depot': 'Waterloo Depot',
+              'toform': 'To form', 'by': 'By Crew Running No.'}
+    for key, y in rows:
+        x = 96.14 if key in ('arr', 'dep') else 49.45 if key == 'pf' else 38.2
+        text(x, y, labels[key])
+        for dots in (118.08,):
+            text(dots, y, '.')
+        if key == 'arr':
+            text(38.2, y + 3.12, 'WATERLOO')
+    y = dict(rows)
+    for c, col in cols:
+        for key, v in col.items():
+            if key == 'extra':
+                for dy, s in v:
+                    centred(c, y['notes'] + dy, s)
+            elif isinstance(v, tuple):
+                time(c, y[key] + 0.08, *v[:2], **(v[2] if len(v) > 2 else {}))
+            else:
+                centred(c, y[key] + 0.08, v)
+    out.append('  </page>')
+
+out.append('<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"><html xmlns="http://www.w3.org/1999/xhtml">')
+out.append('<head>\n<title>Synthetic working timetable (test data)</title>\n</head>\n<body>\n<doc>')
+# Page 1: a contents page (no train service).
+out.append('  <page width="595.220000" height="842.000000">')
+text(200, 100, 'SYNTHETIC LINE WORKING TIMETABLE')
+text(200, 120, 'Train Service MONDAYS TO FRIDAYS')
+out.append('  </page>')
+W = [('train', 73.21), ('trip', 85.71), ('crew', 98.20), ('notes', 116.95), ('pf', 129.54), ('bank', 135.70),
+     ('arr', 141.95), ('dep', 148.20), ('siding', 154.53), ('depot', 160.70), ('toform', 173.20), ('by', 179.45)]
+page('WESTBOUND', W, [
+    (142.0, {'train': '303', 'trip': '1', 'crew': '9', 'notes': 'Ety', 'extra': [(-6.16, 'Start')],
+             'arr': 'Pfm 26', 'dep': ('05', '50'), 'depot': ('05', '52'), 'toform': 'Stop'}),
+    (185.2, {'train': '302', 'trip': '1', 'crew': '2', 'notes': 'TThX', 'extra': [(-6.16, 'Start')], 'pf': '8',
+             'bank': ('06', '05'), 'arr': ('06', '09'), 'dep': ('06', '10'), 'siding': ('06', '11'), 'toform': ('06', '12')}),
+    (206.8, {'train': '302', 'trip': '2', 'crew': '2', 'notes': 'TThO', 'extra': [(-6.16, 'Start')], 'pf': '7',
+             'bank': ('06', '05'), 'arr': ('06', '08', {'frac': '12'}), 'dep': ('06', '10'), 'siding': ('06', '11'), 'toform': ('06', '12')}),
+    (250.0, {'train': '301', 'trip': '2', 'crew': '1', 'pf': '7', 'bank': ('06', '09'), 'arr': ('06', '12', {'frac': '12'}),
+             'dep': ('06', '13', {'frac': '12'}), 'siding': ('06', '14', {'frac': '12'}), 'toform': ('06', '16'), 'by': '2'}),
+    (336.5, {'train': '302', 'trip': '5', 'crew': '2', 'notes': 'WO', 'pf': '8', 'bank': ('06', '34', {'frac': '14'}),
+             'arr': ('06', '38', {'stacked': ('1', '4')}), 'toform': 'Stop'}),
+    (293.3, {'train': '301', 'trip': '4', 'crew': '1', 'pf': '7', 'bank': ('06', '24'), 'arr': ('06', '27', {'frac': '12'}),
+             'dep': ('06', '28', {'frac': '12'}), 'depot': ('06', '30', {'frac': '12', 'wash': True}),
+             'extra': [(49.0, 'Shed Rd')], 'toform': 'Stop'}),
+])
+E = [('train', 73.21), ('trip', 85.71), ('crew', 98.20), ('notes', 116.95), ('depot', 123.20), ('siding', 129.45),
+     ('arr', 135.70), ('dep', 141.95), ('bank', 148.20), ('pf', 154.45), ('toform', 166.95), ('by', 173.20)]
+page('EASTBOUND', E, [
+    (142.0, {'train': '301', 'trip': '1', 'crew': '1', 'extra': [(-6.16, 'Start')], 'depot': ('06', '00'),
+             'arr': ('06', '01', {'frac': '12'}), 'dep': ('06', '03'), 'bank': ('06', '07', {'frac': '14'}), 'pf': '7', 'toform': ('06', '09')}),
+    (185.2, {'train': '302', 'trip': '3', 'crew': '2', 'siding': ('06', '12'), 'arr': ('06', '12', {'frac': '34'}),
+             'dep': ('06', '13', {'frac': '12'}), 'bank': ('06', '17', {'frac': '12'}), 'pf': '8', 'toform': ('06', '34', {'stacked': ('1', '4')})}),
+    (228.4, {'train': '301', 'trip': '3', 'crew': '1', 'siding': ('06', '16'), 'arr': ('06', '16', {'frac': '34'}),
+             'dep': ('06', '18'), 'bank': ('06', '22', {'frac': '14'}), 'pf': '7', 'toform': ('06', '24')}),
+])
+# A Saturday page: never read.
+out.append('  <page width="595.220000" height="842.000000">')
+text(42.83, 54.31, 'SATURDAYS WESTBOUND', 8.4)
+text(38.2, 73.21, 'Train No.'); text(140, 73.29, '309', 4.55)
+out.append('  </page>')
+out.append('</doc>\n</body>\n</html>')
+print('\n'.join(out))
+```
+
+Run: `python3 crates/ts2-import/tests/data/wtt-synthetic.py > crates/ts2-import/tests/data/wtt-synthetic.bbox.html`
+then `sha256sum crates/ts2-import/tests/data/wtt-synthetic.bbox.html`
+Expected: `0d8e2207fe1d872ed5bab8b6ac58c612f9436b9bccaaa16b33094a9fec8e87bb` (256 lines).
+
+- [ ] **Step 2: Write the failing tests**
+
+Create `crates/ts2-import/tests/wtt.rs`:
+
+```rust
+//! Reading a Working Timetable (polish spec §4) from `pdftotext -bbox` text,
+//! on a hand-made synthetic WTT (`tests/data/wtt-synthetic.bbox.html`,
+//! written by `wtt-synthetic.py`: fictional trains 301–303 in the real WTT's
+//! layout and notation), and putting it into Drain.
+
+use signalbox_core::robot::soak;
+use signalbox_core::sim::Sim;
+use signalbox_core::time::parse_hms;
+use signalbox_core::world::World;
+use signalbox_core::world::file::{EndFile, WorldFile};
+use ts2_import::wtt::{self, Bound, Checks, Day, Trip, WttError};
+
+const SYNTHETIC: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/wtt-synthetic.bbox.html");
+const DRAIN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/drain.json");
+
+fn trips() -> Vec<Trip> {
+    wtt::parse(&std::fs::read_to_string(SYNTHETIC).unwrap()).unwrap()
+}
+
+fn find(ts: &[Trip], train: u16, trip: u16) -> &Trip {
+    ts.iter().find(|t| t.train == train && t.trip == trip).unwrap_or_else(|| panic!("no {train}/{trip}"))
+}
+
+fn at(s: &str) -> Option<u32> {
+    parse_hms(s)
+}
+
+/// What the synthetic WTT says about itself.
+fn checks() -> Checks {
+    Checks {
+        running: vec![("7", Bound::West, 210), ("8", Bound::West, 240), ("7", Bound::East, 255), ("8", Bound::East, 240)],
+        snapshots: vec![(at("05:51").unwrap(), 0), (at("06:10").unwrap(), 2), (at("06:36").unwrap(), 1)],
+        intervals: vec![(at("06:00").unwrap(), at("06:40").unwrap(), 585)],
+    }
+}
+
+fn drain() -> WorldFile {
+    ts2_import::convert(&std::fs::read_to_string(DRAIN).unwrap()).unwrap().world
+}
+
+#[test]
+fn every_monday_to_friday_column_is_read() {
+    let ts = trips();
+    // Six westbound columns, three eastbound; the contents and Saturday pages are not timetables.
+    assert_eq!(ts.len(), 9);
+    assert!(ts.iter().all(|t| t.train != 309));
+    let t = find(&ts, 301, 2);
+    assert_eq!(t.bound, Bound::West);
+    assert_eq!(t.platform.as_deref(), Some("7"));
+    assert_eq!((t.bank, t.arr, t.dep, t.siding, t.to_form), (at("06:09"), at("06:12:30"), at("06:13:30"), at("06:14:30"), at("06:16")));
+    // Fractions: `12` = ½, `14` = ¼, `34` = ¾, and a numerator stacked on its denominator.
+    assert_eq!(find(&ts, 302, 3).arr, at("06:12:45"));
+    assert_eq!(find(&ts, 302, 5).bank, at("06:34:15"));
+    assert_eq!(find(&ts, 302, 5).arr, at("06:38:15"));
+    assert_eq!(find(&ts, 302, 3).to_form, at("06:34:15"));
+    // `06z30` is 06:30 with the train-wash mark; `Stop` ends a working.
+    let t = find(&ts, 301, 4);
+    assert_eq!((t.depot, t.wash, t.to_form), (at("06:30:30"), true, None));
+    assert!(t.has("Shed") && t.has("Rd"));
+    // `Pfm 26`: a move that starts standing in a Waterloo platform.
+    let t = find(&ts, 303, 1);
+    assert_eq!((t.starts_in.as_deref(), t.dep, t.depot), (Some("26"), at("05:50"), at("05:52")));
+    assert!(t.has("Start") && t.has("Ety"));
+    let t = find(&ts, 301, 1);
+    assert_eq!((t.bound, t.depot, t.arr, t.dep, t.bank), (Bound::East, at("06:00"), at("06:01:30"), at("06:03"), at("06:07:15")));
+}
+
+#[test]
+fn day_codes_pick_one_weekday() {
+    let ts = trips();
+    let wed: Vec<(u16, u16)> = wtt::on_day(&ts, Day::Wed).unwrap().iter().map(|t| (t.train, t.trip)).collect();
+    assert!(wed.contains(&(302, 1)) && wed.contains(&(302, 5)) && !wed.contains(&(302, 2)), "{wed:?}");
+    let tue: Vec<(u16, u16)> = wtt::on_day(&ts, Day::Tue).unwrap().iter().map(|t| (t.train, t.trip)).collect();
+    assert!(tue.contains(&(302, 2)) && !tue.contains(&(302, 1)) && !tue.contains(&(302, 5)), "{tue:?}");
+    let mut odd = ts.clone();
+    odd[0].notes.push("QO".into());
+    assert_eq!(wtt::on_day(&odd, Day::Wed), Err(WttError::DayCode("QO".into(), odd[0].train, odd[0].trip)));
+}
+
+#[test]
+fn a_day_is_checked_against_what_the_wtt_says() {
+    let day = wtt::on_day(&trips(), Day::Wed).unwrap();
+    let r = wtt::check(&day, &checks()).unwrap();
+    assert_eq!((r.trips, r.trains, r.running_exact, r.running_longer, r.links), (8, 3, 7, 0, 5));
+    assert_eq!(r.intervals, vec![(at("06:00").unwrap(), at("06:40").unwrap(), 585)]);
+    let mut c = checks();
+    c.snapshots[1].1 = 3;
+    assert!(matches!(wtt::check(&day, &c), Err(WttError::Check(m)) if m.contains("2 trains in service at 06:10:00")));
+    let mut fast = day.clone();
+    fast.iter_mut().find(|t| (t.train, t.trip) == (301, 2)).unwrap().arr = at("06:12");
+    assert!(matches!(wtt::check(&fast, &checks()), Err(WttError::Check(m)) if m.contains("under the published")));
+    let mut broken = day.clone();
+    broken.iter_mut().find(|t| (t.train, t.trip) == (301, 2)).unwrap().to_form = at("06:17");
+    assert!(matches!(wtt::check(&broken, &checks()), Err(WttError::Check(m)) if m.contains("301 trip 2 forms")));
+}
+
+#[test]
+fn a_day_goes_into_drain() {
+    let day = wtt::on_day(&trips(), Day::Wed).unwrap();
+    let mut w = drain();
+    let r = wtt::apply(&mut w, &day).unwrap();
+    assert_eq!((r.services, r.entries, r.start_time.as_str()), (7, 2, "05:50:00"));
+    assert_eq!((r.dropped_empty, r.dropped_trains), (vec!["303/1".to_string()], vec![303]));
+    let heads: Vec<&str> = w.services.iter().map(|s| s.headcode.as_str()).collect();
+    assert_eq!(heads, ["301/1", "301/2", "301/3", "301/4", "302/1", "302/3", "302/5"]);
+    let svc = |h: &str| w.services.iter().find(|s| s.headcode == h).unwrap();
+    let calls = |h: &str| svc(h).calls.iter().map(|c| format!("{} {}", c.place, c.platform.clone().unwrap_or_default())).collect::<Vec<_>>();
+    assert_eq!(calls("302/1"), ["BNK 8", "WTL 26", "DPT 6"]);
+    assert_eq!(calls("302/3"), ["DPT 6", "WTL 25", "BNK 8"]);
+    assert_eq!(calls("301/1"), ["DPT 5", "WTL 25", "BNK 7"]);
+    assert_eq!(calls("301/4"), ["BNK 7", "WTL 26", "DPT 5"]);
+    assert!(matches!(&svc("301/1").end, EndFile::Form { service } if service == "301/2"));
+    assert!(matches!(svc("301/4").end, EndFile::Stable), "to the depot for the night");
+    let last = svc("302/5").calls.last().unwrap();
+    assert_eq!((last.place.as_str(), last.stop, last.arr.as_deref()), ("WTL", false, Some("06:38:15")));
+    assert!(matches!(svc("302/5").end, EndFile::Stable), "the last train in stables in platform 26");
+    assert_eq!(w.options.start_time, "05:50:00");
+    let entry = |h: &str| w.entries.iter().find(|e| e.service == h).unwrap();
+    assert_eq!((entry("301/1").time.as_str(), entry("301/1").at.as_ref().unwrap().segment.as_str()), ("05:50:00", "L1000021"));
+    assert_eq!((entry("302/1").time.as_str(), entry("302/1").at.as_ref().unwrap().segment.as_str()), ("05:50:00", "L8"));
+    let again = {
+        let mut w2 = drain();
+        wtt::apply(&mut w2, &day).unwrap();
+        serde_json::to_string(&w2).unwrap()
+    };
+    assert_eq!(serde_json::to_string(&w).unwrap(), again, "byte-identical");
+    World::from_file(w).unwrap();
+}
+
+#[test]
+fn the_synthetic_day_runs_under_the_robot() {
+    let mut w = drain();
+    wtt::apply(&mut w, &wtt::on_day(&trips(), Day::Wed).unwrap()).unwrap();
+    let mut sim = Sim::new(World::from_file(w).unwrap(), 7);
+    let r = soak(&mut sim, 3600.0);
+    assert_eq!((r.spads, r.collisions, r.invariant_violations), (0, 0, 0), "{r:?}");
+    assert!(r.stuck.is_empty() && r.still_running.is_empty(), "{r:?}");
+    assert_eq!((r.entered, r.stabled), (2, 2), "{r:?}");
+}
+
+#[test]
+fn a_wrong_file_is_refused() {
+    assert_eq!(wtt::parse("<html><body>not a timetable</body></html>"), Err(WttError::NoPages));
+    let text = std::fs::read_to_string(SYNTHETIC).unwrap().replacen(">06</word>", ">6a</word>", 1);
+    assert!(matches!(wtt::parse(&text), Err(WttError::Format(..))), "a garbled time");
+}
+```
+
+In `crates/ts2-import/tests/cli.rs`: the first doc line becomes ``//! The converter CLI's `--areas`, `--lines` and `--wtt` flags.``;
+after `DRAIN_LINES` add
+
+```rust
+const SYNTHETIC_WTT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/wtt-synthetic.bbox.html");
 ```
 
 and append:
 
 ```rust
+/// `--wtt` checks the WTT against the Waterloo & City figures before it
+/// writes anything: the synthetic test WTT is read but fails them, and the
+/// image build stops rather than shipping a timetable that is not the real one.
 #[test]
-fn repeat_flag_repeats_the_timetable() {
-    let dir = temp_dir("repeat");
+fn wtt_flag_checks_the_timetable_and_writes_nothing_when_it_fails() {
+    let dir = temp_dir("wtt");
     let out = dir.join("drain.json");
-    let o = cli(&[DRAIN, "-o", out.to_str().unwrap(), "--areas", DRAIN_AREAS, "--lines", DRAIN_LINES, "--repeat", DRAIN_REPEAT]);
-    assert!(o.status.success(), "{}", stderr(&o));
-    assert!(stderr(&o).contains("192 services"), "{}", stderr(&o));
-    let w: WorldFile = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
-    assert_eq!(w.services.len(), 192);
-    let bad = dir.join("bad.repeat.json");
-    std::fs::write(&bad, r#"{"schema": 1, "every": "00:10:00", "until": "23:00:00", "headcode_step": 2}"#).unwrap();
-    let out2 = dir.join("drain2.json");
-    let o = cli(&[DRAIN, "-o", out2.to_str().unwrap(), "--repeat", bad.to_str().unwrap()]);
+    let o = cli(&[DRAIN, "-o", out.to_str().unwrap(), "--wtt", SYNTHETIC_WTT]);
     assert_eq!(o.status.code(), Some(1), "{}", stderr(&o));
-    assert!(stderr(&o).contains("longer than the original"), "{}", stderr(&o));
-    assert!(!out2.exists());
-    let o = cli(&[DRAIN, "-o", out2.to_str().unwrap(), "--repeat"]);
-    assert_eq!(o.status.code(), Some(2), "--repeat needs a value");
+    assert!(stderr(&o).contains("check failed: 0 trains in service at 09:00:00, the WTT says 5"), "{}", stderr(&o));
+    assert!(!out.exists());
+    let o = cli(&[DRAIN, "-o", out.to_str().unwrap(), "--wtt", dir.join("missing.html").to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(1), "{}", stderr(&o));
+    assert!(!out.exists());
+    let o = cli(&[DRAIN, "-o", out.to_str().unwrap(), "--wtt"]);
+    assert_eq!(o.status.code(), Some(2), "--wtt needs a value");
     let _ = std::fs::remove_dir_all(&dir);
 }
 ```
 
-In `crates/ts2-import/tests/soak.rs`, before the doc comment of `liverpool_street_runs_three_hours` (`/// Three sim-hours from 05:00:15.`), add:
+- [ ] **Step 3: Run them to see them fail**
+
+Run: `scripts/cargo test -p ts2-import --test wtt --test cli`
+Expected: compile errors (`could not find wtt in ts2_import`).
+
+- [ ] **Step 4: Implement**
+
+Create `crates/ts2-import/src/wtt.rs`:
 
 ```rust
-/// Drain with its repeat file (polish spec §4): three sim hours from 06:00,
-/// the three trains still shuttling on repeated headcodes.
-#[test]
-fn drain_repeats_through_the_morning() {
-    let dir = env!("CARGO_MANIFEST_DIR");
-    let mut w = ts2_import::convert(&std::fs::read_to_string(format!("{dir}/tests/data/drain.json")).unwrap()).unwrap().world;
-    let spec = ts2_import::repeat::parse(&std::fs::read_to_string(format!("{dir}/../../layouts/drain.repeat.json")).unwrap()).unwrap();
-    ts2_import::repeat::apply(&mut w, &spec).unwrap();
-    let mut sim = Sim::new(World::from_file(w).unwrap(), 7);
-    let r = soak(&mut sim, 3.0 * 3600.0);
-    assert_safe("drain repeated", &r);
-    assert_eq!(r.still_running.len(), 3, "{r:?}");
-    let number = |h: &str| h[2..].parse::<u32>().unwrap();
-    assert!(r.still_running.iter().all(|h| number(h) > 8), "repeated headcodes by 09:00: {r:?}");
-}
-```
+//! The Waterloo & City line's Working Timetable (polish spec §4): read from
+//! `pdftotext -bbox` output of the owner's own copy of LU WTT No. 7, checked
+//! against the figures the WTT itself publishes, and put into the Drain world
+//! as its timetable. Only this code is in the repository: the PDF and anything
+//! made from it stay outside it (`external/wtt/`, git-ignored).
+//!
+//! The WTT's train-service pages are tables, one column per trip, one row per
+//! timing point. `pdftotext -bbox` gives every word with its box, so rows and
+//! columns are found by position, never by counting spaces: fractions of a
+//! minute are small words abutting the minutes (`12` = ½, `14` = ¼, `34` = ¾,
+//! or a numerator and denominator stacked), and `23z57` is 23:57 with the
+//! train-wash mark. Deterministic: same input, same output.
 
-- [ ] **Step 2: Run them to see them fail**
+use std::collections::BTreeMap;
 
-Run: `scripts/cargo test -p ts2-import --test repeat --test cli --test soak`
-Expected: compile errors (`could not find repeat in ts2_import`).
+use signalbox_core::network::Dir;
+use signalbox_core::sim::Sim;
+use signalbox_core::time::fmt_hms;
+use signalbox_core::world::World;
+use signalbox_core::world::file::{CallFile, EndFile, EntryFile, PositionFile, ServiceFile, WorldFile};
 
-- [ ] **Step 3: Implement**
-
-Create `crates/ts2-import/src/repeat.rs`:
-
-```rust
-//! Repeating a converted timetable (polish spec §4), from an optional
-//! hand-made per-layout file: every service that the timetable already
-//! repeats `every` minutes is carried on until `until`, with its headcode's
-//! number going up by `headcode_step` each time, and services that ended
-//! the day without working on now form the next repeat's, as the earlier
-//! ones did. Deterministic: same world and file, byte-identical result.
-
-use std::collections::{BTreeMap, BTreeSet};
-
-use serde::Deserialize;
-use signalbox_core::time::{fmt_hms, parse_hms};
-use signalbox_core::world::file::{CallFile, EndFile, ServiceFile, WorldFile};
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RepeatSpec {
-    pub schema: u32,
-    /// "HH:MM:SS": how far apart repeats are.
-    pub every: String,
-    /// "HH:MM:SS": no repeat starts later than this.
-    pub until: String,
-    /// Added to the headcode's trailing number at each repeat.
-    pub headcode_step: u32,
-}
+/// Row labels sit left of this (PDF points).
+const LABEL_X: f64 = 100.0;
+/// Table cells sit right of this.
+const DATA_X: f64 = 128.0;
+/// A word belongs to the row whose label is at most this far above or below.
+const ROW_TOL: f64 = 4.0;
+/// A cell belongs to the column whose train number is centred at most this far away.
+const COL_TOL: f64 = 10.0;
+/// Stacked fraction digits are shorter than this; every other word is taller.
+const STACK_H: f64 = 4.0;
+/// WTT times before this hour are after midnight (the line is shut 01:00–05:00).
+const NIGHT_H: u32 = 4;
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum RepeatError {
-    #[error("not a repeat file: {0}")]
-    Parse(String),
-    #[error("unsupported repeat file schema {0}")]
-    Schema(u32),
-    #[error("`every` must be 00:01:00 to 12:00:00, `until` before 24:00:00 and `headcode_step` at least 1")]
-    Bad,
-    #[error("headcode `{0}` has no trailing number to renumber")]
-    NoNumber(String),
-    #[error("`{0}` repeats `{1}` but its headcode should then be `{2}`")]
-    Step(String, String, String),
-    #[error("repeating `{0}` would need headcode `{1}`, which {2}")]
-    Headcode(String, String, &'static str),
-    #[error("repeating `{0}` would run past 23:59:59")]
-    Midnight(String),
-    #[error("`{0}` would be formed by more than one service, or both formed and entered")]
-    Formed(String),
+pub enum WttError {
+    #[error("page {0}: {1}")]
+    Format(usize, String),
+    #[error("no Monday to Friday train service pages found")]
+    NoPages,
+    #[error("unknown day code `{0}` on train {1} trip {2}")]
+    DayCode(String, u16, u16),
+    #[error("check failed: {0}")]
+    Check(String),
+    #[error("cannot put into the world: {0}")]
+    Apply(String),
 }
 
-pub fn parse(json: &str) -> Result<RepeatSpec, RepeatError> {
-    let s: RepeatSpec = serde_json::from_str(json).map_err(|e| RepeatError::Parse(e.to_string()))?;
-    if s.schema != 1 {
-        return Err(RepeatError::Schema(s.schema));
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Bound {
+    /// Bank → Waterloo.
+    West,
+    /// Waterloo → Bank.
+    East,
+}
+
+/// One column of the train service pages. Times are seconds since the
+/// midnight before the service day (so 00:30 is 24:30).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Trip {
+    pub train: u16,
+    pub trip: u16,
+    pub bound: Bound,
+    /// Words in the notes rows: day codes, `Start`, `Ety`, `YW`, `Shed`, `Rd`.
+    pub notes: Vec<String>,
+    /// Bank platform.
+    pub platform: Option<String>,
+    pub bank: Option<u32>,
+    /// Waterloo arrival (westbound: platform 26; eastbound: platform 25).
+    pub arr: Option<u32>,
+    /// `Pfm 25`/`Pfm 26` in the arrival row: the move starts standing in that platform.
+    pub starts_in: Option<String>,
+    pub dep: Option<u32>,
+    pub siding: Option<u32>,
+    pub depot: Option<u32>,
+    /// A time with the train-wash mark `z`.
+    pub wash: bool,
+    /// The next trip's start; `None` for `Stop`.
+    pub to_form: Option<u32>,
+}
+
+impl Trip {
+    pub fn has(&self, note: &str) -> bool {
+        self.notes.iter().any(|n| n == note)
     }
-    let (every, until) = (parse_hms(&s.every), parse_hms(&s.until));
-    match (every, until) {
-        (Some(e), Some(u)) if (60..=12 * 3600).contains(&e) && u < 24 * 3600 && s.headcode_step >= 1 => Ok(s),
-        _ => Err(RepeatError::Bad),
+
+    fn times(&self) -> impl Iterator<Item = u32> + '_ {
+        [self.bank, self.arr, self.dep, self.siding, self.depot].into_iter().flatten()
+    }
+
+    pub fn first(&self) -> u32 {
+        self.times().min().unwrap_or(0)
+    }
+
+    pub fn last(&self) -> u32 {
+        self.times().max().unwrap_or(0)
     }
 }
 
-/// A call's times in seconds (`None` where it has none); unreadable times
-/// never reach here (the converter only writes good ones).
-fn times(s: &ServiceFile) -> Vec<(Option<u32>, Option<u32>)> {
-    let t = |x: &Option<String>| x.as_deref().and_then(parse_hms);
-    s.calls.iter().map(|c| (t(&c.arr), t(&c.dep))).collect()
+#[derive(Debug, Clone)]
+struct Word {
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+    text: String,
 }
 
-/// What must match for one service to repeat another: type and calls.
-fn shape(s: &ServiceFile) -> (String, Vec<(String, Option<String>, bool)>) {
-    (s.train_type.clone(), s.calls.iter().map(|c| (c.place.clone(), c.platform.clone(), c.stop)).collect())
+fn attr(tag: &str, name: &str) -> Option<f64> {
+    let at = tag.find(&format!("{name}=\""))? + name.len() + 2;
+    let end = tag[at..].find('"')? + at;
+    tag[at..end].parse().ok()
 }
 
-fn shifted(ts: &[(Option<u32>, Option<u32>)], by: i64) -> Option<Vec<(Option<u32>, Option<u32>)>> {
-    let f = |t: Option<u32>| -> Option<Option<u32>> {
-        match t {
-            None => Some(None),
-            Some(v) => u32::try_from(i64::from(v) + by).ok().map(Some),
+fn decode(s: &str) -> String {
+    s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
+}
+
+/// The words of each page of `pdftotext -bbox` output.
+fn pages(xhtml: &str) -> Vec<Vec<Word>> {
+    let mut out = Vec::new();
+    for page in xhtml.split("<page ").skip(1) {
+        let mut words = Vec::new();
+        let mut rest = page;
+        while let Some(at) = rest.find("<word ") {
+            rest = &rest[at..];
+            let (Some(close), Some(end)) = (rest.find('>'), rest.find("</word>")) else { break };
+            let tag = &rest[..close];
+            if let (Some(x0), Some(y0), Some(x1), Some(y1)) = (attr(tag, "xMin"), attr(tag, "yMin"), attr(tag, "xMax"), attr(tag, "yMax")) {
+                words.push(Word { x0, y0, x1, y1, text: decode(&rest[close + 1..end]) });
+            }
+            rest = &rest[end..];
         }
-    };
-    ts.iter().map(|&(a, d)| Some((f(a)?, f(d)?))).collect()
-}
-
-fn first_time(s: &ServiceFile) -> Option<u32> {
-    times(s).into_iter().find_map(|(a, d)| a.or(d))
-}
-
-/// `head` with `n` added to its trailing number, at the same width.
-fn renumber(head: &str, n: u64) -> Result<String, RepeatError> {
-    let digits = head.bytes().rev().take_while(u8::is_ascii_digit).count();
-    if digits == 0 {
-        return Err(RepeatError::NoNumber(head.to_string()));
+        out.push(words);
     }
-    let (stem, num) = head.split_at(head.len() - digits);
-    let value: u64 = num.parse().map_err(|_| RepeatError::NoNumber(head.to_string()))?;
-    let out = format!("{stem}{:0digits$}", value + n);
-    if out.len() != head.len() {
-        return Err(RepeatError::Headcode(head.to_string(), out, "is longer than the original"));
+    out
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Row {
+    Train,
+    Trip,
+    Crew,
+    Notes,
+    Platform,
+    Bank,
+    Arr,
+    Dep,
+    Siding,
+    Depot,
+    ToForm,
+    ByCrew,
+}
+
+/// Row labels (left of `LABEL_X`) by height.
+fn anchors(words: &[Word]) -> Vec<(f64, Row)> {
+    let mut out = Vec::new();
+    for w in words.iter().filter(|w| w.x0 < LABEL_X) {
+        let next = words
+            .iter()
+            .filter(|v| (v.y0 - w.y0).abs() < 0.5 && v.x0 > w.x1 && v.x0 < w.x1 + 5.0)
+            .map(|v| v.text.as_str())
+            .next();
+        let row = match (w.text.as_str(), next) {
+            ("Train", Some("No.")) => Row::Train,
+            ("Trip", _) => Row::Trip,
+            ("Crew", _) => Row::Crew,
+            ("Notes", _) => Row::Notes,
+            ("Platform", _) => Row::Platform,
+            ("BANK", _) => Row::Bank,
+            ("arr.", _) => Row::Arr,
+            ("dep.", _) => Row::Dep,
+            ("Waterloo", Some("Siding")) => Row::Siding,
+            ("Waterloo", Some("Depot")) => Row::Depot,
+            ("To", Some("form")) => Row::ToForm,
+            ("By", _) => Row::ByCrew,
+            _ => continue,
+        };
+        out.push((w.y0, row));
+    }
+    out.sort_by(|a, b| a.0.total_cmp(&b.0));
+    out
+}
+
+#[derive(Debug, Clone)]
+enum Tok {
+    /// Hours, minutes (once read), seconds of fraction, wash mark.
+    Time { h: u32, m: Option<u32>, frac: u32, wash: bool, x0: f64, x1: f64, y0: f64 },
+    Text { text: String, x0: f64, x1: f64 },
+}
+
+impl Tok {
+    fn centre(&self) -> f64 {
+        match self {
+            Tok::Time { x0, x1, .. } | Tok::Text { x0, x1, .. } => (x0 + x1) / 2.0,
+        }
+    }
+}
+
+fn two_digits(s: &str) -> Option<u32> {
+    (s.len() == 2 && s.bytes().all(|b| b.is_ascii_digit())).then(|| s.parse().ok()).flatten()
+}
+
+/// One row's words (sorted by x) as times and texts.
+fn tokens(row: Row, words: &[&Word], stacked: &[&Word], page: usize) -> Result<Vec<Tok>, WttError> {
+    let timed = matches!(row, Row::Bank | Row::Arr | Row::Dep | Row::Siding | Row::Depot | Row::ToForm);
+    let mut out: Vec<Tok> = Vec::new();
+    for w in words {
+        let t = w.text.as_str();
+        if let Some(Tok::Time { m, frac, x1, .. }) = out.last_mut() {
+            if m.is_none() && (2.0..5.0).contains(&(w.x0 - *x1)) {
+                if let Some(v) = two_digits(t) {
+                    *m = Some(v);
+                    *x1 = w.x1;
+                    continue;
+                }
+            }
+            if m.is_some() && *frac == 0 && (w.x0 - *x1).abs() < 0.4 {
+                let f = match t {
+                    "14" => Some(15),
+                    "12" => Some(30),
+                    "34" => Some(45),
+                    _ => None,
+                };
+                if let Some(f) = f {
+                    *frac = f;
+                    *x1 = w.x1;
+                    continue;
+                }
+            }
+        }
+        if timed {
+            let b = t.as_bytes();
+            if b.len() == 5 && b[2] == b'z' {
+                if let (Some(h), Some(m)) = (two_digits(&t[..2]), two_digits(&t[3..])) {
+                    out.push(Tok::Time { h, m: Some(m), frac: 0, wash: true, x0: w.x0, x1: w.x1, y0: w.y0 });
+                    continue;
+                }
+            }
+            let after_pfm = matches!(out.last(), Some(Tok::Text { text, .. }) if text == "Pfm");
+            if let (Some(h), false) = (two_digits(t), after_pfm) {
+                out.push(Tok::Time { h, m: None, frac: 0, wash: false, x0: w.x0, x1: w.x1, y0: w.y0 });
+                continue;
+            }
+        }
+        out.push(Tok::Text { text: w.text.clone(), x0: w.x0, x1: w.x1 });
+    }
+    for tok in &mut out {
+        if let Tok::Time { h, m, frac, x1, y0, .. } = tok {
+            if m.is_none() {
+                return Err(WttError::Format(page, format!("hours {h:02} without minutes")));
+            }
+            let mut st: Vec<&&Word> =
+                stacked.iter().filter(|s| (s.x0 - *x1).abs() < 0.6 && (-1.0..5.0).contains(&(s.y0 - *y0))).collect();
+            if !st.is_empty() {
+                st.sort_by(|a, b| a.y0.total_cmp(&b.y0));
+                let digits: Vec<u32> = st.iter().filter_map(|s| s.text.parse().ok()).collect();
+                *frac = match digits.as_slice() {
+                    [1, 4] => 15,
+                    [1, 2] => 30,
+                    [3, 4] => 45,
+                    _ => return Err(WttError::Format(page, format!("odd stacked fraction {digits:?}"))),
+                };
+            }
+        }
     }
     Ok(out)
 }
 
-/// Repeat the world's timetable as `spec` says (spec §4.2).
-pub fn apply(w: &mut WorldFile, spec: &RepeatSpec) -> Result<(), RepeatError> {
-    let every = parse_hms(&spec.every).ok_or(RepeatError::Bad)?;
-    let until = parse_hms(&spec.until).ok_or(RepeatError::Bad)?;
-    let step = u64::from(spec.headcode_step);
-    let base = std::mem::take(&mut w.services);
-    let by_name: BTreeMap<&str, usize> = base.iter().enumerate().map(|(i, s)| (s.headcode.as_str(), i)).collect();
-    let index: BTreeMap<_, usize> = base.iter().enumerate().map(|(i, s)| ((shape(s), times(s)), i)).collect();
-    // The service each one repeats (`every` earlier), if any.
-    let pred: Vec<Option<usize>> = base
-        .iter()
-        .map(|s| shifted(&times(s), -i64::from(every)).and_then(|t| index.get(&(shape(s), t)).copied()))
-        .collect();
-    // Root and repeat number of each service; every root's members by number.
-    let mut root = vec![(0, 0u64); base.len()];
-    let mut members: BTreeMap<usize, BTreeMap<u64, String>> = BTreeMap::new();
-    for i in 0..base.len() {
-        let (mut r, mut j) = (i, 0u64);
-        while let Some(p) = pred[r] {
-            r = p;
-            j += 1;
+fn seconds(h: u32, m: u32, frac: u32) -> u32 {
+    let h = if h < NIGHT_H { h + 24 } else { h };
+    h * 3600 + m * 60 + frac
+}
+
+/// Every Monday-to-Friday trip, in page and column order.
+pub fn parse(xhtml: &str) -> Result<Vec<Trip>, WttError> {
+    let mut trips = Vec::new();
+    for (pi, words) in pages(xhtml).into_iter().enumerate() {
+        let page = pi + 1;
+        let texts: Vec<&str> = words.iter().map(|w| w.text.as_str()).collect();
+        let mf = texts.windows(3).any(|w| w == ["MONDAYS", "TO", "FRIDAYS"]) && !texts.contains(&"SATURDAYS");
+        let bound = match (texts.contains(&"WESTBOUND"), texts.contains(&"EASTBOUND")) {
+            (true, false) => Bound::West,
+            (false, true) => Bound::East,
+            _ => continue,
+        };
+        if !mf {
+            continue;
         }
-        let want = renumber(&base[r].headcode, j * step)?;
-        if want != base[i].headcode {
-            return Err(RepeatError::Step(base[i].headcode.clone(), base[r].headcode.clone(), want));
-        }
-        root[i] = (r, j);
-        members.entry(r).or_default().insert(j, base[i].headcode.clone());
-    }
-    let roots: Vec<usize> = (0..base.len()).filter(|&i| pred[i].is_none()).collect();
-    // The copies, by repeat number and then root order.
-    let mut taken: BTreeSet<String> = base.iter().map(|s| s.headcode.clone()).collect();
-    let mut copies: Vec<(usize, u64, ServiceFile)> = Vec::new();
-    for &r in &roots {
-        let last = *members[&r].keys().next_back().expect("a root is its own member");
-        let Some(start) = first_time(&base[r]) else { continue };
-        let mut j = last + 1;
-        while u64::from(start) + j * u64::from(every) <= u64::from(until) {
-            let head = renumber(&base[r].headcode, j * step)?;
-            if !taken.insert(head.clone()) {
-                return Err(RepeatError::Headcode(base[r].headcode.clone(), head, "another service has"));
+        let words: Vec<Word> = words.into_iter().filter(|w| !w.text.chars().all(|c| c == '.')).collect();
+        let an = anchors(&words);
+        let starts: Vec<f64> = an.iter().filter(|a| a.1 == Row::Train).map(|a| a.0).collect();
+        for (bi, &y0) in starts.iter().enumerate() {
+            let y1 = starts.get(bi + 1).copied().unwrap_or(f64::INFINITY);
+            let rows: Vec<(f64, Row)> = an.iter().copied().filter(|a| a.0 >= y0 - 1.0 && a.0 < y1 - 1.0).collect();
+            let data: Vec<&Word> = words.iter().filter(|w| w.x0 >= DATA_X && w.y0 >= y0 - 1.0 && w.y0 < y1 - 1.0).collect();
+            let mut cols: Vec<(f64, u16)> = Vec::new();
+            for w in data.iter().filter(|w| (w.y0 - y0).abs() < 1.0) {
+                let n = w.text.parse().map_err(|_| WttError::Format(page, format!("train number `{}`", w.text)))?;
+                cols.push(((w.x0 + w.x1) / 2.0, n));
             }
-            let by = i64::try_from(j * u64::from(every)).map_err(|_| RepeatError::Midnight(base[r].headcode.clone()))?;
-            let ts = shifted(&times(&base[r]), by).ok_or_else(|| RepeatError::Midnight(base[r].headcode.clone()))?;
-            if ts.iter().any(|&(a, d)| a.max(d).is_some_and(|t| t >= 24 * 3600)) {
-                return Err(RepeatError::Midnight(base[r].headcode.clone()));
+            cols.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let (stacked, plain): (Vec<&Word>, Vec<&Word>) = data
+                .iter()
+                .copied()
+                .partition(|w| w.y1 - w.y0 < STACK_H && w.text.len() == 1 && w.text.as_bytes()[0].is_ascii_digit());
+            // Each word to its row (or an unlabelled notes line).
+            let mut by_row: BTreeMap<(Option<Row>, i64), Vec<&Word>> = BTreeMap::new();
+            for w in plain {
+                let near = rows.iter().min_by(|a, b| (a.0 - w.y0).abs().total_cmp(&(b.0 - w.y0).abs()));
+                let key = match near {
+                    Some(&(y, r)) if (y - w.y0).abs() <= ROW_TOL => (Some(r), 0),
+                    _ => (None, w.y0.round() as i64),
+                };
+                by_row.entry(key).or_default().push(w);
             }
-            let fmt = |t: Option<u32>| t.map(|v| fmt_hms(f64::from(v)));
-            let calls = base[r].calls.iter().zip(&ts).map(|(c, &(a, d))| CallFile { arr: fmt(a), dep: fmt(d), ..c.clone() }).collect();
-            copies.push((r, j, ServiceFile { headcode: head.clone(), calls, ..base[r].clone() }));
-            members.get_mut(&r).expect("root").insert(j, head);
-            j += 1;
+            let mut cells: Vec<BTreeMap<Row, Vec<Tok>>> = vec![BTreeMap::new(); cols.len()];
+            let mut extra: Vec<Vec<String>> = vec![Vec::new(); cols.len()];
+            for ((row, _), mut ws) in by_row {
+                ws.sort_by(|a, b| a.x0.total_cmp(&b.x0));
+                for tok in tokens(row.unwrap_or(Row::Notes), &ws, &stacked, page)? {
+                    let c = cols
+                        .iter()
+                        .enumerate()
+                        .min_by(|a, b| (a.1.0 - tok.centre()).abs().total_cmp(&(b.1.0 - tok.centre()).abs()))
+                        .filter(|(_, c)| (c.0 - tok.centre()).abs() <= COL_TOL)
+                        .map(|(i, _)| i)
+                        .ok_or_else(|| WttError::Format(page, format!("a cell in no column: {tok:?}")))?;
+                    match row {
+                        Some(r) => cells[c].entry(r).or_default().push(tok),
+                        None => {
+                            if let Tok::Text { text, .. } = tok {
+                                extra[c].push(text);
+                            }
+                        }
+                    }
+                }
+            }
+            for (c, (cell, extra)) in cells.into_iter().zip(extra).enumerate() {
+                trips.push(trip(page, bound, cols[c].1, cell, extra)?);
+            }
         }
     }
-    copies.sort_by_key(|(r, j, _)| (*j, roots.iter().position(|x| x == r)));
-    // The steady end of member j of root r (spec §4.2 rule 3).
-    let steady = |r: usize, j: u64| -> EndFile {
-        let base_members: Vec<(u64, usize)> =
-            members[&r].iter().filter_map(|(&i, h)| by_name.get(h.as_str()).map(|&b| (i, b))).collect();
-        if let Some(&(i, b)) = base_members.iter().rev().find(|&&(i, b)| i <= j && matches!(base[b].end, EndFile::Form { .. })) {
-            if let EndFile::Form { service } = &base[b].end {
-                let (q, l) = root[by_name[service.as_str()]];
-                if let Some(t) = members[&q].get(&(l + j - i)) {
-                    return EndFile::Form { service: t.clone() };
+    if trips.is_empty() {
+        return Err(WttError::NoPages);
+    }
+    Ok(trips)
+}
+
+fn trip(page: usize, bound: Bound, train: u16, mut cell: BTreeMap<Row, Vec<Tok>>, extra: Vec<String>) -> Result<Trip, WttError> {
+    let err = |what: String| WttError::Format(page, format!("train {train}: {what}"));
+    let mut take = |r: Row| cell.remove(&r).unwrap_or_default();
+    let text = |toks: &[Tok]| -> Vec<String> {
+        toks.iter().filter_map(|t| if let Tok::Text { text, .. } = t { Some(text.clone()) } else { None }).collect()
+    };
+    let mut wash = false;
+    let mut time = |r: Row, toks: Vec<Tok>| -> Result<Option<u32>, WttError> {
+        let ts: Vec<u32> = toks
+            .iter()
+            .filter_map(|t| match t {
+                Tok::Time { h, m: Some(m), frac, wash: z, .. } => {
+                    wash |= *z;
+                    Some(seconds(*h, *m, *frac))
+                }
+                _ => None,
+            })
+            .collect();
+        match ts.as_slice() {
+            [] => Ok(None),
+            [t] => Ok(Some(*t)),
+            _ => Err(err(format!("{} times in row {r:?}", ts.len()))),
+        }
+    };
+    let number = |toks: &[Tok], r: Row| -> Result<u16, WttError> {
+        match text(toks).as_slice() {
+            [n] => n.parse().map_err(|_| err(format!("{r:?} `{n}`"))),
+            other => Err(err(format!("{r:?} {other:?}"))),
+        }
+    };
+    let trip_no = number(&take(Row::Trip), Row::Trip)?;
+    let mut notes = text(&take(Row::Notes));
+    notes.extend(extra);
+    let platform = text(&take(Row::Platform)).first().cloned();
+    let arr_toks = take(Row::Arr);
+    let starts_in = match text(&arr_toks).as_slice() {
+        [] => None,
+        [p] if p.starts_with("Pfm") => p.strip_prefix("Pfm").map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
+        [p, n] if p == "Pfm" => Some(n.clone()),
+        other => return Err(err(format!("arrival {other:?}"))),
+    };
+    let to_form_toks = take(Row::ToForm);
+    let stop = text(&to_form_toks) == ["Stop"];
+    let bank = time(Row::Bank, take(Row::Bank))?;
+    let arr = time(Row::Arr, arr_toks)?;
+    let dep = time(Row::Dep, take(Row::Dep))?;
+    let siding = time(Row::Siding, take(Row::Siding))?;
+    let depot = time(Row::Depot, take(Row::Depot))?;
+    let to_form = time(Row::ToForm, to_form_toks)?;
+    if stop == to_form.is_some() {
+        return Err(err(format!("trip {trip_no}: `To form` must be a time or `Stop`")));
+    }
+    Ok(Trip { train, trip: trip_no, bound, notes, platform, bank, arr, starts_in, dep, siding, depot, wash, to_form })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Day {
+    Mon,
+    Tue,
+    Wed,
+    Thu,
+    Fri,
+}
+
+/// The weekday Drain runs (spec P15): Wednesday, the plain midweek day.
+pub const DAY: Day = Day::Wed;
+
+/// The days a note like `MO`, `TThX` or `MWO` names, and whether they are
+/// the only days (`O`) or the excepted ones (`X`); `None` if it is not a day code.
+fn day_code(note: &str) -> Option<(Vec<Day>, bool)> {
+    let (body, only) = match note.as_bytes().last()? {
+        b'O' => (&note[..note.len() - 1], true),
+        b'X' => (&note[..note.len() - 1], false),
+        _ => return None,
+    };
+    let mut days = Vec::new();
+    let mut rest = body;
+    while !rest.is_empty() {
+        let (d, n) = if rest.starts_with("Th") {
+            (Day::Thu, 2)
+        } else {
+            match rest.as_bytes()[0] {
+                b'M' => (Day::Mon, 1),
+                b'T' => (Day::Tue, 1),
+                b'W' => (Day::Wed, 1),
+                b'F' => (Day::Fri, 1),
+                _ => return None,
+            }
+        };
+        days.push(d);
+        rest = &rest[n..];
+    }
+    (!days.is_empty()).then_some((days, only))
+}
+
+/// Notes that are neither day codes nor one of these are an error, so a
+/// different WTT cannot slip an unknown restriction past the importer.
+const PLAIN_NOTES: [&str; 6] = ["Start", "Ety", "YW", "Shed", "Rd", "RR"];
+
+/// The trips that run on `day`.
+pub fn on_day(trips: &[Trip], day: Day) -> Result<Vec<Trip>, WttError> {
+    let mut out = Vec::new();
+    for t in trips {
+        let mut runs = true;
+        for n in &t.notes {
+            match day_code(n) {
+                Some((days, only)) => runs &= days.contains(&day) == only,
+                None if PLAIN_NOTES.contains(&n.as_str()) => {}
+                None => return Err(WttError::DayCode(n.clone(), t.train, t.trip)),
+            }
+        }
+        if runs {
+            out.push(t.clone());
+        }
+    }
+    Ok(out)
+}
+
+/// What the WTT says about itself, to check a parse against.
+#[derive(Debug, Clone)]
+pub struct Checks {
+    /// Bank platform, bound, published running time in seconds (Waterloo ⇄ that platform).
+    pub running: Vec<(&'static str, Bound, u32)>,
+    /// Time, trains in service.
+    pub snapshots: Vec<(u32, usize)>,
+    /// From, to, mean interval between Bank departures (seconds).
+    pub intervals: Vec<(u32, u32, u32)>,
+}
+
+const fn hm(h: u32, m: u32) -> u32 {
+    h * 3600 + m * 60
+}
+
+impl Checks {
+    /// WTT No. 7, page 2. The snapshot table prints 3 trains at 21:00, but its
+    /// own workings (page 5: 201 finishes at 21:37) give 4, and so does every
+    /// trip; the table is taken to predate the revision that lengthened the
+    /// evening peak.
+    pub fn waterloo_city() -> Checks {
+        Checks {
+            running: vec![("7", Bound::West, 210), ("8", Bound::West, 240), ("7", Bound::East, 255), ("8", Bound::East, 240)],
+            snapshots: vec![
+                (hm(6, 0), 1),
+                (hm(9, 0), 5),
+                (hm(12, 0), 3),
+                (hm(15, 0), 3),
+                (hm(18, 0), 5),
+                (hm(21, 0), 4),
+                (hm(24, 0), 2),
+            ],
+            intervals: vec![
+                (hm(7, 30), hm(9, 30), 165),
+                (hm(11, 0), hm(15, 30), 300),
+                (hm(16, 30), hm(19, 45), 165),
+                (hm(19, 45), hm(21, 30), 210),
+                (hm(21, 30), hm(23, 30), 360),
+                (hm(23, 30), hm(26, 0), 600),
+            ],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CheckReport {
+    pub trips: usize,
+    pub trains: usize,
+    /// Trips run in exactly the published time, and trips given longer.
+    pub running_exact: usize,
+    pub running_longer: usize,
+    pub links: usize,
+    pub snapshots: Vec<(u32, usize)>,
+    /// From, to, mean interval in seconds (rounded).
+    pub intervals: Vec<(u32, u32, u32)>,
+}
+
+/// Each train's trips in running order.
+fn by_train(trips: &[Trip]) -> BTreeMap<u16, Vec<&Trip>> {
+    let mut out: BTreeMap<u16, Vec<&Trip>> = BTreeMap::new();
+    for t in trips {
+        out.entry(t.train).or_default().push(t);
+    }
+    for v in out.values_mut() {
+        v.sort_by_key(|t| (t.first(), t.trip));
+    }
+    out
+}
+
+fn running(t: &Trip) -> Option<u32> {
+    match t.bound {
+        Bound::West => Some(t.arr?.checked_sub(t.bank?)?),
+        Bound::East => Some(t.bank?.checked_sub(t.dep?)?),
+    }
+}
+
+/// Check one day's trips against the WTT's own figures (spec §4.3).
+pub fn check(trips: &[Trip], c: &Checks) -> Result<CheckReport, WttError> {
+    let mut r = CheckReport { trips: trips.len(), ..Default::default() };
+    let fail = |s: String| Err(WttError::Check(s));
+    for t in trips {
+        let (Some(rt), Some(p)) = (running(t), t.platform.as_deref()) else { continue };
+        let Some(&(_, _, want)) = c.running.iter().find(|x| x.0 == p && x.1 == t.bound) else {
+            return fail(format!("train {} trip {}: no running time for platform {p}", t.train, t.trip));
+        };
+        match rt.cmp(&want) {
+            std::cmp::Ordering::Less => {
+                return fail(format!("train {} trip {} runs in {rt} s, under the published {want} s", t.train, t.trip));
+            }
+            std::cmp::Ordering::Equal => r.running_exact += 1,
+            std::cmp::Ordering::Greater => r.running_longer += 1,
+        }
+    }
+    let trains = by_train(trips);
+    r.trains = trains.len();
+    // Service periods: runs of trips linked by `To form`, with whether any carries passengers.
+    let mut periods: Vec<(u32, u32, bool)> = Vec::new();
+    for (n, ts) in &trains {
+        let mut cur: Option<(u32, u32, bool)> = None;
+        for (i, t) in ts.iter().enumerate() {
+            let p = cur.get_or_insert((t.first(), t.last(), false));
+            p.1 = t.last();
+            p.2 |= !t.has("Ety");
+            match (t.to_form, ts.get(i + 1)) {
+                (Some(f), Some(next)) => {
+                    if next.first() != f || next.bound == t.bound || t.last() > f {
+                        return fail(format!("train {n} trip {} forms {} at {}, not trip {}", t.trip, fmt_hms(f.into()), fmt_hms(next.first().into()), next.trip));
+                    }
+                    r.links += 1;
+                }
+                (Some(f), None) => return fail(format!("train {n} trip {} forms a trip at {} that is not there", t.trip, fmt_hms(f.into()))),
+                (None, next) => {
+                    if let Some(next) = next {
+                        if !next.has("Start") || next.first() < t.last() {
+                            return fail(format!("train {n} trip {} stops but trip {} does not start", t.trip, next.trip));
+                        }
+                    }
+                    periods.extend(cur.take());
                 }
             }
         }
-        // Past the last repeat: end as the root's last converted member does.
-        match base_members.last().map(|&(_, b)| &base[b].end) {
-            Some(EndFile::Form { .. }) | None => EndFile::Stable,
-            Some(e) => e.clone(),
+        periods.extend(cur);
+    }
+    for &(at, want) in &c.snapshots {
+        let n = periods.iter().filter(|p| p.2 && p.0 <= at && at < p.1).count();
+        r.snapshots.push((at, n));
+        if n != want {
+            return fail(format!("{} trains in service at {}, the WTT says {want}", n, fmt_hms(at.into())));
         }
-    };
-    let mut out: Vec<ServiceFile> = Vec::with_capacity(base.len() + copies.len());
-    for (i, s) in base.iter().enumerate() {
-        let end = if matches!(s.end, EndFile::Form { .. }) { s.end.clone() } else { steady(root[i].0, root[i].1) };
-        out.push(ServiceFile { end, ..s.clone() });
     }
-    for (r, j, s) in copies {
-        out.push(ServiceFile { end: steady(r, j), ..s });
+    let mut deps: Vec<u32> = trips.iter().filter(|t| t.bound == Bound::West).filter_map(|t| t.bank).collect();
+    deps.sort();
+    for &(from, to, want) in &c.intervals {
+        let xs: Vec<u32> = deps.iter().copied().filter(|d| (from..=to).contains(d)).collect();
+        if xs.len() < 2 {
+            return fail(format!("fewer than two Bank departures {}–{}", fmt_hms(from.into()), fmt_hms(to.into())));
+        }
+        let mean = f64::from(xs[xs.len() - 1] - xs[0]) / (xs.len() - 1) as f64;
+        r.intervals.push((from, to, mean.round() as u32));
+        if (mean - f64::from(want)).abs() > 6.0 {
+            return fail(format!("Bank departures {}–{} every {mean:.0} s, the WTT says {want} s", fmt_hms(from.into()), fmt_hms(to.into())));
+        }
     }
-    let mut formed: BTreeSet<&str> = w.entries.iter().map(|e| e.service.as_str()).collect();
-    for s in &out {
-        if let EndFile::Form { service } = &s.end {
-            if !formed.insert(service.as_str()) {
-                return Err(RepeatError::Formed(service.clone()));
+    Ok(r)
+}
+
+/// Where the WTT's places are on Drain (spec §4.4).
+pub const BANK: &str = "BNK";
+pub const WATERLOO: &str = "WTL";
+pub const ARRIVAL: &str = "26";
+pub const DEPARTURE: &str = "25";
+/// Waterloo roads 5, 6 and 7 behind the platforms: both the reversing siding and the depot.
+pub const ROADS: (&str, [&str; 3]) = ("DPT", ["5", "6", "7"]);
+/// Minimum time between one train leaving a road and the next arriving in it.
+const ROAD_GAP_S: u32 = 60;
+/// A train coming out of the depot appears this long before it leaves.
+const APPEAR_S: u32 = 600;
+
+/// The headcode of a trip (spec P18): train number and trip number.
+pub fn headcode(t: &Trip) -> String {
+    format!("{}/{}", t.train, t.trip)
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ApplyReport {
+    pub services: usize,
+    pub entries: usize,
+    /// Empty moves left out (train/trip).
+    pub dropped_empty: Vec<String>,
+    /// Trains left out because they only run empty.
+    pub dropped_trains: Vec<u16>,
+    /// Trains ended early to free a road for the night, and where they stable.
+    pub shortened: Vec<String>,
+    /// Stays in Waterloo roads, by road.
+    pub road_use: Vec<(String, usize)>,
+    pub start_time: String,
+}
+
+/// A stay in a Waterloo road: (train index in `chains`, trip index of the trip that arrives, or
+/// `None` for a train that appears there), from, to (`None`: to the end of the day).
+#[derive(Debug, Clone, Copy)]
+struct Stay {
+    chain: usize,
+    arrives: Option<usize>,
+    from: u32,
+    to: Option<u32>,
+}
+
+/// Put one day's trips into `w` (Drain) in place of its timetable (spec §4.4).
+pub fn apply(w: &mut WorldFile, day: &[Trip]) -> Result<ApplyReport, WttError> {
+    let mut rep = ApplyReport::default();
+    let fail = |s: String| WttError::Apply(s);
+    let mut chains: Vec<Vec<Trip>> = Vec::new();
+    for (n, ts) in by_train(day) {
+        let kept: Vec<Trip> = ts.iter().filter(|t| !t.has("Ety")).map(|t| (*t).clone()).collect();
+        rep.dropped_empty.extend(ts.iter().filter(|t| t.has("Ety")).map(|t| headcode(t)));
+        if kept.is_empty() {
+            rep.dropped_trains.push(n);
+        } else {
+            chains.push(kept);
+        }
+    }
+    for ch in &chains {
+        if let Some(w) = ch.windows(2).find(|w| w[0].bound == w[1].bound) {
+            return Err(fail(format!("{} and {} run the same way one after the other", headcode(&w[0]), headcode(&w[1]))));
+        }
+        for t in ch {
+            let ok = match t.bound {
+                Bound::West => t.bank.is_some() && t.arr.is_some() && t.platform.is_some() && t.starts_in.is_none(),
+                Bound::East => t.bank.is_some() && t.dep.is_some() && t.platform.is_some() && (t.siding.is_some() || t.depot.is_some()),
+            };
+            if !ok {
+                return Err(fail(format!("trip {} is not a Bank–Waterloo run", headcode(t))));
             }
         }
     }
-    w.services = out;
-    Ok(())
+    let first_dep = chains.iter().map(|c| c[0].first()).min().ok_or_else(|| fail("no trips".into()))?;
+    let start = (first_dep.saturating_sub(APPEAR_S)) / 300 * 300;
+    // Allocate roads; a train whose last stay leaves no road for later ones ends at Bank instead.
+    let roads = loop {
+        let stays = stays(&chains, start);
+        match allocate(&stays) {
+            Ok(r) => break r.into_iter().zip(stays).collect::<Vec<_>>(),
+            Err(blocked_at) => {
+                let open: Vec<&Stay> = stays.iter().filter(|s| s.to.is_none() && s.from <= blocked_at).collect();
+                let Some(&&last) = open.iter().max_by_key(|s| s.from) else {
+                    return Err(fail(format!("no Waterloo road free at {}", fmt_hms(blocked_at.into()))));
+                };
+                rep.shortened.push(shorten(&mut chains, last.chain)?);
+            }
+        }
+    };
+    let mut road_of: BTreeMap<(usize, Option<usize>), &str> = BTreeMap::new();
+    let mut use_count: BTreeMap<&str, usize> = BTreeMap::new();
+    for (r, s) in &roads {
+        road_of.insert((s.chain, s.arrives), ROADS.1[*r]);
+        *use_count.entry(ROADS.1[*r]).or_default() += 1;
+    }
+    rep.road_use = use_count.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+    let fmt = |t: Option<u32>| t.map(|v| fmt_hms(v.into()));
+    let call = |place: &str, pf: &str, arr: Option<u32>, dep: Option<u32>| CallFile {
+        place: place.into(),
+        platform: Some(pf.into()),
+        arr: fmt(arr),
+        dep: fmt(dep),
+        stop: true,
+    };
+    let train_type = w.train_types.first().map(|t| t.code.clone()).ok_or_else(|| fail("no train type".into()))?;
+    let mut services = Vec::new();
+    let mut entries = Vec::new();
+    for (ci, ch) in chains.iter().enumerate() {
+        for (i, t) in ch.iter().enumerate() {
+            let bank_pf = t.platform.as_deref().expect("checked above");
+            let calls = match t.bound {
+                Bound::West => {
+                    let mut c = vec![call(BANK, bank_pf, None, t.bank), call(WATERLOO, ARRIVAL, t.arr, t.dep)];
+                    if let Some(at) = t.siding.or(t.depot) {
+                        let road = road_of.get(&(ci, Some(i))).ok_or_else(|| fail(format!("{}: no road", headcode(t))))?;
+                        c.push(call(ROADS.0, road, Some(at), None));
+                    } else {
+                        // Its last call: run into platform 26 and stand at its starting
+                        // signal. A booked stop there would wait for that signal to clear
+                        // before the train could stable; a timed pass does not.
+                        c[1].dep = None;
+                        c[1].stop = false;
+                    }
+                    c
+                }
+                Bound::East => {
+                    let road = match i {
+                        0 => road_of.get(&(ci, None)),
+                        _ => road_of.get(&(ci, Some(i - 1))),
+                    }
+                    .ok_or_else(|| fail(format!("{}: no road", headcode(t))))?;
+                    vec![call(ROADS.0, road, None, t.siding.or(t.depot)), call(WATERLOO, DEPARTURE, t.arr, t.dep), call(BANK, bank_pf, t.bank, None)]
+                }
+            };
+            let end = match ch.get(i + 1) {
+                Some(n) => EndFile::Form { service: headcode(n) },
+                None => EndFile::Stable,
+            };
+            services.push(ServiceFile { headcode: headcode(t), train_type: train_type.clone(), calls, end });
+        }
+        let first = &services[services.len() - ch.len()];
+        let (place, pf, time) = match ch[0].bound {
+            Bound::West => (BANK, ch[0].platform.clone().unwrap_or_default(), start),
+            Bound::East => {
+                let road = road_of[&(ci, None)];
+                (ROADS.0, road.to_string(), ch[0].first().saturating_sub(APPEAR_S).max(start))
+            }
+        };
+        entries.push(EntryFile {
+            service: first.headcode.clone(),
+            boundary: None,
+            at: Some(stand(w, place, &pf)?),
+            time: fmt_hms(time.into()),
+            speed_kmh: 0.0,
+            on_demand: false,
+        });
+    }
+    entries.sort_by(|a, b| a.time.cmp(&b.time).then(a.service.cmp(&b.service)));
+    rep.services = services.len();
+    rep.entries = entries.len();
+    rep.start_time = fmt_hms(start.into());
+    w.services = services;
+    w.entries = entries;
+    w.options.start_time = rep.start_time.clone();
+    w.options.min_dwell_s = [20, 30];
+    World::from_file(w.clone()).map_err(|e| fail(format!("the world no longer loads: {e}")))?;
+    Ok(rep)
+}
+
+/// Every stay in a Waterloo road, in time order.
+fn stays(chains: &[Vec<Trip>], start: u32) -> Vec<Stay> {
+    let mut out = Vec::new();
+    for (ci, ch) in chains.iter().enumerate() {
+        if ch[0].bound == Bound::East {
+            let leave = ch[0].first();
+            out.push(Stay { chain: ci, arrives: None, from: leave.saturating_sub(APPEAR_S).max(start), to: Some(leave) });
+        }
+        for (i, t) in ch.iter().enumerate() {
+            if let (Bound::West, Some(at)) = (t.bound, t.siding.or(t.depot)) {
+                out.push(Stay { chain: ci, arrives: Some(i), from: at, to: ch.get(i + 1).map(|n| n.first()) });
+            }
+        }
+    }
+    out.sort_by_key(|s| (s.from, s.chain));
+    out
+}
+
+/// The road (index into `ROADS`) for each stay: the one free longest. `Err`
+/// is the time a stay found none.
+fn allocate(stays: &[Stay]) -> Result<Vec<usize>, u32> {
+    let mut free_from: [Option<u32>; 3] = [Some(0); 3];
+    let mut out = Vec::new();
+    for s in stays {
+        // The road free longest, so a late train is least likely to find its road still taken.
+        let r = (0..3).filter(|&r| free_from[r].is_some_and(|f| f <= s.from)).min_by_key(|&r| (free_from[r], r)).ok_or(s.from)?;
+        free_from[r] = s.to.map(|t| t + ROAD_GAP_S);
+        out.push(r);
+    }
+    Ok(out)
+}
+
+/// End chain `ci` at its last Bank arrival instead, in a Bank platform no
+/// later trip uses, so its last road stay is no longer needed.
+fn shorten(chains: &mut [Vec<Trip>], ci: usize) -> Result<String, WttError> {
+    let ch = &chains[ci];
+    let Some(k) = ch.iter().rposition(|t| t.bound == Bound::East) else {
+        return Err(WttError::Apply(format!("train {} never reaches Bank", ch[0].train)));
+    };
+    let arrive = ch[k].bank.unwrap_or(0);
+    let used_later = |pf: &str| {
+        chains.iter().enumerate().filter(|(i, _)| *i != ci).flat_map(|(_, c)| c).any(|t| t.platform.as_deref() == Some(pf) && t.bank.is_some_and(|b| b >= arrive))
+    };
+    let pf = ["7", "8"].into_iter().find(|p| !used_later(p)).ok_or_else(|| {
+        WttError::Apply(format!("train {}: no Bank platform free from {}", chains[ci][0].train, fmt_hms(arrive.into())))
+    })?;
+    let ch = &mut chains[ci];
+    ch.truncate(k + 1);
+    ch[k].platform = Some(pf.to_string());
+    ch[k].to_form = None;
+    Ok(format!("{} stables at Bank platform {pf} at {}", headcode(&ch[k]), fmt_hms(arrive.into())))
+}
+
+/// A train standing in `place` platform `pf`, its head 1 m short of the end
+/// that faces the platform's starting signal.
+fn stand(w: &WorldFile, place: &str, pf: &str) -> Result<PositionFile, WttError> {
+    let p = w
+        .platforms
+        .iter()
+        .find(|p| p.place == place && p.platform == pf)
+        .ok_or_else(|| WttError::Apply(format!("Drain has no platform {place} {pf}")))?;
+    let mut probe = w.clone();
+    probe.services.clear();
+    probe.entries.clear();
+    let world = World::from_file(probe).map_err(|e| WttError::Apply(e.to_string()))?;
+    let sim = Sim::new(world, 0);
+    let net = &sim.world().net;
+    let seg = net.segments.iter().position(|s| s.name == p.segment).expect("platform segments exist");
+    let sg = &net.segments[seg];
+    let mut found = Vec::new();
+    for (dir, offset) in [(Dir::Up, p.to_m - 1.0), (Dir::Down, p.from_m + 1.0)] {
+        let id = signalbox_core::ids::SegmentId::from_idx(seg);
+        if let Some((_, d)) = net.first_signal_ahead(id, dir, sg.along(offset, dir), 30.0, sim.points()) {
+            found.push((d, dir, offset));
+        }
+    }
+    found.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let &(_, dir, offset_m) = found.first().ok_or_else(|| WttError::Apply(format!("no starting signal for {place} {pf}")))?;
+    Ok(PositionFile { segment: p.segment.clone(), offset_m, direction: dir })
 }
 ```
 
-Note: copies are built with `..base[r].clone()` / `..c.clone()`, so fields the tutorial adds to `ServiceFile` or `CallFile` are carried over unchanged.
-
-In `crates/ts2-import/src/lib.rs`, after `pub mod lines;` add `pub mod repeat;`.
-
-Create `layouts/drain.repeat.json`:
-
-```json
-{
-  "schema": 1,
-  "every": "00:10:00",
-  "until": "14:00:00",
-  "headcode_step": 2
-}
-```
+In `crates/ts2-import/src/lib.rs`, after `pub mod ts2;` add `pub mod wtt;`.
 
 `crates/ts2-import/src/main.rs`:
-- `use ts2_import::{areas, convert, lines, repeat, report};`
-- `USAGE` ends `[--lines <lines.json>] [--repeat <repeat.json>]";`
-- after the `let (mut input, …) = …;` line: `let mut repeat_path = None;`
+- `use ts2_import::{areas, convert, lines, report, wtt};`
+- `USAGE` ends `[--lines <lines.json>] [--wtt <wtt.bbox.html>]";`
+- after the `let (mut input, …) = …;` line: `let mut wtt_path = None;`
 - a match arm before `"--strict"`:
 
 ```rust
-            "--repeat" => {
+            "--wtt" => {
                 i += 1;
                 match args.get(i) {
-                    Some(r) => repeat_path = Some(r.clone()),
+                    Some(t) => wtt_path = Some(t.clone()),
                     None => return usage(),
                 }
             }
@@ -1719,9 +2605,9 @@ Create `layouts/drain.repeat.json`:
 - before `let text = match std::fs::read_to_string(&input) {`:
 
 ```rust
-    let repeat_spec = match &repeat_path {
-        Some(p) => match std::fs::read_to_string(p).map_err(|e| e.to_string()).and_then(|t| repeat::parse(&t).map_err(|e| e.to_string())) {
-            Ok(r) => Some((p.clone(), r)),
+    let day = match &wtt_path {
+        Some(p) => match read_wtt(p) {
+            Ok(d) => Some((p.clone(), d)),
             Err(e) => {
                 eprintln!("{p}: {e}");
                 return ExitCode::FAILURE;
@@ -1731,47 +2617,398 @@ Create `layouts/drain.repeat.json`:
     };
 ```
 
-- before `let json = serde_json::to_string_pretty(&c.world)…`:
+- before `let json = serde_json::to_string_pretty(&c.world)…` (after the `--lines` block):
 
 ```rust
-            if let Some((p, r)) = &repeat_spec {
-                if let Err(e) = repeat::apply(&mut c.world, r) {
-                    eprintln!("{p}: {e}");
-                    return ExitCode::FAILURE;
+            if let Some((p, (trips, checked))) = &day {
+                match wtt::apply(&mut c.world, trips) {
+                    Ok(r) => {
+                        eprintln!(
+                            "{p}: Wednesday, {} trips of {} trains; {} trips at the published running time, {} longer; snapshots {}",
+                            checked.trips,
+                            checked.trains,
+                            checked.running_exact,
+                            checked.running_longer,
+                            checked.snapshots.iter().map(|(t, n)| format!("{}={n}", &signalbox_core::time::fmt_hms((*t).into())[..5])).collect::<Vec<_>>().join(" ")
+                        );
+                        eprintln!(
+                            "{p}: {} services, {} entries from {}; left out {} empty moves and trains {:?}; roads {:?}",
+                            r.services,
+                            r.entries,
+                            r.start_time,
+                            r.dropped_empty.len(),
+                            r.dropped_trains,
+                            r.road_use
+                        );
+                        for s in &r.shortened {
+                            eprintln!("{p}: {s}");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("{p}: {e}");
+                        return ExitCode::FAILURE;
+                    }
                 }
             }
 ```
 
-`deploy/Dockerfile`, the conversion loop in the `build` stage becomes:
+- before `fn usage() -> ExitCode {`:
 
-```dockerfile
- && for n in liverpool-st drain gretz-armainvilliers; do \
-      rep=""; if [ -f "layouts/$n.repeat.json" ]; then rep="--repeat layouts/$n.repeat.json"; fi; \
-      target/release/ts2-import "crates/ts2-import/tests/data/$n.json" -o "/out/layouts/$n.json" \
-        --areas "layouts/$n.areas.json" --lines "layouts/$n.lines.json" $rep || exit 1; \
-    done
+```rust
+/// The WTT's Wednesday trips, checked against its own figures.
+fn read_wtt(path: &str) -> Result<(Vec<wtt::Trip>, wtt::CheckReport), String> {
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let all = wtt::parse(&text).map_err(|e| e.to_string())?;
+    let day = wtt::on_day(&all, wtt::DAY).map_err(|e| e.to_string())?;
+    let checked = wtt::check(&day, &wtt::Checks::waterloo_city()).map_err(|e| e.to_string())?;
+    Ok((day, checked))
+}
 ```
 
-and the header comment's "(with their areas, box prefixes and line names)" becomes "(with their areas, box prefixes, line names and, for Drain, a repeated timetable)".
-
-- [ ] **Step 4: Run the tests to see them pass**
+- [ ] **Step 5: Run the tests to see them pass**
 
 Run: `scripts/cargo test -p ts2-import`
-Expected: PASS (repeat 7, cli 6, soak 3 + 1 ignored, convert snapshots unchanged — `convert` itself is untouched).
+Expected: PASS (wtt 6, cli 6, soak 3 + 1 ignored; the convert snapshots unchanged: `convert` is untouched).
+Then the CI build: `docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/w" -w /w -e CARGO_HOME=/w/.cargo-home -e RUSTFLAGS="-D warnings" rust:1.98-slim-bookworm cargo build -p ts2-import --all-targets --locked`
+Expected: no warnings.
 
-- [ ] **Step 5: Document**
+- [ ] **Step 6: Document**
 
-`deploy/README.md`, the `Dockerfile` row: "… line names from `layouts/` and Drain's repeated timetable (`layouts/drain.repeat.json`) (no dev login)". `CLAUDE.md`:
+`CLAUDE.md`:
 - Commands block, after the Liverpool Street `ts2-import` line:
-  `scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/drain.json -o /w/target/drain.json --areas /w/layouts/drain.areas.json --lines /w/layouts/drain.lines.json --repeat /w/layouts/drain.repeat.json`
-- "Multiplayer", after the lines-file sentence: "An optional `layouts/<name>.repeat.json` (`ts2-import --repeat`, `ts2_import::repeat`, polish spec §4) carries on every service the timetable already repeats `every` minutes until `until`, renumbering headcodes by `headcode_step` at the same width, and turns the day's last workings into forms of the next repeat; only Drain has one (to 14:00). Old saves keep the timetable they were created with."
+  `scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/drain.json -o /w/target/drain.json --areas /w/layouts/drain.areas.json --lines /w/layouts/drain.lines.json --wtt /w/external/wtt/wtt.bbox.html   # the real WTT: external/wtt/README.md`
+- "Multiplayer", after the lines-file sentence: "Drain's timetable can be the real Waterloo & City WTT
+  (`ts2-import --wtt`, `ts2_import::wtt`, polish spec §4): it reads `pdftotext -bbox` output of the owner's PDF,
+  checks it against the WTT's own figures (running times, workings, trains in service, intervals) and replaces
+  Drain's services, entries and start time (Wednesday; headcodes `<train>/<trip>`; the depot and siding are roads
+  5–7). The PDF and anything made from it are never committed (`external/wtt/`, git-ignored); CI tests only the
+  synthetic `tests/data/wtt-synthetic.bbox.html` (written by `wtt-synthetic.py`)."
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add crates/ts2-import layouts/drain.repeat.json deploy/Dockerfile deploy/README.md CLAUDE.md
-git commit -m "feat(ts2-import): repeat a layout's timetable from a per-layout file; Drain runs until 14:00"
+git add crates/ts2-import CLAUDE.md
+git commit -m "feat(ts2-import): read a Waterloo & City WTT (pdftotext -bbox), check it, and make it Drain's timetable"
 ```
+
+---
+
+### Task 4c: The image gets the owner's WTT; the whole-day soak
+
+**Files:**
+- Create: `external/wtt/README.md`, `external/wtt/.gitignore`, `crates/ts2-import/tests/wtt_day.rs`
+- Modify: `deploy/Dockerfile`, `deploy/README.md`, `CLAUDE.md`
+
+**Interfaces:**
+- Consumes: Task 4b's `wtt::{parse, on_day, DAY, check, Checks::waterloo_city, apply}` and `--wtt`; Task 4a's robot.
+- Produces: the `wtt` Docker stage (`/out/wtt.bbox.html` when `external/wtt/` holds exactly one PDF); the image's
+  `drain.json` from the WTT when present; `scripts/cargo test --release -p ts2-import --test wtt_day -- --ignored --nocapture`
+  (skips without `external/wtt/wtt.bbox.html`).
+
+- [ ] **Step 1: The ignored directory**
+
+Create `external/wtt/.gitignore`:
+
+```text
+# The owner's WTT and everything made from it stay out of the repository.
+*
+!.gitignore
+!README.md
+```
+
+Create `external/wtt/README.md`:
+
+```markdown
+# The Waterloo & City Working Timetable (not in this repository)
+
+Drain can run the real London Underground Waterloo & City line timetable:
+WTT No. 7, Mondays to Fridays, from 9 October 2017 (a TfL document). Only the
+code that reads it is in this repository (`crates/ts2-import/src/wtt.rs`);
+the PDF, its text and anything made from them are never committed (this
+directory ignores everything but this file and its `.gitignore`).
+
+To build an image with it, put your copy here as the only PDF:
+
+    external/wtt/wtt-7-waterloo-and-city-2017-10-09.pdf
+
+(any name ending `.pdf`; sha256
+`7709d5b56564dd5b0d9acd7d27cb2668fc5a88407d6dae6f389a8e6fb592475b` for the
+copy this was written against). `deploy/Dockerfile` turns it into
+`pdftotext -bbox` text and converts Drain with `ts2-import --wtt`, which
+checks the timetable against the WTT's own figures (running times, train
+workings, trains in service, service intervals) and stops the build if they
+do not match. Without a PDF the image's Drain keeps its TS2 timetable.
+
+The image then holds a timetable made from TfL's document: keep it on ra,
+never push it to a public registry.
+
+To try it outside Docker (poppler-utils installed):
+
+    pdftotext -bbox external/wtt/*.pdf external/wtt/wtt.bbox.html
+    scripts/cargo run -p ts2-import -- crates/ts2-import/tests/data/drain.json -o /w/target/drain.json \
+      --areas /w/layouts/drain.areas.json --lines /w/layouts/drain.lines.json --wtt /w/external/wtt/wtt.bbox.html
+    scripts/cargo test --release -p ts2-import --test wtt_day -- --ignored --nocapture
+```
+
+Run: `git status --short --ignored external/`
+Expected: only `?? external/` (or the two files once added); a PDF dropped there shows as `!!`.
+
+- [ ] **Step 2: The whole-day soak (owner-run)**
+
+Create `crates/ts2-import/tests/wtt_day.rs`:
+
+```rust
+//! The owner's real WTT as Drain's timetable (polish spec §4), run for a
+//! whole day under the robot. Needs the git-ignored
+//! `external/wtt/wtt.bbox.html` (deploy/README.md says how to make it) and
+//! is skipped without it; slow in debug builds:
+//! `scripts/cargo test --release -p ts2-import --test wtt_day -- --ignored --nocapture`
+
+use std::collections::BTreeMap;
+
+use signalbox_core::events::Event;
+use signalbox_core::robot::{self, ROBOT_EVERY_TICKS, STUCK_S};
+use signalbox_core::sim::{Sim, TICK_S};
+use signalbox_core::time::fmt_hms;
+use signalbox_core::world::World;
+use signalbox_core::world::file::WorldFile;
+use ts2_import::wtt;
+
+const WTT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../external/wtt/wtt.bbox.html");
+
+fn drain_with_wtt() -> Option<WorldFile> {
+    let text = std::fs::read_to_string(WTT).ok()?;
+    let dir = env!("CARGO_MANIFEST_DIR");
+    let mut w = ts2_import::convert(&std::fs::read_to_string(format!("{dir}/tests/data/drain.json")).unwrap()).unwrap().world;
+    let areas = ts2_import::areas::parse(&std::fs::read_to_string(format!("{dir}/../../layouts/drain.areas.json")).unwrap()).unwrap();
+    ts2_import::areas::apply(&mut w, &areas).unwrap();
+    let day = wtt::on_day(&wtt::parse(&text).unwrap(), wtt::DAY).unwrap();
+    wtt::check(&day, &wtt::Checks::waterloo_city()).unwrap();
+    wtt::apply(&mut w, &day).unwrap();
+    Some(w)
+}
+
+#[derive(Debug, Default)]
+struct Day {
+    spads: usize,
+    collisions: usize,
+    violations: usize,
+    wrong_platform: usize,
+    stuck: Vec<String>,
+    running: Vec<String>,
+    stabled: usize,
+    /// Lateness in seconds at each booked stop and each departure, with headcode and time.
+    arrivals: Vec<(i64, String, f64)>,
+    departures: Vec<(i64, String, f64)>,
+}
+
+/// Until 01:00, as `robot::soak` runs a world, also timing every call.
+fn run_day(w: WorldFile, seed: u64) -> Day {
+    let mut sim = Sim::new(World::from_file(w).unwrap(), seed);
+    let ticks = ((25.0 * 3600.0 - sim.now_s()) / TICK_S).round() as u64;
+    let mut d = Day::default();
+    let mut still: BTreeMap<u32, (usize, f64, f64)> = BTreeMap::new();
+    for i in 0..ticks {
+        if i % ROBOT_EVERY_TICKS == 0 {
+            for c in robot::commands(&sim) {
+                sim.submit(c);
+            }
+            let now = sim.now_s();
+            for t in sim.trains() {
+                let here = (t.head().0.idx(), t.head_m);
+                if still.get(&t.id.0).is_none_or(|s| (s.0, s.1) != here) {
+                    still.insert(t.id.0, (here.0, here.1, now));
+                }
+            }
+        }
+        let now = sim.now_s();
+        for e in sim.step() {
+            match e {
+                Event::SignalPassedAtDanger { .. } => d.spads += 1,
+                Event::Collision { .. } => d.collisions += 1,
+                Event::InvariantViolated { .. } => d.violations += 1,
+                Event::WrongPlatform { .. } => d.wrong_platform += 1,
+                Event::TrainArrived { train, late_s, .. } | Event::TrainPassed { train, late_s, .. } => {
+                    let h = sim.trains().iter().find(|t| t.id == train).map(|t| t.headcode.clone()).unwrap_or_default();
+                    d.arrivals.push((late_s, h, now));
+                }
+                Event::TrainDeparted { train, .. } => {
+                    // (A train that formed its next service in the same tick has next_call 0.)
+                    if let Some(t) = sim.trains().iter().find(|t| t.id == train && t.next_call > 0) {
+                        if let Some(dep) = sim.world().services[t.service.idx()].calls[t.next_call - 1].dep_s {
+                            d.departures.push(((now - dep).round() as i64, t.headcode.clone(), now));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let now = sim.now_s();
+    let standing = |t: &&signalbox_core::trains::Train| still.get(&t.id.0).is_some_and(|s| now - s.2 >= STUCK_S);
+    d.stuck = sim.trains().iter().filter(|t| !t.stabled && t.dwell.is_none()).filter(standing).map(|t| t.headcode.clone()).collect();
+    d.running = sim.trains().iter().filter(|t| !t.stabled).map(|t| t.headcode.clone()).collect();
+    d.stabled = sim.trains().iter().filter(|t| t.stabled).count();
+    d
+}
+
+fn worst(v: &[(i64, String, f64)]) -> (i64, String) {
+    v.iter().max_by_key(|x| x.0).map(|x| (x.0, format!("{} at {}", x.1, fmt_hms(x.2)))).unwrap_or_default()
+}
+
+/// No SPADs, collisions or stuck trains; every train stabled by 01:00; no
+/// stop more than 3 minutes late, over five seeds (the dwell times differ).
+#[test]
+#[ignore]
+fn the_real_wtt_runs_a_whole_day() {
+    let Some(w) = drain_with_wtt() else {
+        eprintln!("no {WTT}: skipped");
+        return;
+    };
+    for seed in [1, 2, 3, 7, 42] {
+        let d = run_day(w.clone(), seed);
+        let mut hourly: BTreeMap<u32, (i64, usize, usize)> = BTreeMap::new();
+        for (late, _, at) in &d.arrivals {
+            let e = hourly.entry((*at / 3600.0) as u32).or_default();
+            e.0 = e.0.max(*late);
+            e.1 += usize::from(*late > 60);
+            e.2 += 1;
+        }
+        eprintln!(
+            "seed {seed}: spads {} collisions {} violations {} wrong platform {} stuck {:?} running {:?} stabled {}; {} stops, {} over 1 min late, worst {:?}; {} departures, {} over 1 min late, worst {:?}",
+            d.spads,
+            d.collisions,
+            d.violations,
+            d.wrong_platform,
+            d.stuck,
+            d.running,
+            d.stabled,
+            d.arrivals.len(),
+            d.arrivals.iter().filter(|x| x.0 > 60).count(),
+            worst(&d.arrivals),
+            d.departures.len(),
+            d.departures.iter().filter(|x| x.0 > 60).count(),
+            worst(&d.departures),
+        );
+        eprintln!(
+            "  by hour (worst s / stops over 1 min late / stops): {}",
+            hourly.iter().map(|(h, (m, l, n))| format!("{h:02}h {m}/{l}/{n}")).collect::<Vec<_>>().join(", ")
+        );
+        assert_eq!((d.spads, d.collisions, d.violations), (0, 0, 0), "seed {seed}");
+        assert!(d.stuck.is_empty() && d.running.is_empty(), "seed {seed}: {:?} {:?}", d.stuck, d.running);
+        assert_eq!(d.stabled, 5, "seed {seed}");
+        assert!(worst(&d.arrivals).0 <= 180 && worst(&d.departures).0 <= 180, "seed {seed}");
+    }
+}
+```
+
+Run: `scripts/cargo test -p ts2-import --test wtt_day`
+Expected: PASS (0 run, 1 ignored). Without the PDF, `-- --ignored` prints `no …wtt.bbox.html: skipped` and passes.
+
+- [ ] **Step 3: The image**
+
+`deploy/Dockerfile`:
+
+```diff
+diff --git a/deploy/Dockerfile b/deploy/Dockerfile
+index 2b7153c..b33c921 100644
+--- a/deploy/Dockerfile
++++ b/deploy/Dockerfile
+@@ -1,8 +1,9 @@
+ # syntax=docker/dockerfile:1
+ # signalbox: the front (signalbox-server), the game process (signalbox-game),
+ # the browser client, the three converted TS2 layouts (with their areas, box
+-# prefixes and line names) and the tutorial lessons. Release build: no
+-# dev login.
++# prefixes and line names; Drain with the real Waterloo & City timetable when
++# external/wtt/ holds the owner's WTT) and the tutorial lessons. Release
++# build: no dev login.
+ # Build from the repository root:
+ #   docker build -f deploy/Dockerfile -t local/signalbox:$(git rev-parse --short HEAD) .
+ 
+@@ -22,17 +23,34 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
+     --mount=type=cache,target=/src/target \
+     scripts/build-web.sh /out/web
+ 
++# The owner's copy of the Waterloo & City line's Working Timetable, if
++# external/wtt/ holds one (git-ignored: TfL's document and anything made from
++# it never go into the repository; see external/wtt/README.md). ts2-import
++# --wtt reads its words and their positions. Without it Drain keeps its TS2
++# timetable.
++FROM debian:bookworm-slim AS wtt
++RUN apt-get update \
++ && apt-get install -y --no-install-recommends poppler-utils \
++ && rm -rf /var/lib/apt/lists/*
++COPY external/wtt/ /wtt/
++RUN set -eu; mkdir -p /out; set -- /wtt/*.pdf; \
++    if [ "$#" -gt 1 ]; then echo "external/wtt: more than one PDF" >&2; exit 1; fi; \
++    if [ -f "$1" ]; then sha256sum "$1"; pdftotext -bbox "$1" /out/wtt.bbox.html; \
++    else echo "external/wtt: no WTT; Drain keeps its TS2 timetable"; fi
++
+ FROM rust:1.98-slim-bookworm AS build
+ WORKDIR /src
+ COPY . .
++COPY --from=wtt /out/ /wtt/
+ RUN --mount=type=cache,target=/usr/local/cargo/registry \
+     --mount=type=cache,target=/src/target \
+     cargo build --release --locked -p signalbox-server -p ts2-import --bins \
+  && mkdir -p /out/bin /out/layouts \
+  && cp target/release/signalbox-server target/release/signalbox-game /out/bin/ \
+  && for n in liverpool-st drain gretz-armainvilliers; do \
++      wtt=""; if [ "$n" = drain ] && [ -f /wtt/wtt.bbox.html ]; then wtt="--wtt /wtt/wtt.bbox.html"; fi; \
+       target/release/ts2-import "crates/ts2-import/tests/data/$n.json" -o "/out/layouts/$n.json" \
+-        --areas "layouts/$n.areas.json" --lines "layouts/$n.lines.json" || exit 1; \
++        --areas "layouts/$n.areas.json" --lines "layouts/$n.lines.json" $wtt || exit 1; \
+     done \
+  && cp -r lessons /out/lessons \
+  && chmod -R a+rX /out/lessons
+```
+
+Check the stage alone (no PDF in the checkout):
+`docker build --progress=plain -f deploy/Dockerfile --target wtt -t local/sbx-wtt-probe:check . 2>&1 | grep external/wtt`
+Expected: `external/wtt: no WTT; Drain keeps its TS2 timetable`. Then `docker rmi local/sbx-wtt-probe:check`.
+(Scratch, `0c0ea67`: with the owner's PDF the stage wrote the same `wtt.bbox.html` as poppler 25.03 on ra, byte
+for byte; with two PDFs it stopped with `external/wtt: more than one PDF`; the build stage's loop, run by hand with
+and without the text, wrote Drain with 574 and 16 services.)
+
+- [ ] **Step 4: Document**
+
+`deploy/README.md`:
+- the `Dockerfile` row ends "… line names from `layouts/`, and Drain with the real Waterloo & City timetable when
+  `external/wtt/` holds the owner's WTT (its `wtt` stage runs `pdftotext -bbox`; without one, Drain's TS2
+  timetable) (no dev login)"; the `Dockerfile.dockerignore` row adds "(`external/wtt/` stays in, for that stage)".
+- a section after "Build and run":
+
+```markdown
+## The Waterloo & City timetable (optional)
+
+Before `docker build`, copy the owner's WTT PDF into `external/wtt/` of the checkout being built (the only PDF
+there; `external/wtt/README.md`). The build log shows its sha256 and the converter's summary (`Wednesday, 585
+trips of 7 trains; …`, `574 services, 5 entries from 05:40:00; …`); a WTT that fails the checks fails the build.
+Without a PDF the log says `Drain keeps its TS2 timetable`. An image built with it holds a timetable made from
+TfL's document: it stays on ra and is never pushed to a public registry. Old Drain saves keep the timetable they
+were created with.
+```
+
+`CLAUDE.md` Commands block, after the `--wtt` line from Task 4b:
+`scripts/cargo test --release -p ts2-import --test wtt_day -- --ignored --nocapture   # the real WTT, a whole day under the robot (skips without it)`
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add external/wtt/README.md external/wtt/.gitignore crates/ts2-import/tests/wtt_day.rs deploy/Dockerfile deploy/README.md CLAUDE.md
+git status --short   # nothing from external/wtt/ but those two files
+git commit -m "feat(deploy): the image converts Drain with the owner's WTT when external/wtt/ has it"
+```
+
+- [ ] **Step 6 (controller, with the owner's PDF; not for subagents)**
+
+Copy the PDF into `external/wtt/` of the worktree, `pdftotext -bbox external/wtt/*.pdf external/wtt/wtt.bbox.html`
+(poppler-utils on ra), then `scripts/cargo test --release -p ts2-import --test wtt_day -- --ignored --nocapture`.
+Expected (scratch, `0c0ea67`): for seeds 1, 2, 3, 7, 42: `spads 0 collisions 0 violations 0 wrong platform 0 stuck []
+running [] stabled 5; 1721 stops, 137 over 1 min late, worst (103, "204/73 at 19:45:42")`, departures worst 109 s.
+Copy the two lines of one seed into the branch report. `git status` must still show nothing from `external/wtt/`
+but the README and `.gitignore`.
 
 ---
 
@@ -1782,7 +3019,7 @@ git commit -m "feat(ts2-import): repeat a layout's timetable from a per-layout f
 - Test: `crates/client-core/tests/simplifier.rs`, `crates/client-ui/tests/screens.rs`
 
 **Interfaces:**
-- Consumes: `layouts/drain.repeat.json` and `ts2_import::repeat` (Task 4) in the screen test.
+- Consumes: Drain's committed TS2 timetable (`crates/ts2-import/tests/data/drain.json`, 06:00–06:43) in the screen test; the WTT is not in CI.
 - Produces: `client_core::simplifier::{last_time(&SimplifierRow) -> Option<f64>, now_line(rows: &[&SimplifierRow], now_s: f64) -> usize}`; `UiApp` field `simplifier_scroll: Option<usize>`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1811,18 +3048,16 @@ fn the_simplifier_opens_at_the_first_train_not_yet_finished() {
 Append to `crates/client-ui/tests/screens.rs`:
 
 ```rust
-/// Polish spec §7: with Drain repeated, the simplifier opens at 07:00's
-/// trains, not at 06:00's.
+/// Polish spec §7: half an hour into Drain's TS2 timetable the simplifier
+/// opens at the trains still running, not at 06:00's.
 #[test]
 fn the_simplifier_opens_at_now() {
     let dir = env!("CARGO_MANIFEST_DIR");
-    let read = |p: String| std::fs::read_to_string(p).unwrap();
-    let mut w = ts2_import::convert(&read(format!("{dir}/../ts2-import/tests/data/drain.json"))).unwrap().world;
-    ts2_import::repeat::apply(&mut w, &ts2_import::repeat::parse(&read(format!("{dir}/../../layouts/drain.repeat.json"))).unwrap()).unwrap();
+    let w = ts2_import::convert(&std::fs::read_to_string(format!("{dir}/../ts2-import/tests/data/drain.json")).unwrap()).unwrap().world;
     let mut r = Rig::in_game(signalbox_core::world::World::from_file(w).unwrap(), None);
     r.game.handle("ann", ClientMsg::Vote { proposal: Proposal::Speed { x: 8 } });
-    for _ in 0..450 {
-        r.game.advance(1.0); // 06:00 to 07:00 at 8x
+    for _ in 0..225 {
+        r.game.advance(1.0); // 06:00 to 06:30 at 8x
     }
     for (p, m) in r.game.resync("ann") {
         if p == "ann" {
@@ -1835,15 +3070,15 @@ fn the_simplifier_opens_at_now() {
     r.frame();
     let out = r.frame();
     let side = side_texts(&r, &out);
-    assert!(!side.iter().any(|t| t == "BW01"), "06:00 is long gone: {side:?}");
-    assert!(side.iter().any(|t| t == "BW13"), "07:00's trains: {side:?}");
+    assert!(!side.iter().any(|t| t == "BW01"), "BW01 ran at 06:00: {side:?}");
+    assert!(side.iter().any(|t| t == "BW06") && side.iter().any(|t| t == "BW07"), "06:30's trains: {side:?}");
 }
 ```
 
 - [ ] **Step 2: Run them to see them fail**
 
 Run: `scripts/cargo test -p signalbox-client-core --test simplifier` → compile error (`now_line` not found).
-Run: `scripts/cargo test -p signalbox-client-ui --test screens the_simplifier_opens_at_now` → FAIL: `06:00 is long gone: [… "BW01" …]`.
+Run: `scripts/cargo test -p signalbox-client-ui --test screens the_simplifier_opens_at_now` → FAIL: `BW01 ran at 06:00: [… "BW01" …]` (checked on `0c0ea67` with only the scroll line left out).
 
 - [ ] **Step 3: Implement**
 
@@ -1865,7 +3100,7 @@ pub fn now_line(rows: &[&SimplifierRow], now_s: f64) -> usize {
 ```
 
 `crates/client-ui/src/screens.rs`:
-- `UiApp` gains, after `placement`:
+- `UiApp` gains, after `placement` (Task 3; on `0c0ea67` without Task 3: after `simplifier_lines`):
 
 ```rust
     /// The simplifier line to scroll to once, set when its lines are built.
@@ -1873,10 +3108,11 @@ pub fn now_line(rows: &[&SimplifierRow], now_s: f64) -> usize {
 ```
 
   and `simplifier_scroll: None,` in `UiApp::new`.
-- in `side`, the SIMPLIFIER tab:
+- in `side`, the SIMPLIFIER tab (on `0c0ea67` the tab is `let simplifier = ui.selectable_value(…)` followed by its
+  `mark(…)` line for lesson highlights); after that `mark` line add:
 
 ```rust
-            if ui.selectable_value(&mut self.side_tab, SideTab::Simplifier, RichText::new("SIMPLIFIER").strong()).clicked() {
+            if simplifier.clicked() {
                 // Opened again: build the lines afresh and scroll to now.
                 self.simplifier_lines = None;
             }
@@ -2338,7 +3574,7 @@ git commit -m "feat(server): a resumed game gets the listed layout file for toda
 - Modify: `deploy/README.md`, `CLAUDE.md`
 
 **Interfaces:**
-- Consumes: `scripts/wasm-build`, the dev-auth front, Task 4's `layouts/drain.repeat.json` (the check converts Drain with it), the client's console line `signalbox: drawing with <backend>` (already in `crates/client-web/src/lib.rs`).
+- Consumes: `scripts/wasm-build`, the dev-auth front, Drain's committed TS2 timetable (the check converts Drain with its areas and lines only, never the WTT: three trains stand in the platforms at 06:00), the client's console line `signalbox: drawing with <backend>` (already in `crates/client-web/src/lib.rs`).
 - Produces: `deploy/browser-check.sh [--no-build]` → one `ok`/`FAIL` line per case (`webgl2`, `webgpu`, `none`), exit 0/1 (2 for missing build outputs with `--no-build`); outputs in `target/browser-check/`.
 
 - [ ] **Step 1: Write the check**
@@ -2531,7 +3767,7 @@ done
 rm -rf "$out"
 mkdir -p "$out/layouts" "$out/data"
 scripts/cargo run -q -p ts2-import -- crates/ts2-import/tests/data/drain.json -o /w/target/browser-check/layouts/drain.json \
-  --areas /w/layouts/drain.areas.json --lines /w/layouts/drain.lines.json --repeat /w/layouts/drain.repeat.json 2>/dev/null
+  --areas /w/layouts/drain.areas.json --lines /w/layouts/drain.lines.json 2>/dev/null
 cleanup() {
   docker stop "$name" >/dev/null 2>&1 || true
   # The browser's files are root-owned: give them back.
@@ -2617,6 +3853,11 @@ Expected: the three `ok` lines.
 Run: `scripts/cargo test --release -p signalbox-client-ui --test legibility -- --nocapture`
 Expected: PASS; copy the 1280x800 and 1920x1080 Fit rows and the plan times into the branch report, with the browser-check screenshots.
 
+- [ ] **Step 4: The robot soaks and the WTT (controller)**
+
+Run: `scripts/cargo test --release -p ts2-import --test soak -- --ignored` and `scripts/cargo test --release -p signalbox-bot --test soak -- --ignored`
+Expected: PASS. Then Task 4c Step 6 with the owner's PDF, and `git status --short --ignored external/` shows the PDF and its text only as ignored (`!!`).
+
 ---
 
 ## Controller section (after the branch's final review; not for subagents)
@@ -2624,6 +3865,6 @@ Expected: PASS; copy the 1280x800 and 1920x1080 Fit rows and the plan times into
 The owner has agreed to redeploy as the realism pass did.
 
 1. **CI cache:** nothing to reseed (no new crates).
-2. **Deploy:** as `deploy/README.md` "Build and run" from the merged commit, then `deploy/smoke.sh https://ra.tail3e0c1e.ts.net:50160 303`. The image now carries Drain's repeated timetable and the front passes `--current-layout` on resume. Roll back by retagging the previous `<rev>`.
+2. **Deploy:** first copy the owner's WTT PDF into `external/wtt/` of the checkout being built (`deploy/README.md`, "The Waterloo & City timetable"); the build log must show its sha256 (`7709d5b5…2475b`) and `574 services, 5 entries from 05:40:00`. Then as "Build and run" from the merged commit, and `deploy/smoke.sh https://ra.tail3e0c1e.ts.net:50160 303`. The image now carries Drain's WTT timetable (private: never push it) and the front passes `--current-layout` on resume. Roll back by retagging the previous `<rev>`.
 3. **Old saves:** join an existing pre-realism Drain save in the lobby; its signals must read `WA…`/`WB…` and `docker logs signalbox` show `display data from layout drain`. Its timetable still ends at 06:43 (spec P9).
-4. **Owner's look (morning):** the `legibility` table and the browser-check screenshots in the branch report; then in Chrome/Edge and Firefox on the tailnet: Liverpool Street box A at Fit (numbers clear of the next platform road), the spectator view of Gretz (no pile-ups; ○A appears one zoom step in), a new Drain game past 06:43 (trains keep running; the simplifier opens at now).
+4. **Owner's look (morning):** the `legibility` table and the browser-check screenshots in the branch report; then in Chrome/Edge and Firefox on the tailnet: Liverpool Street box A at Fit (numbers clear of the next platform road), the spectator view of Gretz (no pile-ups; ○A appears one zoom step in), a new Drain game (starts 05:40, 203 in Bank 8, headcodes like `202/1`; through the morning peak the trains keep running, up to about 1½ minutes late under the robot; the simplifier opens at now).
