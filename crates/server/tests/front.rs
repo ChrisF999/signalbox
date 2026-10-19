@@ -78,6 +78,42 @@ async fn the_lobby_and_a_game_over_websockets() {
     f.running.stop().await;
 }
 
+/// The players panel's presence list over real sockets: a view that names
+/// who is in the game, and deltas as people come and go.
+#[tokio::test]
+async fn who_is_in_the_game_reaches_every_player() {
+    fn players_say(f: &ServerFrame, who: &str, up: Option<bool>) -> bool {
+        matches!(f, ServerFrame::Game(ServerMsg::Delta(d)) if d.players.get(who) == Some(&up))
+    }
+    let f = front("presence").await;
+    let mut ann = f.connect("ann").await;
+    let id = create(&mut ann, "twobox").await;
+    ann.send(&ClientFrame::Game(ClientMsg::Claim { area: s("West") })).await.unwrap();
+    until(&mut ann, is_view).await;
+    let mut bob = f.connect("bob").await;
+    bob.send(&lobby(LobbyMsg::Join { game: id })).await.unwrap();
+    let got = until(&mut bob, is_view).await;
+    let Some(ServerFrame::Game(ServerMsg::View(v))) = got.last() else { panic!("{got:?}") };
+    assert_eq!(v.players, [(s("ann"), true), (s("bob"), true)].into_iter().collect(), "bob's first view names both");
+    // Ann hears of bob by delta (a spectator: no area, just listed).
+    until(&mut ann, |f| players_say(f, "bob", Some(true))).await;
+    // A spectator who goes is forgotten.
+    drop(bob);
+    until(&mut ann, |f| players_say(f, "bob", None)).await;
+    // A holder who drops is listed as away for the grace period.
+    let mut cy = f.connect("cy").await;
+    cy.send(&lobby(LobbyMsg::ListGames)).await.unwrap();
+    let Some(ServerFrame::Lobby(LobbyReply::Games { games })) = next(&mut cy).await else { panic!() };
+    cy.send(&lobby(LobbyMsg::Join { game: games[0].id.clone() })).await.unwrap();
+    until(&mut cy, is_view).await;
+    cy.send(&ClientFrame::Game(ClientMsg::Claim { area: s("East") })).await.unwrap();
+    until(&mut cy, is_view).await;
+    until(&mut ann, |f| players_say(f, "cy", Some(true))).await;
+    drop(cy);
+    until(&mut ann, |f| players_say(f, "cy", Some(false))).await;
+    f.running.stop().await;
+}
+
 #[tokio::test]
 async fn limits_malformed_binary_oversize_and_flood() {
     let f = front("limits").await;

@@ -203,6 +203,10 @@ output is byte-identical for the same input.
   `Event::CommandRejected.by` carries it (events are never stored, so no state
   or hash change). The client outlines that route's entrance too, if its
   layout lists the route (else the text says "another route").
+- `View.players` (name → connected) lists everyone the game knows, in `Shared` so all players
+  get the same list: a holder whose socket dropped is `false` through the grace period, a
+  spectator who leaves is dropped. Sparse in deltas (`Delta.players`, null = forgotten), absent
+  from the JSON when empty (players-panel spec).
 - Views are built from sim state per player (`game::view::build_view`) — own area
   plus a fringe walked along the track to the first signal — and sent as deltas
   (`protocol::diff`, `View::apply`); a client that sees a `seq` gap resyncs.
@@ -358,6 +362,12 @@ output is byte-identical for the same input.
 - The side panel can be hidden (top bar: Hide panel / Show panel) or dragged to 240 pt, where the simplifier
   scrolls sideways, header and all; an untouched Fit follows the window's size, a view the player has panned or
   zoomed is left alone (polish spec H7).
+- Players panel (players-panel spec, 2026-10-19): `client_core::roster::Roster` (from the layout's
+  areas and the view alone) feeds the side panel's PLAYERS block (holder per area, presence disc,
+  robot square, Claim for a spectator, Watching list, count) and the owner strip along the top of
+  the diagram (`paint::owner_marks`: long text, else short, else none; `Scene::areas` gives each
+  area's stretch). The top bar keeps its `Players:` line only with the panel hidden or in a
+  tutorial. Setting `owners` (Area owners on diagram).
 - Zoom: ×1.2 a wheel notch, + and − buttons and keys ×1.25 (they count as moving the view; Fit clears that); signal
   glyphs grow with the zoom once the track is at its widest, up to twice their size (`paint::glyph`, a function of
   the zoom alone so placement never jumps; polish spec M11).

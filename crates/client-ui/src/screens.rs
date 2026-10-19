@@ -1255,15 +1255,13 @@ impl UiApp {
         paint::paint(&painter, d);
         // Who works which area, along the top (players panel spec); not in a
         // tutorial, and not on a layout of one area.
-        if self.settings.owners && g.lesson().is_none() {
-            if let Some(roster) = g.roster().filter(|r| r.areas.len() > 1) {
-                let tags = owner_tags(&roster);
-                let font = FontId::proportional(paint::OWNER_PX);
-                let marks = ui.ctx().fonts_mut(|f| {
-                    paint::owner_marks(scene, &cam, rect, &tags, &mut |t| f.layout_no_wrap(t.to_string(), font.clone(), Color32::WHITE).size().x)
-                });
-                paint::paint_owners(&painter, &marks);
-            }
+        if let Some(roster) = g.roster().filter(|r| r.areas.len() > 1 && self.settings.owners && g.lesson().is_none()) {
+            let tags = owner_tags(&roster);
+            let font = FontId::proportional(paint::OWNER_PX);
+            let marks = ui.ctx().fonts_mut(|f| {
+                paint::owner_marks(scene, &cam, rect, &tags, &mut |t| f.layout_no_wrap(t.to_string(), font.clone(), Color32::WHITE).size().x)
+            });
+            paint::paint_owners(&painter, &marks);
         }
         if !self.cam_moved {
             let hint = if scene.fit_is_partial(rect.shrink2(vec2(0.0, VIEW_BAND))) { VIEW_HINT_PARTIAL } else { VIEW_HINT };

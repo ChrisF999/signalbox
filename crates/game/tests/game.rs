@@ -708,7 +708,7 @@ fn presence_changes_reach_other_clients_as_deltas() {
     g.disconnect("alice");
     assert_eq!(step(&mut g, &mut bob, "alice drops"), map(&[("alice", false), ("bob", true), ("carol", true)]));
     g.connect("alice");
-    assert_eq!(step(&mut g, &mut bob, "alice returns")["alice"], true);
+    assert!(step(&mut g, &mut bob, "alice returns")["alice"]);
     g.disconnect("carol");
     assert_eq!(step(&mut g, &mut bob, "carol leaves"), map(&[("alice", true), ("bob", true)]));
 }
