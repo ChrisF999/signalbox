@@ -200,3 +200,13 @@ fn a_line_names_arrow_is_kept_as_a_unit_vector() {
     assert_eq!(down.arrow, Some(vec2(1.0, 0.0)));
     assert_eq!(sc.labels.iter().find(|l| l.text == "BAD").unwrap().arrow, None, "a nonsense arrow is dropped");
 }
+
+#[test]
+fn each_area_has_the_extent_of_its_own_track() {
+    let sc = Scene::build(&layout_for(None)).unwrap();
+    let spans: Vec<(&str, f32, f32)> = sc.areas.iter().map(|a| (a.area.as_str(), a.bounds.min.x, a.bounds.max.x)).collect();
+    assert_eq!(spans, [("West", 0.0, 200.0), ("East", 215.0, 400.0)], "layout order, drawn track only");
+    // A holder sees the neighbour's track too (as fringe), and it is the neighbour's.
+    let sc = Scene::build(&layout_for(Some("West"))).unwrap();
+    assert!(sc.areas.iter().any(|a| a.area == "West"));
+}

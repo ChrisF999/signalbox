@@ -136,6 +136,15 @@ pub const BOUNDARY_BERTH_OFFSET_PX: Vec2 = vec2(0.0, -18.0);
 /// How far (pixels) behind its signal, or inside its boundary, a berth sits.
 pub const BERTH_BACK_PX: f32 = 24.0;
 
+/// Where an area's drawn track lies (the players panel's owner strip names
+/// an area over its stretch of the diagram).
+#[derive(Clone, Debug, PartialEq)]
+pub struct AreaSpan {
+    pub area: String,
+    /// Bounds of the area's visible track, in layout coordinates.
+    pub bounds: Rect,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Scene {
     pub tracks: Vec<TrackLine>,
@@ -146,6 +155,8 @@ pub struct Scene {
     pub platforms: Vec<PlatformMark>,
     pub labels: Vec<LabelMark>,
     pub runs: Vec<Run>,
+    /// Each area that has visible track, in the layout's order.
+    pub areas: Vec<AreaSpan>,
     /// Bounds of your own area's drawing (`None` for a spectator).
     pub own: Option<Rect>,
     /// Bounds of everything drawn.
@@ -380,6 +391,17 @@ impl Scene {
         }
         for p in &sc.points {
             grow(&mut sc.all, p.at);
+        }
+        let area_of: BTreeMap<&str, &str> = l.sections.iter().map(|s| (s.name.as_str(), s.area.as_str())).collect();
+        for area in &l.areas {
+            let mut bounds = None;
+            for t in sc.tracks.iter().filter(|t| area_of.get(t.section.as_str()) == Some(&area.as_str())) {
+                grow(&mut bounds, t.a);
+                grow(&mut bounds, t.b);
+            }
+            if let Some(bounds) = bounds {
+                sc.areas.push(AreaSpan { area: area.clone(), bounds });
+            }
         }
         sc.focus = busiest(l, &sc);
         Some(sc)

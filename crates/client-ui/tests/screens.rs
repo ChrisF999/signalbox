@@ -212,7 +212,7 @@ fn deleting_a_game_asks_first() {
 fn the_game_screen_shows_bar_trains_alarms_and_the_fitted_diagram() {
     let mut r = Rig::in_game(drawn_twobox(), Some("West"));
     let out = r.frame();
-    for want in ["g-test · Workstation A · West (ann)", "07:00:0", "1×", "TRAINS", "ALARMS", "West: ann", "East: robot", "1E01", "Leave"] {
+    for want in ["g-test · Workstation A · West (ann)", "07:00:0", "1×", "TRAINS", "ALARMS", "PLAYERS", "1 player", "ann (you)", "robot", "East", "1E01", "Leave"] {
         assert!(has_text(&out, want), "{want} in {:?}", texts(&out));
     }
     let rect = r.ui.diagram_rect().unwrap();
@@ -457,7 +457,7 @@ fn settings_change_from_the_menu_and_are_kept() {
         click_text(&mut r, &out, item);
     }
     assert_eq!((r.ui.settings().aspects, r.ui.settings().numbers), (AspectMode::Real, false));
-    assert_eq!(store.text().as_deref(), Some("aspects=real\nenquiry=off\nnumbers=off\n"));
+    assert_eq!(store.text().as_deref(), Some("aspects=real\nenquiry=off\nnumbers=off\nowners=on\n"));
     let again = Rig::in_game_with(drawn_twobox(), Some("West"), Some(store));
     assert_eq!(again.ui.settings().aspects, AspectMode::Real, "a new page reads them back");
 }
@@ -527,13 +527,13 @@ fn a_headcode_in_the_train_list_opens_the_enquiry() {
     let out = r.frame();
     assert!(has_text(&out, "Train 1E01"), "{:?}", texts(&out));
     // Polish spec M7: labelled, with what the train does next, and opened
-    // beside the click, clear of the top bar's Players row.
+    // beside the click, clear of the top bar.
     for want in ["State", "Next", "arrive EST 1 at 07:04", "Runs", "EST to EST", "Place", "Plat", "07:04", "07:05"] {
         assert!(has_text(&out, want), "{want} in {:?}", texts(&out));
     }
     let win = r.ctx.memory(|m| m.area_rect(egui::Id::new("enquiry"))).unwrap();
-    let players = texts(&out).into_iter().find(|(t, _)| t == "Players:").unwrap().1;
-    assert!(win.min.y > players.max.y, "{win:?} below {players:?}");
+    let bar_bottom = r.ui.diagram_rect().unwrap().min.y;
+    assert!(win.min.y > bar_bottom, "{win:?} below the top bar ({bar_bottom})");
     assert!((win.min.y - at.y).abs() < 40.0, "{win:?} level with {at:?} (kept on screen sideways)");
 }
 
@@ -682,13 +682,13 @@ fn the_enquiry_toggles_from_the_menu_and_turning_it_off_closes_the_window() {
     let mut r = Rig::in_game_with(drawn_twobox(), Some("East"), Some(store.clone()));
     settings_item(&mut r, "Headcode enquiry");
     assert!(r.ui.settings().enquiry);
-    assert_eq!(store.text().as_deref(), Some("aspects=red_green\nenquiry=on\nnumbers=on\n"));
+    assert_eq!(store.text().as_deref(), Some("aspects=red_green\nenquiry=on\nnumbers=on\nowners=on\n"));
     open_1e01_from_the_train_list(&mut r);
     assert!(has_text(&r.frame(), "Train 1E01"));
     settings_item(&mut r, "Headcode enquiry");
     let out = r.frame();
     assert!(!has_text(&out, "Train 1E01") && r.ui.enquiry().is_none(), "{:?}", texts(&out));
-    assert_eq!(store.text().as_deref(), Some("aspects=red_green\nenquiry=off\nnumbers=on\n"));
+    assert_eq!(store.text().as_deref(), Some("aspects=red_green\nenquiry=off\nnumbers=on\nowners=on\n"));
 }
 
 #[test]
@@ -838,7 +838,14 @@ fn a_spectator_is_told_to_claim_an_area() {
     assert!(has_text(&out, "Signal") && has_text(&out, "watch"), "{:?}", texts(&out));
     let mut r = Rig::in_game(drawn_twobox(), None);
     let out = r.frame();
-    assert!(has_text(&out, "You are watching. Claim an area to signal:"));
+    assert!(has_text(&out, "You are watching. Claim an area in the players panel to signal."), "{:?}", texts(&out));
+    // With the panel hidden the top bar carries the claim buttons again.
+    click_text(&mut r, &out, "Hide panel");
+    let out = r.frame();
+    assert!(has_text(&out, "You are watching. Claim an area to signal:") && has_text(&out, "Players:"), "{:?}", texts(&out));
+    let out = r.frame();
+    click_text(&mut r, &out, "Show panel");
+    r.frame();
     let w1 = r.at(100.0, 0.0);
     r.click(w1, PointerButton::Primary);
     let out = r.frame();
@@ -1644,4 +1651,86 @@ fn the_signal_picker_goes_back_to_watch_when_the_layout_changes() {
         r.frame();
     }
     assert_eq!(r.ui.core.game().unwrap().area(), None, "nothing claimed");
+}
+
+// ---- the players panel and the owner strip (players-panel spec) ----
+
+/// A frame, and the texts on the side panel.
+fn side_now(r: &mut Rig) -> Vec<String> {
+    let out = r.frame();
+    side_texts(r, &out)
+}
+
+/// `name` joins the game as another player, holding `area` if given.
+fn another_player(r: &mut Rig, name: &str, area: Option<&str>) {
+    r.game.connect(name);
+    if let Some(a) = area {
+        r.game.handle(name, ClientMsg::Claim { area: a.to_string() });
+    }
+    r.frame();
+    r.frame();
+}
+
+#[test]
+fn the_players_panel_lists_holders_the_robot_and_those_watching() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    another_player(&mut r, "bob", None);
+    let out = r.frame();
+    let side = side_texts(&r, &out);
+    for want in ["PLAYERS", "2 players", "ann (you)", "robot", "East", "Watching:", "bob"] {
+        assert!(side.iter().any(|t| t == want), "{want} in {side:?}");
+    }
+    assert!(!side.iter().any(|t| t == "Claim"), "a holder does not claim: {side:?}");
+    another_player(&mut r, "cy", Some("East"));
+    let side = side_now(&mut r);
+    assert!(side.iter().any(|t| t == "3 players") && side.iter().any(|t| t == "cy"), "{side:?}");
+    assert!(!side.iter().any(|t| t == "robot"), "every area is held now: {side:?}");
+}
+
+#[test]
+fn a_holder_who_drops_shows_as_away_and_is_not_counted() {
+    let mut r = Rig::in_game(drawn_twobox(), Some("West"));
+    another_player(&mut r, "bob", Some("East"));
+    assert!(side_now(&mut r).iter().any(|t| t == "2 players"));
+    r.game.disconnect("bob");
+    r.frame();
+    let side = side_now(&mut r);
+    assert!(side.iter().any(|t| t == "bob away") && side.iter().any(|t| t == "1 player"), "{side:?}");
+    r.game.advance(game::game::GRACE_S + 1.0);
+    r.frame();
+    let side = side_now(&mut r);
+    assert!(side.iter().any(|t| t == "robot") && !side.iter().any(|t| t.contains("bob")), "the area went back: {side:?}");
+}
+
+#[test]
+fn a_spectator_claims_a_robot_area_from_the_panel() {
+    let mut r = Rig::in_game(drawn_twobox(), None);
+    let out = r.frame();
+    let claims: Vec<_> = texts(&out).into_iter().filter(|(t, _)| t == "Claim").collect();
+    assert_eq!(claims.len(), 2, "one per robot area: {:?}", texts(&out));
+    let side = side_texts(&r, &out);
+    assert!(side.iter().any(|t| t == "ann (you)"), "you are listed among those watching: {side:?}");
+    r.click(claims[0].1.center(), PointerButton::Primary);
+    r.frame();
+    assert!(r.game.area_of("ann").is_some(), "the claim reached the game");
+    let side = side_now(&mut r);
+    assert!(!side.iter().any(|t| t == "Claim"), "no more claims once you hold one: {side:?}");
+}
+
+#[test]
+fn the_diagram_names_each_areas_owner_and_the_setting_turns_it_off() {
+    // A spectator's Fit shows both areas; a holder's frames only their own.
+    let mut r = Rig::in_game(drawn_twobox(), None);
+    another_player(&mut r, "bob", Some("West"));
+    another_player(&mut r, "cy", Some("East"));
+    let rect = r.ui.diagram_rect().unwrap();
+    let on_diagram = |out: &FullOutput| -> Vec<String> {
+        texts(out).into_iter().filter(|(t, at)| t.contains(": ") && rect.contains(at.center())).map(|(t, _)| t).collect()
+    };
+    let out = r.frame();
+    let tags = on_diagram(&out);
+    assert!(tags.iter().any(|t| t == "A  West: bob") && tags.iter().any(|t| t == "B  East: cy"), "{tags:?}");
+    settings_item(&mut r, "Area owners on diagram");
+    let out = r.frame();
+    assert!(on_diagram(&out).is_empty() && !r.ui.settings().owners, "{:?}", on_diagram(&out));
 }

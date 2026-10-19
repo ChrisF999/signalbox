@@ -189,7 +189,7 @@ fn a_lesson_is_followed_through_the_lesson_box_and_the_diagram() {
         assert!(has_text(&out, want), "{want} in {:?}", texts(&out));
     }
     assert!(has_text(&out, "Tutorial · Hollins Cross (ann)"), "{:?}", texts(&out));
-    for gone in ["Penalty", "Release area", "Claim"] {
+    for gone in ["Penalty", "Release area", "Claim", "PLAYERS"] {
         assert!(!has_text(&out, gone), "{gone} is not offered in a lesson");
     }
     let next = find(&out, "Next");

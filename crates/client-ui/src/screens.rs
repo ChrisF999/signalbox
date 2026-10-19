@@ -8,6 +8,7 @@
 use std::time::Duration;
 
 use client_core::names::shown_headcode;
+use client_core::roster::{Holder, Person, Roster};
 use client_core::simplifier::{self, Line};
 use client_core::text::{fmt_hms, proposal_text, train_state_text, vote_text};
 use client_core::trains::train_list;
@@ -52,6 +53,71 @@ const CELL_GAP: f32 = 2.0;
 const SIDE_MIN_W: f32 = 240.0;
 /// The side panel's margins and a scroll bar, beside the simplifier.
 const SIDE_PAD: f32 = 24.0;
+
+/// A player's colour in the players panel and on the diagram: you in the
+/// headcode cyan, a dropped connection in the vote yellow, others white.
+pub fn person_colour(p: &Person) -> Color32 {
+    if p.away {
+        paint::YELLOW
+    } else if p.you {
+        paint::HEADCODE
+    } else {
+        paint::ROUTE
+    }
+}
+
+/// The diagram's owner tags for a roster: `A  West: ann (you)`, or without
+/// the area's name when that does not fit, `A: ann (you)`.
+pub fn owner_tags(roster: &Roster) -> Vec<paint::OwnerTag> {
+    roster
+        .areas
+        .iter()
+        .map(|row| {
+            let (who, colour) = match &row.holder {
+                Holder::Robot => ("robot".to_string(), paint::FRINGE),
+                Holder::Player(p) => (person_text(p), person_colour(p)),
+            };
+            let short = row.workstation.as_deref().unwrap_or(&row.area);
+            let long = match &row.workstation {
+                Some(w) => format!("{w}  {}: {who}", row.area),
+                None => format!("{}: {who}", row.area),
+            };
+            paint::OwnerTag { area: row.area.clone(), long, short: format!("{short}: {who}"), colour }
+        })
+        .collect()
+}
+
+/// A player's name as the panel writes it: `ann (you)`, `bob away`.
+pub fn person_text(p: &Person) -> String {
+    match (p.you, p.away) {
+        (true, true) => format!("{} (you) away", p.name),
+        (true, false) => format!("{} (you)", p.name),
+        (false, true) => format!("{} away", p.name),
+        (false, false) => p.name.clone(),
+    }
+}
+
+fn person_label(ui: &mut Ui, p: &Person) {
+    let r = ui.label(RichText::new(person_text(p)).color(person_colour(p)));
+    if p.away {
+        r.on_hover_text("Connection lost. They keep their area for up to two minutes.");
+    }
+}
+
+/// The marker before a holder: a disc for a player (hollow while their
+/// connection is down), a small square for the robot. Shapes, not glyphs.
+fn presence_dot(ui: &mut Ui, colour: Color32, robot: bool, away: bool) {
+    let (rect, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+    let c = rect.center();
+    if robot {
+        let r = Rect::from_center_size(c, vec2(6.0, 6.0));
+        ui.painter().rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.0, colour), StrokeKind::Middle);
+    } else if away {
+        ui.painter().circle_stroke(c, 4.0, Stroke::new(1.5, colour));
+    } else {
+        ui.painter().circle_filled(c, 4.0, colour);
+    }
+}
 
 /// The simplifier's columns with the Train column at least `train_w` wide
 /// (polish spec H3: Gretz's 8-character headcodes fit, not `W118...`).
@@ -576,6 +642,9 @@ impl UiApp {
         let mut confirm_release = self.confirm_release && holding;
         let mut refit = false;
         let mut side_open = self.side_open;
+        // The players panel lives in the side panel (never in a tutorial);
+        // without it the top bar keeps the short list of holders.
+        let players_panel = side_open && !lesson;
         let buttons = |ui: &mut Ui, act: &mut Vec<Box<dyn FnOnce(&mut App)>>, settings: &mut Settings, confirm_release: &mut bool, refit: &mut bool, side_open: &mut bool| {
                 if ui.button("Leave").clicked() {
                     act.push(Box::new(|a| a.leave()));
@@ -606,6 +675,7 @@ impl UiApp {
                     ui.separator();
                     ui.checkbox(&mut settings.enquiry, "Headcode enquiry");
                     ui.checkbox(&mut settings.numbers, "Signal numbers");
+                    ui.checkbox(&mut settings.owners, "Area owners on diagram");
                 });
                 mark(ui, &menu.response, marked("settings"), now);
                 // Polish spec H7: the panel can make way for the diagram.
@@ -681,10 +751,19 @@ impl UiApp {
                     // Polish spec H2: a spectator's clicks do nothing; say so where they look.
                     None if !holding && !lesson => {
                         let free = areas.iter().any(|a| view.as_ref().and_then(|v| v.holders.get(a)).is_none_or(|h| h == "robot"));
-                        let hint = if free { "You are watching. Claim an area to signal:" } else { "All areas are held; you are watching" };
+                        let hint = match (free, players_panel) {
+                            (true, true) => "You are watching. Claim an area in the players panel to signal.",
+                            (true, false) => "You are watching. Claim an area to signal:",
+                            (false, _) => "All areas are held; you are watching",
+                        };
                         ui.label(RichText::new(hint).color(paint::YELLOW));
                     }
                     None => {}
+                }
+                if players_panel {
+                    // Keep the row's height, so a vote appearing never moves the diagram (M5).
+                    ui.set_min_height(ui.spacing().interact_size.y);
+                    return;
                 }
                 ui.label("Players:");
                 for area in &areas {
@@ -725,6 +804,7 @@ impl UiApp {
     /// simplifier; below them the alarms, always in view.
     fn side(&mut self, ui: &mut Ui, now: f64) {
         self.lesson_box(ui);
+        self.players_ui(ui);
         let lit = self.highlights();
         ui.horizontal(|ui| {
             let trains = ui.selectable_value(&mut self.side_tab, SideTab::Trains, RichText::new("TRAINS").strong());
@@ -752,6 +832,57 @@ impl UiApp {
                 ui.label(if e.alarm { text.color(ALARM) } else { text });
             }
         });
+    }
+
+    /// The players panel (players-panel spec): each area with who works it
+    /// (a player, with a dot for their connection, or the robot), a Claim
+    /// button on the robot's areas while you watch, then who else is
+    /// watching. Not in a tutorial.
+    fn players_ui(&mut self, ui: &mut Ui) {
+        let Some(g) = self.core.game().filter(|g| g.lesson().is_none()) else { return };
+        let Some(roster) = g.roster() else { return };
+        let watching_you = g.area().is_none();
+        let mut claim: Option<String> = None;
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("PLAYERS").strong());
+            ui.label(RichText::new(roster.count_text()).color(paint::LABEL));
+        });
+        // Who first, then where; the area's name is last so it alone gives
+        // way (is cut short) in a narrow panel.
+        for row in &roster.areas {
+            ui.horizontal(|ui| {
+                let (colour, away) = match &row.holder {
+                    Holder::Robot => (paint::FRINGE, false),
+                    Holder::Player(p) => (person_colour(p), p.away),
+                };
+                presence_dot(ui, colour, matches!(row.holder, Holder::Robot), away);
+                if let Some(w) = &row.workstation {
+                    ui.label(RichText::new(w).monospace().color(paint::LABEL));
+                }
+                match &row.holder {
+                    Holder::Robot => {
+                        ui.label(RichText::new("robot").color(colour));
+                        if watching_you && ui.small_button("Claim").clicked() {
+                            claim = Some(row.area.clone());
+                        }
+                    }
+                    Holder::Player(p) => person_label(ui, p),
+                }
+                ui.add(egui::Label::new(RichText::new(&row.area).color(paint::LABEL)).truncate());
+            });
+        }
+        if !roster.watching.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("Watching:").color(paint::LABEL));
+                for p in &roster.watching {
+                    person_label(ui, p);
+                }
+            });
+        }
+        ui.separator();
+        if let Some(area) = claim {
+            self.core.claim(&area);
+        }
     }
 
     /// The lesson (tutorial spec §4; polish spec H4, H5): its title, then a
@@ -1122,6 +1253,18 @@ impl UiApp {
             None => d,
         };
         paint::paint(&painter, d);
+        // Who works which area, along the top (players panel spec); not in a
+        // tutorial, and not on a layout of one area.
+        if self.settings.owners && g.lesson().is_none() {
+            if let Some(roster) = g.roster().filter(|r| r.areas.len() > 1) {
+                let tags = owner_tags(&roster);
+                let font = FontId::proportional(paint::OWNER_PX);
+                let marks = ui.ctx().fonts_mut(|f| {
+                    paint::owner_marks(scene, &cam, rect, &tags, &mut |t| f.layout_no_wrap(t.to_string(), font.clone(), Color32::WHITE).size().x)
+                });
+                paint::paint_owners(&painter, &marks);
+            }
+        }
         if !self.cam_moved {
             let hint = if scene.fit_is_partial(rect.shrink2(vec2(0.0, VIEW_BAND))) { VIEW_HINT_PARTIAL } else { VIEW_HINT };
             painter.text(rect.left_bottom() + vec2(ZOOM_INSET, -ZOOM_INSET), Align2::LEFT_BOTTOM, hint, FontId::proportional(12.0), paint::LABEL);

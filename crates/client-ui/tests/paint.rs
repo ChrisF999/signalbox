@@ -1021,3 +1021,77 @@ fn highlight_underlays_come_before_every_stroke() {
     let first_stroke = d.shapes.iter().position(lit).expect("strokes");
     assert!(last_under < first_stroke, "underlay {last_under} after stroke {first_stroke}");
 }
+
+// ---- the owner strip (players panel spec) ----
+
+fn tag(area: &str, long: &str, short: &str) -> OwnerTag {
+    OwnerTag { area: area.to_string(), long: long.to_string(), short: short.to_string(), colour: Color32::WHITE }
+}
+
+/// 6 px a character.
+fn six(t: &str) -> f32 {
+    6.0 * t.chars().count() as f32
+}
+
+fn spans(list: &[(&str, f32, f32)]) -> Scene {
+    Scene {
+        areas: list
+            .iter()
+            .map(|(a, x0, x1)| client_ui::scene::AreaSpan { area: a.to_string(), bounds: Rect::from_min_max(pos2(*x0, 0.0), pos2(*x1, 10.0)) })
+            .collect(),
+        ..Scene::default()
+    }
+}
+
+fn unit_cam() -> Camera {
+    Camera { centre: pos2(500.0, 300.0), scale: 1.0 }
+}
+
+#[test]
+fn an_owner_tag_sits_over_its_areas_stretch_at_the_top() {
+    let sc = spans(&[("West", 100.0, 400.0), ("East", 450.0, 800.0)]);
+    let tags = [tag("West", "A  West: ann (you)", "A: ann (you)"), tag("East", "B  East: robot", "B: robot")];
+    let marks = owner_marks(&sc, &unit_cam(), screen(), &tags, &mut six);
+    assert_eq!(marks.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["A  West: ann (you)", "B  East: robot"]);
+    assert_eq!(marks[0].rule[0].x, 100.0, "the rule spans the stretch");
+    assert_eq!(marks[0].rule[1].x, 400.0);
+    assert!(marks[0].at.x > 100.0 && marks[0].at.y < 12.0, "{:?}", marks[0]);
+    assert_eq!(marks[0].at.y, marks[1].at.y, "side by side, one row");
+}
+
+#[test]
+fn a_narrow_stretch_takes_the_short_text_and_a_tiny_one_none() {
+    let tags = [tag("West", "A  West: ann (you)", "A: ann (you)")];
+    // 100 px: the long text is 108 px and does not fit; the short one (72) does.
+    let marks = owner_marks(&spans(&[("West", 100.0, 200.0)]), &unit_cam(), screen(), &tags, &mut six);
+    assert_eq!(marks[0].text, "A: ann (you)");
+    // 40 px: nothing fits, so nothing is drawn (the panel still says it all).
+    assert!(owner_marks(&spans(&[("West", 100.0, 140.0)]), &unit_cam(), screen(), &tags, &mut six).is_empty());
+}
+
+#[test]
+fn the_text_stays_on_screen_for_a_stretch_that_runs_off_it() {
+    let tags = [tag("West", "A  West: ann", "A: ann")];
+    // The stretch starts 300 px left of the screen and ends at 500 on it.
+    let marks = owner_marks(&spans(&[("West", -300.0, 500.0)]), &unit_cam(), screen(), &tags, &mut six);
+    assert_eq!(marks.len(), 1);
+    assert!(marks[0].rule[0].x >= 0.0 && marks[0].at.x >= 0.0, "{:?}", marks[0]);
+    // Off to the right of everything: nothing.
+    assert!(owner_marks(&spans(&[("West", 2000.0, 2400.0)]), &unit_cam(), screen(), &tags, &mut six).is_empty());
+}
+
+#[test]
+fn overlapping_stretches_take_rows_and_a_fourth_is_dropped() {
+    let sc = spans(&[("A", 100.0, 600.0), ("B", 120.0, 600.0), ("C", 140.0, 600.0), ("D", 160.0, 600.0)]);
+    let tags: Vec<OwnerTag> = ["A", "B", "C", "D"].iter().map(|n| tag(n, &format!("{n}: robot robot robot"), n)).collect();
+    let marks = owner_marks(&sc, &unit_cam(), screen(), &tags, &mut six);
+    assert_eq!(marks.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["A: robot robot robot", "B: robot robot robot", "C: robot robot robot"]);
+    assert!(marks[0].at.y < marks[1].at.y && marks[1].at.y < marks[2].at.y);
+}
+
+#[test]
+fn the_strip_keeps_clear_of_the_zoom_buttons() {
+    let tags = [tag("West", "A  West: ann", "A: ann")];
+    let marks = owner_marks(&spans(&[("West", 800.0, 1500.0)]), &unit_cam(), screen(), &tags, &mut six);
+    assert!(marks.iter().all(|m| m.rule[1].x <= 920.0), "{marks:?}");
+}

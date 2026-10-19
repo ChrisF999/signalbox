@@ -7,7 +7,7 @@
 //! or fonts); `paint` hands them to an egui `Painter`.
 
 use client_core::{AspectMode, Names};
-use egui::{Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, Vec2, vec2};
+use egui::{Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, Vec2, pos2, vec2};
 use protocol::{Aspect, ExitName, Held, Highlight, PointsPos, RouteState, SectionView, View};
 
 use crate::camera::Camera;
@@ -193,6 +193,83 @@ impl Drawing {
     fn movable_text(&mut self, t: TextItem, role: Role, alts: Vec<(Pos2, Align2)>, within: Option<Rect>) {
         self.movable.push(Movable { text: self.texts.len(), role, alts, within });
         self.texts.push(t);
+    }
+}
+
+/// An owner tag's text size, where it sits and how it is spaced (players panel
+/// spec): along the top of the diagram, over the area's stretch of track.
+pub const OWNER_PX: f32 = 11.0;
+const OWNER_TOP_PX: f32 = 6.0;
+const OWNER_ROW_PX: f32 = 18.0;
+const OWNER_ROWS: usize = 3;
+const OWNER_PAD_PX: f32 = 4.0;
+/// Keeps clear of the zoom buttons at the top right (see `screens::ZOOM_*`).
+const OWNER_RIGHT_CLEAR_PX: f32 = 80.0;
+
+/// What to say over an area: its long and short text and their colour.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OwnerTag {
+    pub area: String,
+    pub long: String,
+    pub short: String,
+    pub colour: Color32,
+}
+
+/// One owner tag placed on screen: the text's top left and the rule drawn
+/// under it across the area's visible stretch.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OwnerMark {
+    pub text: String,
+    pub at: Pos2,
+    pub colour: Color32,
+    pub rule: [Pos2; 2],
+}
+
+/// The owner tags that fit. Each area's stretch of track gives it a span of
+/// the screen's width; its long text is used when that fits, else its short
+/// one, else none (a zoomed-out view has no room, and the panel says it
+/// all). Tags whose spans overlap take the next row down, up to three.
+/// `measure` gives a text's width in pixels.
+pub fn owner_marks(scene: &Scene, cam: &Camera, screen: Rect, tags: &[OwnerTag], measure: &mut dyn FnMut(&str) -> f32) -> Vec<OwnerMark> {
+    let mut spans: Vec<(f32, f32, &OwnerTag)> = Vec::new();
+    for t in tags {
+        let Some(s) = scene.areas.iter().find(|s| s.area == t.area) else { continue };
+        let (a, b) = (cam.to_screen(screen, s.bounds.min).x, cam.to_screen(screen, s.bounds.max).x);
+        let (lo, hi) = (a.min(b).max(screen.left() + OWNER_PAD_PX), a.max(b).min(screen.right() - OWNER_RIGHT_CLEAR_PX));
+        if lo.is_finite() && hi.is_finite() && hi > lo {
+            spans.push((lo, hi, t));
+        }
+    }
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut row_end = [f32::NEG_INFINITY; OWNER_ROWS];
+    let mut out = Vec::new();
+    for (lo, hi, t) in spans {
+        let room = hi - lo - 2.0 * OWNER_PAD_PX;
+        let Some(text) = [&t.long, &t.short].into_iter().find(|s| measure(s) <= room) else { continue };
+        let w = measure(text);
+        let Some(row) = row_end.iter().position(|&end| lo >= end + OWNER_PAD_PX) else { continue };
+        row_end[row] = lo + w + 2.0 * OWNER_PAD_PX;
+        let y = screen.top() + OWNER_TOP_PX + row as f32 * OWNER_ROW_PX;
+        out.push(OwnerMark {
+            text: text.clone(),
+            at: pos2(lo + OWNER_PAD_PX, y),
+            colour: t.colour,
+            rule: [pos2(lo, y + OWNER_PX + 3.0), pos2(hi, y + OWNER_PX + 3.0)],
+        });
+    }
+    out
+}
+
+/// Draw the owner tags: a rule over the area's stretch and the text on a
+/// black knock-out, so track passing underneath never garbles it.
+pub fn paint_owners(p: &Painter, marks: &[OwnerMark]) {
+    let font = FontId::proportional(OWNER_PX);
+    for m in marks {
+        let galley = p.layout_no_wrap(m.text.clone(), font.clone(), m.colour);
+        let r = Rect::from_min_size(m.at, galley.size()).expand2(vec2(2.0, 1.0));
+        p.rect_filled(r, CornerRadius::ZERO, BG);
+        p.line_segment(m.rule, Stroke::new(1.0, m.colour.gamma_multiply(0.55)));
+        p.galley(m.at, galley, m.colour);
     }
 }
 
