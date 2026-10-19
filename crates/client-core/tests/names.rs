@@ -142,6 +142,7 @@ fn empty_view() -> View {
         paused: false,
         vote: None,
         holders: Default::default(),
+        players: Default::default(),
         score: None,
         signals: Default::default(),
         routes: Default::default(),

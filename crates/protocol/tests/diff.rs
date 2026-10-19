@@ -16,6 +16,7 @@ fn base() -> View {
         paused: false,
         vote: Some(VoteView { proposal: Proposal::Pause, agreed: vec![s("alice")], waiting: vec![], expires_in_s: 12 }),
         holders: BTreeMap::from([(s("East"), s("robot")), (s("West"), s("alice"))]),
+        players: BTreeMap::from([(s("alice"), true), (s("carol"), true)]),
         score: Some(0),
         signals: BTreeMap::from([(s("A"), Aspect::Red), (s("W1"), Aspect::Red)]),
         routes: BTreeMap::from([(s("W1-A"), RouteView { state: RouteState::Setting, auto_working: false })]),
@@ -42,6 +43,9 @@ fn changed() -> View {
     v.vote = None;
     v.score = Some(5);
     v.holders.insert(s("East"), s("bob"));
+    v.players.insert(s("alice"), false);
+    v.players.insert(s("bob"), true);
+    v.players.remove("carol");
     v.signals.insert(s("W1"), Aspect::Yellow);
     v.routes.insert(s("W1-A"), RouteView { state: RouteState::Locked, auto_working: true });
     v.routes.insert(s("A-E"), RouteView { state: RouteState::Cancelling, auto_working: false });
@@ -153,4 +157,18 @@ fn a_view_at_the_largest_seq_takes_no_delta() {
         assert_eq!(v.apply(&d), Err(SeqGap { have: u64::MAX, got: seq }));
     }
     assert_eq!(v, before);
+}
+
+#[test]
+fn a_players_change_is_a_sparse_delta_and_nothing_else_is_sent() {
+    let old = base();
+    let mut new = base();
+    new.seq = 2;
+    new.players.insert(s("alice"), false);
+    new.players.remove("carol");
+    let d = diff(&old, &new).expect("presence differs");
+    assert_eq!(d.players, BTreeMap::from([(s("alice"), Some(false)), (s("carol"), None)]));
+    assert_eq!(d, Delta { seq: 2, players: d.players.clone(), ..Delta::default() });
+    let wire = serde_json::to_value(&d).unwrap();
+    assert_eq!(wire, serde_json::json!({"seq": 2, "players": {"alice": false, "carol": null}}));
 }

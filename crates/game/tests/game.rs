@@ -647,3 +647,68 @@ fn agree_only_agrees_to_the_open_proposal() {
     let passed = Notice::VoteEnded { proposal: Proposal::Speed { x: 2 }, outcome: VoteOutcome::Passed };
     assert_eq!(notices(&g.flush(), "sam"), vec![passed]);
 }
+
+// ---- the players panel: who is in the game, and whether they are connected ----
+
+fn presence(g: &game::Game, viewer: &str) -> BTreeMap<String, bool> {
+    g.view_of(viewer).expect("viewer is connected").players
+}
+
+#[test]
+fn the_view_lists_every_player_and_whether_they_are_connected() {
+    let mut g = game();
+    join(&mut g, "alice", Some("West"));
+    join(&mut g, "carol", None);
+    let want = map(&[("alice", true), ("carol", true)]);
+    assert_eq!(presence(&g, "alice"), want);
+    assert_eq!(presence(&g, "carol"), want, "spectators see the same list");
+}
+
+#[test]
+fn a_holder_who_drops_shows_as_away_until_the_grace_ends_and_a_spectator_just_goes() {
+    let mut g = game();
+    join(&mut g, "alice", Some("West"));
+    join(&mut g, "bob", Some("East"));
+    join(&mut g, "carol", None);
+    g.disconnect("alice");
+    g.disconnect("carol");
+    assert_eq!(presence(&g, "bob"), map(&[("alice", false), ("bob", true)]));
+    g.advance(GRACE_S + 1.0);
+    assert_eq!(presence(&g, "bob"), map(&[("bob", true)]));
+    assert_eq!(g.holder("West"), None);
+}
+
+#[test]
+fn reconnecting_in_the_grace_period_shows_present_again() {
+    let mut g = game();
+    join(&mut g, "alice", Some("West"));
+    join(&mut g, "bob", Some("East"));
+    g.disconnect("alice");
+    g.connect("alice");
+    assert_eq!(presence(&g, "bob"), map(&[("alice", true), ("bob", true)]));
+}
+
+/// Presence rides the deltas: a client that applies them holds the server's
+/// list through arrivals, drops, returns and departures.
+#[test]
+fn presence_changes_reach_other_clients_as_deltas() {
+    let mut g = game();
+    let mut bob = Client::default();
+    bob.take(&join(&mut g, "bob", Some("East")), "bob");
+    g.flush();
+    let step = |g: &mut game::Game, bob: &mut Client, what: &str| {
+        let out = g.flush();
+        bob.take(&out, "bob");
+        assert_eq!(bob.view, g.view_of("bob"), "{what}");
+        bob.view.as_ref().unwrap().players.clone()
+    };
+    join(&mut g, "carol", None);
+    assert_eq!(step(&mut g, &mut bob, "carol joins"), map(&[("bob", true), ("carol", true)]));
+    join(&mut g, "alice", Some("West"));
+    g.disconnect("alice");
+    assert_eq!(step(&mut g, &mut bob, "alice drops"), map(&[("alice", false), ("bob", true), ("carol", true)]));
+    g.connect("alice");
+    assert_eq!(step(&mut g, &mut bob, "alice returns")["alice"], true);
+    g.disconnect("carol");
+    assert_eq!(step(&mut g, &mut bob, "carol leaves"), map(&[("alice", true), ("bob", true)]));
+}

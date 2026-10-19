@@ -23,6 +23,7 @@ fn view(seq: u64) -> ServerFrame {
         paused: false,
         vote: None,
         holders: BTreeMap::new(),
+        players: Default::default(),
         score: None,
         signals: BTreeMap::new(),
         routes: BTreeMap::new(),

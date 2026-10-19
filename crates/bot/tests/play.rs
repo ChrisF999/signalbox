@@ -65,6 +65,7 @@ async fn decide_runs_at_most_twice_a_second_whoever_calls_it() {
         paused: false,
         vote: None,
         holders: BTreeMap::new(),
+        players: Default::default(),
         score: Some(0),
         signals: names.iter().map(|n| (s(n), Aspect::Red)).collect(),
         routes: BTreeMap::new(),

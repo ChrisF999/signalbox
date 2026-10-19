@@ -21,6 +21,8 @@ pub struct Shared {
     pub vote: Option<VoteView>,
     /// Area → holder, or `"robot"`.
     pub holders: BTreeMap<String, String>,
+    /// Every known player → connected (the players panel).
+    pub players: BTreeMap<String, bool>,
 }
 
 pub fn build_view(sim: &Sim, vis: &Visibility, shared: &Shared, seq: u64) -> View {
@@ -80,6 +82,7 @@ pub fn build_view(sim: &Sim, vis: &Visibility, shared: &Shared, seq: u64) -> Vie
         paused: shared.paused,
         vote: shared.vote.clone(),
         holders: shared.holders.clone(),
+        players: shared.players.clone(),
         score: vis.area.map(|a| sim.scores().by_area[a.idx()]),
         signals,
         routes,

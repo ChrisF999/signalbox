@@ -15,6 +15,7 @@ fn view(seq: u64) -> View {
         paused: false,
         vote: None,
         holders: BTreeMap::new(),
+        players: Default::default(),
         score: None,
         signals: BTreeMap::from([("A".to_string(), Aspect::Red)]),
         routes: BTreeMap::new(),

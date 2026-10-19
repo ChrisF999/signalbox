@@ -241,6 +241,7 @@ fn empty_view() -> View {
         paused: false,
         vote: None,
         holders: BTreeMap::new(),
+        players: Default::default(),
         score: Some(0),
         signals: BTreeMap::new(),
         routes: BTreeMap::new(),

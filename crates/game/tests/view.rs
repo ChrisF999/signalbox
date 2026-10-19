@@ -36,6 +36,7 @@ impl Rig {
             paused: false,
             vote: None,
             holders: map(&[("East", "robot".to_string()), ("West", "alice".to_string())]),
+            players: Default::default(),
         };
         build_view(&self.sim, vis, &shared, 4)
     }

@@ -221,6 +221,13 @@ pub struct View {
     pub vote: Option<VoteView>,
     /// Area → holding player, or `"robot"`.
     pub holders: BTreeMap<String, String>,
+    /// Every player the game knows, with whether their connection is up:
+    /// holders (a holder who dropped keeps the area through the grace
+    /// period and shows `false`) and the connected spectators. Absent in
+    /// games from before the players panel (then empty: a client treats a
+    /// holder as present).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub players: BTreeMap<String, bool>,
     /// Your area's penalty points; `None` for a spectator.
     pub score: Option<i64>,
     pub signals: BTreeMap<String, Aspect>,
@@ -331,6 +338,10 @@ pub struct Delta {
     pub score: Option<Option<i64>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub holders: BTreeMap<String, String>,
+    /// `Some(up)` for a player who appeared or whose connection changed;
+    /// `None` for one the game forgot.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub players: BTreeMap<String, Option<bool>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub signals: BTreeMap<String, Aspect>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]

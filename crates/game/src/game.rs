@@ -622,6 +622,7 @@ impl Game {
                 .zip(&self.holders)
                 .map(|(a, h)| (a.name.clone(), h.clone().unwrap_or_else(|| ROBOT.to_string())))
                 .collect(),
+            players: self.players.iter().map(|(n, p)| (n.clone(), p.connected)).collect(),
         }
     }
 

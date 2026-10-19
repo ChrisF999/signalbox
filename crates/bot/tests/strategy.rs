@@ -58,6 +58,7 @@ fn view(t: f64, reds: &[&str], berths: &[(&str, &str)]) -> View {
         paused: false,
         vote: None,
         holders: BTreeMap::new(),
+        players: Default::default(),
         score: Some(0),
         signals: reds.iter().map(|r| (s(r), Aspect::Red)).collect(),
         routes: BTreeMap::new(),

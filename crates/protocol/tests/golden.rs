@@ -295,6 +295,29 @@ fn a_layout_or_view_from_before_d1_still_reads() {
     });
     let ServerMsg::View(v) = serde_json::from_value(view).unwrap() else { panic!() };
     assert!(v.trains.is_empty());
+    assert!(v.players.is_empty(), "a view from before the players panel has no presence list");
+}
+
+#[test]
+fn a_view_without_players_does_not_send_the_field() {
+    let json = serde_json::to_value(ServerMsg::View(View {
+        seq: 1,
+        sim_time: 0.0,
+        speed: 1,
+        paused: false,
+        vote: None,
+        holders: BTreeMap::new(),
+        players: BTreeMap::new(),
+        score: None,
+        signals: BTreeMap::new(),
+        routes: BTreeMap::new(),
+        points: BTreeMap::new(),
+        sections: BTreeMap::new(),
+        berths: BTreeMap::new(),
+        trains: BTreeMap::new(),
+    }))
+    .unwrap();
+    assert!(json.get("players").is_none(), "{json}");
 }
 
 #[test]
@@ -306,6 +329,7 @@ fn view() {
         paused: false,
         vote: Some(VoteView { proposal: Proposal::Pause, agreed: vec![s("alice")], waiting: vec![], expires_in_s: 30 }),
         holders: BTreeMap::from([(s("East"), s("robot")), (s("West"), s("alice"))]),
+        players: BTreeMap::from([(s("alice"), true), (s("bob"), false)]),
         score: Some(5),
         signals: BTreeMap::from([(s("A"), Aspect::DoubleYellow)]),
         routes: BTreeMap::from([(s("A-E"), RouteView { state: RouteState::Locked, auto_working: false })]),
@@ -336,7 +360,7 @@ fn view() {
         json!({
             "type": "view", "seq": 7, "sim_time": 25215.5, "speed": 8, "paused": false,
             "vote": {"proposal": {"kind": "pause"}, "agreed": ["alice"], "expires_in_s": 30},
-            "holders": {"East": "robot", "West": "alice"}, "score": 5,
+            "holders": {"East": "robot", "West": "alice"}, "players": {"alice": true, "bob": false}, "score": 5,
             "signals": {"A": "double_yellow"},
             "routes": {"A-E": {"state": "locked", "auto_working": false}},
             "points": {"P": {"position": "normal", "moving": false, "locked": true}},

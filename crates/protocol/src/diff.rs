@@ -32,6 +32,7 @@ pub fn diff(old: &View, new: &View) -> Option<Delta> {
         d.score = Some(new.score);
     }
     d.holders = changed(&old.holders, &new.holders);
+    d.players = sparse(&old.players, &new.players);
     d.signals = changed(&old.signals, &new.signals);
     d.points = changed(&old.points, &new.points);
     d.sections = changed(&old.sections, &new.sections);
@@ -81,6 +82,16 @@ impl View {
             self.score = s;
         }
         self.holders.extend(d.holders.iter().map(|(k, v)| (k.clone(), v.clone())));
+        for (k, v) in &d.players {
+            match v {
+                Some(up) => {
+                    self.players.insert(k.clone(), *up);
+                }
+                None => {
+                    self.players.remove(k);
+                }
+            }
+        }
         self.signals.extend(d.signals.iter().map(|(k, v)| (k.clone(), *v)));
         self.points.extend(d.points.iter().map(|(k, v)| (k.clone(), *v)));
         self.sections.extend(d.sections.iter().map(|(k, v)| (k.clone(), *v)));
