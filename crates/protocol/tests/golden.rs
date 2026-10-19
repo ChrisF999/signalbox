@@ -502,3 +502,22 @@ fn a_lesson_without_highlights_still_reads_and_junk_is_an_error() {
                      "highlight": [{"teleport": "3"}], "needs_next": true, "done": false});
     assert!(serde_json::from_value::<ServerMsg>(bad).is_err());
 }
+
+/// A client built before the players list reads a new server's view: the
+/// extra field is ignored, not an error.
+#[test]
+fn an_old_shaped_view_reads_a_view_with_players() {
+    #[derive(serde::Deserialize, Debug)]
+    struct OldView {
+        seq: u64,
+        holders: BTreeMap<String, String>,
+        score: Option<i64>,
+    }
+    let json = json!({
+        "type": "view", "seq": 4, "sim_time": 0.0, "speed": 1, "paused": false, "vote": null,
+        "holders": {"West": "alice"}, "players": {"alice": true, "bob": false}, "score": null,
+        "signals": {}, "routes": {}, "points": {}, "sections": {}, "berths": {}
+    });
+    let old: OldView = serde_json::from_value(json).unwrap();
+    assert_eq!((old.seq, old.holders.len(), old.score), (4, 1, None));
+}
