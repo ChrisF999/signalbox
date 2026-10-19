@@ -66,6 +66,9 @@ pub fn person_colour(p: &Person) -> Color32 {
     }
 }
 
+/// What the owner strip's marks were laid out from.
+type OwnerKey = (Roster, [u32; 3], [u32; 4], Vec<[u32; 4]>);
+
 /// The diagram's owner tags for a roster: `A  West: ann (you)`, or without
 /// the area's name when that does not fit, `A: ann (you)`.
 pub fn owner_tags(roster: &Roster) -> Vec<paint::OwnerTag> {
@@ -75,7 +78,9 @@ pub fn owner_tags(roster: &Roster) -> Vec<paint::OwnerTag> {
         .map(|row| {
             let (who, colour) = match &row.holder {
                 Holder::Robot => ("robot".to_string(), paint::FRINGE),
-                Holder::Player(p) => (person_text(p), person_colour(p)),
+                // Away shows by colour only here: the word would widen the tag until
+                // a neighbour's short stretch no longer holds it.
+                Holder::Player(p) => (if p.you { format!("{} (you)", p.name) } else { p.name.clone() }, person_colour(p)),
             };
             let short = row.workstation.as_deref().unwrap_or(&row.area);
             let long = match &row.workstation {
@@ -235,6 +240,13 @@ pub struct UiApp {
     /// Where the diagram's texts go, for (game, layout generation, scale
     /// bits, numbers on): made again only on a zoom or a settings change.
     placement: Option<(PlacementKey, Plan)>,
+    /// The players panel's data, built once a frame (`game`) for the panel
+    /// and the owner strip; `None` before a layout and view, and in a tutorial.
+    roster: Option<Roster>,
+    /// The owner strip's marks for what they were laid out from: made again
+    /// only when the roster, the camera, the diagram's rectangle or what the
+    /// strip must keep clear of change.
+    owner_marks: Option<(OwnerKey, Vec<paint::OwnerMark>)>,
     /// The simplifier line to scroll to once, set when its lines are built.
     simplifier_scroll: Option<usize>,
     /// The lessons completed in this browser.
@@ -277,6 +289,8 @@ impl UiApp {
             side_open: true,
             simplifier_lines: None,
             placement: None,
+            roster: None,
+            owner_marks: None,
             simplifier_scroll: None,
             ticks: LessonTicks::default(),
             ticks_store: None,
@@ -585,6 +599,7 @@ impl UiApp {
     }
 
     fn game(&mut self, ui: &mut Ui, now: f64) {
+        self.roster = self.core.game().filter(|g| g.lesson().is_none()).and_then(|g| g.roster());
         self.top_bar(ui, now);
         // The panel starts as wide as the simplifier for the longest headcode it
         // shows (polish spec H3, U3); keyed by that width, so it resets when the
@@ -840,7 +855,7 @@ impl UiApp {
     /// watching. Not in a tutorial.
     fn players_ui(&mut self, ui: &mut Ui) {
         let Some(g) = self.core.game().filter(|g| g.lesson().is_none()) else { return };
-        let Some(roster) = g.roster() else { return };
+        let Some(roster) = self.roster.clone() else { return };
         let watching_you = g.area().is_none();
         let mut claim: Option<String> = None;
         ui.horizontal(|ui| {
@@ -1252,16 +1267,36 @@ impl UiApp {
             Some((_, plan)) => labels::apply(d, plan),
             None => d,
         };
-        paint::paint(&painter, d);
         // Who works which area, along the top (players panel spec); not in a
-        // tutorial, and not on a layout of one area.
-        if let Some(roster) = g.roster().filter(|r| r.areas.len() > 1 && self.settings.owners && g.lesson().is_none()) {
-            let tags = owner_tags(&roster);
-            let font = FontId::proportional(paint::OWNER_PX);
-            let marks = ui.ctx().fonts_mut(|f| {
-                paint::owner_marks(scene, &cam, rect, &tags, &mut |t| f.layout_no_wrap(t.to_string(), font.clone(), Color32::WHITE).size().x)
-            });
-            paint::paint_owners(&painter, &marks);
+        // tutorial, and not on a layout of one area. After the label plan, so
+        // it keeps clear of what that placed (and is made again only when
+        // something it depends on changes).
+        let bits = |r: Rect| [r.min.x.to_bits(), r.min.y.to_bits(), r.max.x.to_bits(), r.max.y.to_bits()];
+        match self.roster.as_ref().filter(|r| r.areas.len() > 1 && self.settings.owners) {
+            Some(roster) => {
+                let font = FontId::proportional(paint::OWNER_PX);
+                let size = |t: &paint::TextItem, ctx: &egui::Context| {
+                    let f = paint::font(t);
+                    let s = ctx.fonts_mut(|fx| fx.layout_no_wrap(t.text.clone(), f, t.colour).size());
+                    Rect::from_min_size(t.anchor.anchor_size(t.at, s).min, s)
+                };
+                let ctx = ui.ctx().clone();
+                let mut avoid: Vec<Rect> = d.keep.boxes.clone();
+                avoid.extend(d.texts.iter().map(|t| size(t, &ctx)));
+                let key = (roster.clone(), [cam.centre.x.to_bits(), cam.centre.y.to_bits(), cam.scale.to_bits()], bits(rect), avoid.iter().map(|r| bits(*r)).collect());
+                if self.owner_marks.as_ref().is_none_or(|(k, _)| *k != key) {
+                    let tags = owner_tags(roster);
+                    let marks = ctx.fonts_mut(|f| {
+                        paint::owner_marks(scene, &cam, rect, &tags, &avoid, &mut |t| f.layout_no_wrap(t.to_string(), font.clone(), Color32::WHITE).size().x)
+                    });
+                    self.owner_marks = Some((key, marks));
+                }
+            }
+            None => self.owner_marks = None,
+        }
+        paint::paint(&painter, d);
+        if let Some((_, marks)) = &self.owner_marks {
+            paint::paint_owners(&painter, marks);
         }
         if !self.cam_moved {
             let hint = if scene.fit_is_partial(rect.shrink2(vec2(0.0, VIEW_BAND))) { VIEW_HINT_PARTIAL } else { VIEW_HINT };

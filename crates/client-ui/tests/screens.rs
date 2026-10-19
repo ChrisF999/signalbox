@@ -1730,6 +1730,13 @@ fn the_diagram_names_each_areas_owner_and_the_setting_turns_it_off() {
     let out = r.frame();
     let tags = on_diagram(&out);
     assert!(tags.iter().any(|t| t == "A  West: bob") && tags.iter().any(|t| t == "B  East: cy"), "{tags:?}");
+    // Away shows by colour on the diagram: the tag keeps its width (the panel says the word).
+    r.game.disconnect("cy");
+    r.frame();
+    let tags = on_diagram(&r.frame());
+    assert!(tags.iter().any(|t| t == "B  East: cy"), "{tags:?}");
+    r.game.connect("cy");
+    r.frame();
     settings_item(&mut r, "Area owners on diagram");
     let out = r.frame();
     assert!(on_diagram(&out).is_empty() && !r.ui.settings().owners, "{:?}", on_diagram(&out));

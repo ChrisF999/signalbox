@@ -201,7 +201,7 @@ impl Drawing {
 pub const OWNER_PX: f32 = 11.0;
 const OWNER_TOP_PX: f32 = 6.0;
 const OWNER_ROW_PX: f32 = 18.0;
-const OWNER_ROWS: usize = 3;
+const OWNER_ROWS: usize = 2;
 const OWNER_PAD_PX: f32 = 4.0;
 /// Keeps clear of the zoom buttons at the top right (see `screens::ZOOM_*`).
 const OWNER_RIGHT_CLEAR_PX: f32 = 80.0;
@@ -223,14 +223,25 @@ pub struct OwnerMark {
     pub at: Pos2,
     pub colour: Color32,
     pub rule: [Pos2; 2],
+    /// The text's box on screen (what it must not cover).
+    pub bounds: Rect,
 }
 
 /// The owner tags that fit. Each area's stretch of track gives it a span of
 /// the screen's width; its long text is used when that fits, else its short
 /// one, else none (a zoomed-out view has no room, and the panel says it
-/// all). Tags whose spans overlap take the next row down, up to three.
-/// `measure` gives a text's width in pixels.
-pub fn owner_marks(scene: &Scene, cam: &Camera, screen: Rect, tags: &[OwnerTag], measure: &mut dyn FnMut(&str) -> f32) -> Vec<OwnerMark> {
+/// all). Tags whose rules would overlap take the next row down; there are two
+/// rows, both inside the band Fit keeps clear at the top, and a tag whose
+/// text would cover anything in `avoid` (berth boxes, headcodes, labels) goes
+/// to the other row or is left out. `measure` gives a text's width in pixels.
+pub fn owner_marks(
+    scene: &Scene,
+    cam: &Camera,
+    screen: Rect,
+    tags: &[OwnerTag],
+    avoid: &[Rect],
+    measure: &mut dyn FnMut(&str) -> f32,
+) -> Vec<OwnerMark> {
     let mut spans: Vec<(f32, f32, &OwnerTag)> = Vec::new();
     for t in tags {
         let Some(s) = scene.areas.iter().find(|s| s.area == t.area) else { continue };
@@ -247,15 +258,19 @@ pub fn owner_marks(scene: &Scene, cam: &Camera, screen: Rect, tags: &[OwnerTag],
         let room = hi - lo - 2.0 * OWNER_PAD_PX;
         let Some(text) = [&t.long, &t.short].into_iter().find(|s| measure(s) <= room) else { continue };
         let w = measure(text);
-        let Some(row) = row_end.iter().position(|&end| lo >= end + OWNER_PAD_PX) else { continue };
-        row_end[row] = lo + w + 2.0 * OWNER_PAD_PX;
-        let y = screen.top() + OWNER_TOP_PX + row as f32 * OWNER_ROW_PX;
-        out.push(OwnerMark {
-            text: text.clone(),
-            at: pos2(lo + OWNER_PAD_PX, y),
-            colour: t.colour,
-            rule: [pos2(lo, y + OWNER_PX + 3.0), pos2(hi, y + OWNER_PX + 3.0)],
-        });
+        let place = |row: usize| {
+            let y = screen.top() + OWNER_TOP_PX + row as f32 * OWNER_ROW_PX;
+            let at = pos2(lo + OWNER_PAD_PX, y);
+            (at, Rect::from_min_size(at, vec2(w, OWNER_PX + 2.0)).expand2(vec2(2.0, 1.0)), y)
+        };
+        // A row is free when the rules already in it end before this one starts.
+        let Some((row, (at, bounds, y))) =
+            (0..OWNER_ROWS).map(|r| (r, place(r))).find(|(r, (_, b, _))| lo >= row_end[*r] + OWNER_PAD_PX && !avoid.iter().any(|a| a.intersects(*b)))
+        else {
+            continue;
+        };
+        row_end[row] = hi;
+        out.push(OwnerMark { text: text.clone(), at, colour: t.colour, rule: [pos2(lo, y + OWNER_PX + 3.0), pos2(hi, y + OWNER_PX + 3.0)], bounds });
     }
     out
 }

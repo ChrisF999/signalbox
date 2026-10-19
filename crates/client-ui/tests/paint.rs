@@ -1051,7 +1051,7 @@ fn unit_cam() -> Camera {
 fn an_owner_tag_sits_over_its_areas_stretch_at_the_top() {
     let sc = spans(&[("West", 100.0, 400.0), ("East", 450.0, 800.0)]);
     let tags = [tag("West", "A  West: ann (you)", "A: ann (you)"), tag("East", "B  East: robot", "B: robot")];
-    let marks = owner_marks(&sc, &unit_cam(), screen(), &tags, &mut six);
+    let marks = owner_marks(&sc, &unit_cam(), screen(), &tags, &[], &mut six);
     assert_eq!(marks.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["A  West: ann (you)", "B  East: robot"]);
     assert_eq!(marks[0].rule[0].x, 100.0, "the rule spans the stretch");
     assert_eq!(marks[0].rule[1].x, 400.0);
@@ -1063,35 +1063,69 @@ fn an_owner_tag_sits_over_its_areas_stretch_at_the_top() {
 fn a_narrow_stretch_takes_the_short_text_and_a_tiny_one_none() {
     let tags = [tag("West", "A  West: ann (you)", "A: ann (you)")];
     // 100 px: the long text is 108 px and does not fit; the short one (72) does.
-    let marks = owner_marks(&spans(&[("West", 100.0, 200.0)]), &unit_cam(), screen(), &tags, &mut six);
+    let marks = owner_marks(&spans(&[("West", 100.0, 200.0)]), &unit_cam(), screen(), &tags, &[], &mut six);
     assert_eq!(marks[0].text, "A: ann (you)");
     // 40 px: nothing fits, so nothing is drawn (the panel still says it all).
-    assert!(owner_marks(&spans(&[("West", 100.0, 140.0)]), &unit_cam(), screen(), &tags, &mut six).is_empty());
+    assert!(owner_marks(&spans(&[("West", 100.0, 140.0)]), &unit_cam(), screen(), &tags, &[], &mut six).is_empty());
 }
 
 #[test]
 fn the_text_stays_on_screen_for_a_stretch_that_runs_off_it() {
     let tags = [tag("West", "A  West: ann", "A: ann")];
     // The stretch starts 300 px left of the screen and ends at 500 on it.
-    let marks = owner_marks(&spans(&[("West", -300.0, 500.0)]), &unit_cam(), screen(), &tags, &mut six);
+    let marks = owner_marks(&spans(&[("West", -300.0, 500.0)]), &unit_cam(), screen(), &tags, &[], &mut six);
     assert_eq!(marks.len(), 1);
     assert!(marks[0].rule[0].x >= 0.0 && marks[0].at.x >= 0.0, "{:?}", marks[0]);
     // Off to the right of everything: nothing.
-    assert!(owner_marks(&spans(&[("West", 2000.0, 2400.0)]), &unit_cam(), screen(), &tags, &mut six).is_empty());
+    assert!(owner_marks(&spans(&[("West", 2000.0, 2400.0)]), &unit_cam(), screen(), &tags, &[], &mut six).is_empty());
 }
 
 #[test]
-fn overlapping_stretches_take_rows_and_a_fourth_is_dropped() {
+fn overlapping_stretches_take_two_rows_and_a_third_is_dropped() {
     let sc = spans(&[("A", 100.0, 600.0), ("B", 120.0, 600.0), ("C", 140.0, 600.0), ("D", 160.0, 600.0)]);
     let tags: Vec<OwnerTag> = ["A", "B", "C", "D"].iter().map(|n| tag(n, &format!("{n}: robot robot robot"), n)).collect();
-    let marks = owner_marks(&sc, &unit_cam(), screen(), &tags, &mut six);
-    assert_eq!(marks.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["A: robot robot robot", "B: robot robot robot", "C: robot robot robot"]);
-    assert!(marks[0].at.y < marks[1].at.y && marks[1].at.y < marks[2].at.y);
+    let marks = owner_marks(&sc, &unit_cam(), screen(), &tags, &[], &mut six);
+    assert_eq!(marks.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["A: robot robot robot", "B: robot robot robot"]);
+    assert!(marks[0].at.y < marks[1].at.y);
 }
 
 #[test]
 fn the_strip_keeps_clear_of_the_zoom_buttons() {
     let tags = [tag("West", "A  West: ann", "A: ann")];
-    let marks = owner_marks(&spans(&[("West", 800.0, 1500.0)]), &unit_cam(), screen(), &tags, &mut six);
+    let marks = owner_marks(&spans(&[("West", 800.0, 1500.0)]), &unit_cam(), screen(), &tags, &[], &mut six);
     assert!(marks.iter().all(|m| m.rule[1].x <= 920.0), "{marks:?}");
+}
+
+#[test]
+fn a_row_is_busy_to_the_end_of_the_rule_not_the_text() {
+    // A's rule runs 100 to 400 under a short text; B starts at 200, well past A's text but
+    // inside its rule, so B must take the next row.
+    let sc = spans(&[("A", 100.0, 400.0), ("B", 200.0, 600.0), ("C", 450.0, 700.0)]);
+    let tags = [tag("A", "A: x", "A"), tag("B", "B: y", "B"), tag("C", "C: z", "C")];
+    let marks = owner_marks(&sc, &unit_cam(), screen(), &tags, &[], &mut six);
+    let row = |t: &str| marks.iter().find(|m| m.text == t).map(|m| m.at.y).unwrap();
+    assert!(row("A: x") < row("B: y"), "{marks:?}");
+    assert_eq!(row("A: x"), row("C: z"), "C starts after A's rule ends, so it is back on the first row");
+    for (i, a) in marks.iter().enumerate() {
+        for b in &marks[i + 1..] {
+            let same_row = a.at.y == b.at.y;
+            let overlap = a.rule[0].x < b.rule[1].x && b.rule[0].x < a.rule[1].x;
+            assert!(!(same_row && overlap), "rules overlap in a row: {a:?} {b:?}");
+        }
+    }
+}
+
+#[test]
+fn marks_stay_in_the_band_fit_keeps_clear_and_off_anything_to_avoid() {
+    let sc = spans(&[("A", 100.0, 600.0), ("B", 120.0, 600.0), ("C", 140.0, 600.0)]);
+    let tags: Vec<OwnerTag> = ["A", "B", "C"].iter().map(|n| tag(n, &format!("{n}: robot"), n)).collect();
+    let free = owner_marks(&sc, &unit_cam(), screen(), &tags, &[], &mut six);
+    assert!(free.len() == 2 && free.iter().all(|m| m.bounds.max.y <= client_ui::screens::VIEW_BAND && m.rule[0].y < client_ui::screens::VIEW_BAND), "{free:?}");
+    // A headcode box over the first row's text: that row is no good, so A takes the second row.
+    let berth = Rect::from_min_size(free[0].bounds.min, vec2(30.0, 12.0));
+    let moved = owner_marks(&sc, &unit_cam(), screen(), &tags, &[berth], &mut six);
+    assert!(moved.iter().all(|m| !m.bounds.intersects(berth)), "{moved:?}");
+    // Covering both rows leaves the tag out altogether.
+    let both = Rect::from_min_max(pos2(0.0, 0.0), pos2(1000.0, 60.0));
+    assert!(owner_marks(&sc, &unit_cam(), screen(), &tags, &[both], &mut six).is_empty());
 }
