@@ -94,6 +94,13 @@ impl InGame {
         self.bot.view()
     }
 
+    /// Who works each area and who is watching (the players panel); `None`
+    /// before the first layout and view.
+    pub fn roster(&self) -> Option<crate::roster::Roster> {
+        let (l, v) = (self.layout()?, self.view()?);
+        Some(crate::roster::Roster::new(&l.areas, &l.workstations, v, &self.you))
+    }
+
     /// Bumped by every layout received: redraw caches keyed on it.
     pub fn layout_gen(&self) -> u64 {
         self.layout_gen

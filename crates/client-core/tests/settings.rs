@@ -5,7 +5,7 @@ use client_core::{AspectMode, MemStore, Settings, SettingsStore};
 #[test]
 fn the_defaults_are_the_real_panel() {
     let d = Settings::default();
-    assert_eq!((d.aspects, d.enquiry, d.numbers), (AspectMode::RedGreen, false, true));
+    assert_eq!((d.aspects, d.enquiry, d.numbers, d.owners), (AspectMode::RedGreen, false, true, true));
 }
 
 #[test]
@@ -14,12 +14,17 @@ fn settings_survive_their_text() {
     for aspects in all {
         for enquiry in [false, true] {
             for numbers in [false, true] {
-                let s = Settings { aspects, enquiry, numbers };
-                assert_eq!(Settings::from_text(&s.to_text()), s, "{}", s.to_text());
+                for owners in [false, true] {
+                    let s = Settings { aspects, enquiry, numbers, owners };
+                    assert_eq!(Settings::from_text(&s.to_text()), s, "{}", s.to_text());
+                }
             }
         }
     }
-    assert_eq!(Settings { aspects: AspectMode::Real, enquiry: true, numbers: false }.to_text(), "aspects=real\nenquiry=on\nnumbers=off\n");
+    assert_eq!(
+        Settings { aspects: AspectMode::Real, enquiry: true, numbers: false, owners: false }.to_text(),
+        "aspects=real\nenquiry=on\nnumbers=off\nowners=off\n"
+    );
 }
 
 #[test]
@@ -39,4 +44,10 @@ fn a_mem_store_is_shared_by_its_clones() {
     writer.save("numbers=off\n");
     assert_eq!(store.text().as_deref(), Some("numbers=off\n"));
     assert_eq!(client_core::settings::SETTINGS_KEY, "signalbox.settings");
+}
+
+#[test]
+fn settings_stored_before_the_owners_toggle_keep_it_on() {
+    let old = Settings::from_text("aspects=real\nenquiry=on\nnumbers=off\n");
+    assert_eq!(old, Settings { aspects: AspectMode::Real, enquiry: true, numbers: false, owners: true });
 }

@@ -24,11 +24,14 @@ pub struct Settings {
     pub enquiry: bool,
     /// Signal numbers beside every signal.
     pub numbers: bool,
+    /// Each area's name and holder along the top of the diagram (players
+    /// panel spec). Off for a bare panel.
+    pub owners: bool,
 }
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { aspects: AspectMode::RedGreen, enquiry: false, numbers: true }
+        Settings { aspects: AspectMode::RedGreen, enquiry: false, numbers: true, owners: true }
     }
 }
 
@@ -42,7 +45,7 @@ impl Settings {
             AspectMode::RedGreen => "red_green",
             AspectMode::Real => "real",
         };
-        format!("aspects={aspects}\nenquiry={}\nnumbers={}\n", on_off(self.enquiry), on_off(self.numbers))
+        format!("aspects={aspects}\nenquiry={}\nnumbers={}\nowners={}\n", on_off(self.enquiry), on_off(self.numbers), on_off(self.owners))
     }
 
     /// Whatever was stored: unknown keys and bad values give the defaults,
@@ -58,6 +61,8 @@ impl Settings {
                 ("enquiry", "off") => s.enquiry = false,
                 ("numbers", "on") => s.numbers = true,
                 ("numbers", "off") => s.numbers = false,
+                ("owners", "on") => s.owners = true,
+                ("owners", "off") => s.owners = false,
                 _ => {}
             }
         }

@@ -9,6 +9,7 @@ pub mod input;
 pub mod lessons;
 pub mod log;
 pub mod names;
+pub mod roster;
 pub mod select;
 pub mod settings;
 pub mod simplifier;
